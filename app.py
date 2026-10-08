@@ -1,23 +1,15 @@
-# 1. ติดตั้ง Library สำหรับสร้างเว็บและเปิด Port
-!pip install streamlit requests pandas -q
-!npm install -g localtunnel -q
-
-# 2. เขียนโค้ดสร้างแอปพลิเคชัน Streamlit Web App
-%%writefile app.py
 import math
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import requests
 import streamlit as st
 
-# ตั้งค่าหน้าเว็บให้รองรับการแสดงผลบนมือถือ
 st.set_page_config(
     page_title="Value Bet Scanner",
     page_icon="⚽",
     layout="wide"
 )
 
-# ส่วนหัวของเว็บ
 st.title("⚽ ระบบสแกนบอล Value Bet อัตโนมัติ")
 st.markdown("วิเคราะห์อัตราต่อรองด้วยโมเดล **xG + Poisson Distribution** แบบวันต่อวัน")
 
@@ -166,7 +158,6 @@ def scan_league(league_info):
         })
     return results
 
-# ส่วนควบคุมหน้าเว็บ (Sidebar Controls)
 st.sidebar.header("🔍 ตัวเลือกการสแกน")
 selected_league_id = st.sidebar.selectbox(
     "เลือกลีกที่ต้องการสแกน",
@@ -193,8 +184,6 @@ if scan_btn:
                 df = df[df["สถานะ"].str.contains("🔥")]
 
             st.success(f"พบรายการแข่งขันทั้งหมด {len(df)} รายการ")
-            
-            # แสดงผลแบบ Interactive Dataframe สวยงาม
             st.dataframe(
                 df,
                 use_container_width=True,
@@ -202,16 +191,3 @@ if scan_btn:
             )
         else:
             st.warning("ไม่พบคู่แข่งขันในช่วงเวลานี้")
-
-# 3. สั่งเปิด Web Server ใน Colab
-import subprocess
-import urllib.request
-
-ip = urllib.request.urlopen('https://ipv4.icanhazip.com').read().decode('utf8').strip()
-print("\n" + "="*50)
-print(f"🔑 Password สำหรับเข้าเว็บคือ IP นี้: {ip}")
-print("="*50 + "\n")
-
-# รัน streamlit และ localtunnel ใน Background
-subprocess.Popen(["streamlit", "run", "app.py", "--server.port", "8501"])
-subprocess.Popen(["npx", "localtunnel", "--port", "8501"])
