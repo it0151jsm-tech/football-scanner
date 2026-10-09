@@ -1,6 +1,6 @@
+import math
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
-import math
 import pandas as pd
 import requests
 import streamlit as st
@@ -9,32 +9,47 @@ st.set_page_config(
     page_title="Value Bet Scanner Pro Analytics", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics")
+st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics (Full Version)")
 st.markdown(
-    "วิเคราะห์แม่นยำด้วย **xG ถ่วงน้ำหนัก + สถิติ H2H + วันพัก/ความล้า (Fatigue Index) + Kelly Criterion**"
+    "วิเคราะห์แม่นยำครบทุกตลาด **(1X2 + สูง/ต่ำ)** ด้วย **xG ถ่วงน้ำหนัก + H2H + วันพัก/ความล้า (Fatigue Index) + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
+# แผนผังรหัส CSV ลีกหลักและลีกรองทั่วโลก
 CSV_MAPPING = {
+    # อังกฤษ
     "soccer_epl": "E0",
     "soccer_efl_champ": "E1",
     "soccer_england_league1": "E2",
     "soccer_england_league2": "E3",
+    # สเปน
     "soccer_spain_la_liga": "SP1",
     "soccer_spain_segunda_division": "SP2",
+    # อิตาลี
     "soccer_italy_serie_a": "I1",
     "soccer_italy_serie_b": "I2",
+    # เยอรมนี
     "soccer_germany_bundesliga": "D1",
     "soccer_germany_bundesliga2": "D2",
+    # ฝรั่งเศส
     "soccer_france_league1": "F1",
     "soccer_france_league2": "F2",
+    # เนเธอร์แลนด์ (ฮอลแลนด์)
     "soccer_netherlands_eredivisie": "N1",
-    "soccer_belgium_first_div": "B1",
+    "soccer_netherlands_eerste_divisie": None,  # เออร์สเตอ ดีวีซี (ลีกรองฮอลแลนด์)
+    # โปรตุเกส
     "soccer_portugal_primeira_liga": "P1",
+    "soccer_portugal_liga_pro": None,  # ลีก้า โปรตุเกส 2
+    # เบลเยียม / ตุรกี / กรีซ / สกอตแลนด์
+    "soccer_belgium_first_div": "B1",
     "soccer_turkey_super_league": "T1",
     "soccer_greece_super_league": "G1",
     "soccer_spl": "SC0",
+    # ไอร์แลนด์
+    "soccer_ireland_premier_division": None,
+    "soccer_ireland_first_division": None,  # ลีกออฟไอร์แลนด์ เฟิร์สดีวิชั่น
+    # อเมริกาเหนือ / ใต้
     "soccer_brazil_campeonato": "BRA",
     "soccer_brazil_serie_b": "BRA2",
     "soccer_argentina_primera_division": "ARG",
@@ -116,7 +131,9 @@ def calculate_advanced_xg(df, api_home, api_away, match_date):
   if df is None or len(df) == 0:
     return None, None, "สถิติไม่พอ", "สถิติไม่พอ"
 
-  csv_teams = list(set(df["HomeTeam"].unique()).union(set(df["AwayTeam"].unique())))
+  csv_teams = list(
+      set(df["HomeTeam"].unique()).union(set(df["AwayTeam"].unique()))
+  )
   home_team = match_team_name(api_home, csv_teams)
   away_team = match_team_name(api_away, csv_teams)
 
@@ -272,6 +289,7 @@ def scan_league(league_info):
     if not bookmakers:
       continue
 
+    # วนลูปหาตลาด h2h และ totals จากทุกค่ายเจ้ามือที่มีอยู่ใน API
     h2h_market = None
     for bm in bookmakers:
       mk = next((k for k in bm.get("markets", []) if k["key"] == "h2h"), None)
@@ -290,7 +308,9 @@ def scan_league(league_info):
         stats_df, home, away, match_dt_naive
     )
 
-    # 1. วิเคราะห์ฝั่ง 1X2
+    # ----------------------------------------------------
+    # 1. วิเคราะห์ฝั่งแพ้/ชนะ/ต่อรอง (1X2)
+    # ----------------------------------------------------
     best_1x2_str = "N/A"
     ev_1x2_best = -999.0
     kelly_1x2_str = "-"
@@ -331,7 +351,9 @@ def scan_league(league_info):
         best_1x2_str = f"{side_name} @ {odds_best_1x2} (EV: {'+' if ev_1x2_best > 0 else ''}{ev_1x2_best}%)"
         kelly_1x2_str = f"{k_pct}%" if ev_1x2_best > 2.0 and k_pct > 0 else "0%"
 
-    # 2. วิเคราะห์ สูง/ต่ำ
+    # ----------------------------------------------------
+    # 2. วิเคราะห์ สกอร์ สูง/ต่ำ (Totals)
+    # ----------------------------------------------------
     best_totals_str = "N/A"
     ev_totals_best = -999.0
     kelly_totals_str = "-"
@@ -373,7 +395,9 @@ def scan_league(league_info):
             f"{k_pct_tot}%" if ev_totals_best > 2.0 and k_pct_tot > 0 else "0%"
         )
 
+    # ----------------------------------------------------
     # 3. สรุปสถานะความน่าลงทุน
+    # ----------------------------------------------------
     is_1x2_value = ev_1x2_best > 2.0
     is_totals_value = ev_totals_best > 2.0
 
@@ -387,7 +411,7 @@ def scan_league(league_info):
       status = "➖ ไม่คุ้ม/สูสี"
 
     xg_display = (
-      f"H: {h_xg} | A: {a_xg}" if h_xg is not None else "ไม่มีข้อมูล xG"
+        f"H: {h_xg} | A: {a_xg}" if h_xg is not None else "ไม่มีข้อมูล xG"
     )
 
     results.append({
@@ -434,7 +458,9 @@ if scan_btn:
   if not selected_leagues:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 รายการแข่งขัน")
   else:
-    with st.spinner("กำลังวิเคราะห์สถิติความล้า xG H2H และราคาบอล..."):
+    with st.spinner(
+        "กำลังวิเคราะห์สถิติความล้า xG H2H และค่าน้ำบอลแบบ Real-time..."
+    ):
       all_results = []
       if "all" in selected_leagues:
         for k, league in active_leagues.items():
