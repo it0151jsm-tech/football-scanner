@@ -17,111 +17,55 @@ st.markdown(
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
-KNOWN_LEAGUES = {
-    # เนเธอร์แลนด์ (ฮอลแลนด์)
-    "soccer_netherlands_eredivisie": {
-        "name": "Eredivisie - Netherlands",
-        "csv": "N1",
-    },
-    "soccer_netherlands_eerste_divisie": {
-        "name": "Eerste Divisie - Netherlands (ลีกรองฮอลแลนด์)",
-        "csv": None,
-    },
-    # อังกฤษ
-    "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
-    "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
-    "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
-    "soccer_england_league2": {"name": "League 2 - England", "csv": "E3"},
-    # สเปน
-    "soccer_spain_la_liga": {"name": "La Liga - Spain", "csv": "SP1"},
-    "soccer_spain_segunda_division": {
-        "name": "Segunda Division - Spain",
-        "csv": "SP2",
-    },
-    # อิตาลี
-    "soccer_italy_serie_a": {"name": "Serie A - Italy", "csv": "I1"},
-    "soccer_italy_serie_b": {"name": "Serie B - Italy", "csv": "I2"},
-    # เยอรมนี
-    "soccer_germany_bundesliga": {
-        "name": "Bundesliga - Germany",
-        "csv": "D1",
-    },
-    "soccer_germany_bundesliga2": {
-        "name": "2. Bundesliga - Germany",
-        "csv": "D2",
-    },
-    # ฝรั่งเศส
-    "soccer_france_league1": {"name": "Ligue 1 - France", "csv": "F1"},
-    "soccer_france_league2": {"name": "Ligue 2 - France", "csv": "F2"},
-    # โปรตุเกส
-    "soccer_portugal_primeira_liga": {
-        "name": "Primeira Liga - Portugal",
-        "csv": "P1",
-    },
-    "soccer_portugal_liga_pro": {
-        "name": "Liga Portugal 2 (ลีกรองโปรตุเกส)",
-        "csv": None,
-    },
-    # เบลเยียม / ตุรกี / กรีซ / สกอตแลนด์
-    "soccer_belgium_first_div": {
-        "name": "First Division A - Belgium",
-        "csv": "B1",
-    },
-    "soccer_turkey_super_league": {
-        "name": "Super Lig - Turkey",
-        "csv": "T1",
-    },
-    "soccer_greece_super_league": {
-        "name": "Super League - Greece",
-        "csv": "G1",
-    },
-    "soccer_spl": {"name": "Premiership - Scotland", "csv": "SC0"},
-    # ไอร์แลนด์
-    "soccer_ireland_premier_division": {
-        "name": "Premier Division - Ireland",
-        "csv": None,
-    },
-    "soccer_ireland_first_division": {
-        "name": "First Division - Ireland (ลีกรองไอร์แลนด์)",
-        "csv": None,
-    },
-    # อเมริกาเหนือ / ใต้
-    "soccer_brazil_campeonato": {
-        "name": "Serie A - Brazil",
-        "csv": "BRA",
-    },
-    "soccer_brazil_serie_b": {"name": "Serie B - Brazil", "csv": "BRA2"},
-    "soccer_argentina_primera_division": {
-        "name": "Primera Division - Argentina",
-        "csv": "ARG",
-    },
-    "soccer_colombia_categoria_primera_a": {
-        "name": "Primera A - Colombia",
-        "csv": "COL",
-    },
-    "soccer_peru_liga_1": {"name": "Liga 1 - Peru", "csv": "PER"},
-    "soccer_mexico_ligamx": {"name": "Liga MX - Mexico", "csv": "MEX"},
-    "soccer_usa_mls": {"name": "MLS - USA", "csv": "USA"},
+# ผูกรหัสไฟล์สถิติ CSV กับ Key ของ The-Odds-API
+CSV_MAPPING = {
+    "soccer_epl": "E0",
+    "soccer_efl_champ": "E1",
+    "soccer_england_league1": "E2",
+    "soccer_england_league2": "E3",
+    "soccer_spain_la_liga": "SP1",
+    "soccer_spain_segunda_division": "SP2",
+    "soccer_italy_serie_a": "I1",
+    "soccer_italy_serie_b": "I2",
+    "soccer_germany_bundesliga": "D1",
+    "soccer_germany_bundesliga2": "D2",
+    "soccer_france_league1": "F1",
+    "soccer_france_league2": "F2",
+    "soccer_netherlands_eredivisie": "N1",
+    "soccer_portugal_primeira_liga": "P1",
+    "soccer_belgium_first_div": "B1",
+    "soccer_turkey_super_league": "T1",
+    "soccer_greece_super_league": "G1",
+    "soccer_spl": "SC0",
+    "soccer_brazil_campeonato": "BRA",
+    "soccer_brazil_serie_b": "BRA2",
+    "soccer_argentina_primera_division": "ARG",
+    "soccer_colombia_categoria_primera_a": "COL",
+    "soccer_peru_liga_1": "PER",
+    "soccer_mexico_ligamx": "MEX",
+    "soccer_usa_mls": "USA",
 }
 
 
 @st.cache_data(ttl=1800)
 def get_active_soccer_leagues():
-  soccer_leagues = {}
-  for k, v in KNOWN_LEAGUES.items():
-    soccer_leagues[k] = {"name": v["name"], "key": k, "csv": v["csv"]}
-
+  """ดึงเฉพาะลีกฟุตบอลที่มีอยู่จริงและเปิดใช้งานใน API สด"""
   url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
+  soccer_leagues = {}
   try:
     res = requests.get(url)
     if res.status_code == 200:
       data = res.json()
       for item in data:
-        if item.get("group") == "Soccer":
+        if item.get("group") == "Soccer" and item.get("active"):
           key = item["key"]
           title = item["title"]
-          if key not in soccer_leagues:
-            soccer_leagues[key] = {"name": title, "key": key, "csv": None}
+          csv_code = CSV_MAPPING.get(key, None)
+          soccer_leagues[key] = {
+              "name": title,
+              "key": key,
+              "csv": csv_code,
+          }
   except Exception:
     pass
 
@@ -309,7 +253,6 @@ def scan_league(league_info):
     return []
 
   now_utc = datetime.now(timezone.utc)
-  # กำหนดช่วงเวลาดึงเฉพาะบอลเตะภายใน 36 ชั่วโมงข้างหน้า
   next_36h_utc = now_utc + timedelta(hours=36)
   tz_th = timezone(timedelta(hours=7))
 
@@ -474,10 +417,11 @@ options_dict = {
 for k, v in active_leagues.items():
   options_dict[k] = v["name"]
 
+# คืนค่า Default ให้เป็น 'all' (สแกนทุกลีกเหมือนเมื่อเช้า)
 selected_leagues = st.sidebar.multiselect(
     "เลือกรายการแข่งขัน/บอลถ้วย (เลือกได้มากกว่า 1 ลีก)",
     options=list(options_dict.keys()),
-    default=["soccer_netherlands_eerste_divisie"],
+    default=["all"],
     format_func=lambda x: options_dict[x],
 )
 
