@@ -20,7 +20,6 @@ st.caption(
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
-# ฐานข้อมูลรหัสลีกและไฟล์สถิติ CSV ย้อนหลัง
 KNOWN_LEAGUES = {
     # อเมริกาเหนือ / ใต้
     "soccer_brazil_campeonato": {
@@ -140,9 +139,9 @@ def poisson_prob(lmbda, k):
 
 
 def calculate_advanced_xg(df, home_api, away_api, match_date):
-  """คำนวณ xG ถ่วงน้ำหนักฟอร์มล่าสุด + วันพักล้า + สถิติ H2H"""
+  """คำนวณ xG ถ่วงน้ำหนักฟอร์มล่าสุด + วันพักล้า + สถิติ H2H (แก้ไขปัญหาวันพักเพี้ยน)"""
   if df is None or df.empty:
-    return None, None, "ไม่มีสถิติย้อนหลัง", "ไม่มีสถิติย้อนหลัง", 20
+    return None, None, "พักปกติ (7 วัน)", "พักปกติ (7 วัน)", 20
 
   csv_teams = list(
       set(df["HomeTeam"].unique()).union(set(df["AwayTeam"].unique()))
@@ -153,12 +152,16 @@ def calculate_advanced_xg(df, home_api, away_api, match_date):
   home_team = home[0] if home else home_api
   away_team = away[0] if away else away_api
 
+  # แก้ไขจุดนี้: ควบคุมวันพักหากเกมนานเกิน 14 วัน (ปิดซีซั่น/ไฟล์ CSV ไม่อัปเดต) ให้เป็น 7 วัน
   def get_rest(team):
     t_df = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
     past = t_df[t_df["Date_dt"] < match_date].sort_values("Date_dt")
     if past.empty:
       return 7
-    return max((match_date - past.iloc[-1]["Date_dt"]).days, 1)
+    days = (match_date - past.iloc[-1]["Date_dt"]).days
+    if days > 14 or days < 1:
+      return 7
+    return days
 
   h_rest, a_rest = get_rest(home_team), get_rest(away_team)
 
@@ -318,9 +321,7 @@ def scan_league(league_info):
         csv_df, home, away, match_dt
     )
 
-    # ----------------------------------------------------
     # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap - ต่อ/รอง)
-    # ----------------------------------------------------
     best_hdc_str, ev_hdc, k_hdc = "รอค่าน้ำเปิด", -999.0, "0%"
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
@@ -333,14 +334,12 @@ def scan_league(league_info):
         a_line = a_obj.get("point", 0.0)
         a_odds = a_obj["price"]
 
-        # ถอดค่าต๋งค่าน้ำตลาด
         mkt_p_h, mkt_p_a = devig_odds(h_odds, a_odds)
 
         if h_xg is not None and a_xg is not None:
           poisson_p_h, poisson_p_a = calculate_asian_handicap_prob(
               h_xg, a_xg, h_line
           )
-          # ผสมค่าความน่าจะเป็น (Model 50% + Market 50%) ป้องกัน EV บวม
           final_p_h = (poisson_p_h * 0.5) + (mkt_p_h * 0.5)
           final_p_a = (poisson_p_a * 0.5) + (mkt_p_a * 0.5)
         else:
@@ -349,7 +348,6 @@ def scan_league(league_info):
         ev_h = round(((final_p_h * h_odds) - 1.0) * 100, 2)
         ev_a = round(((final_p_a * a_odds) - 1.0) * 100, 2)
 
-        # ตัดสินใจเลือกฝั่ง ต่อ หรือ รอง
         if ev_h >= ev_a:
           ev_hdc = ev_h
           side_label = "ต่อ" if h_line < 0 else "รอง"
@@ -367,9 +365,7 @@ def scan_league(league_info):
           )
           k_hdc = calculate_kelly(ev_a, a_odds)
 
-    # ----------------------------------------------------
     # 2. วิเคราะห์ราคาสูง/ต่ำ (Totals - Over/Under)
-    # ----------------------------------------------------
     best_tot_str, ev_tot, k_tot = "รอค่าน้ำเปิด", -999.0, "0%"
     if tot_mkt:
       outcomes = tot_mkt.get("outcomes", [])
@@ -406,9 +402,7 @@ def scan_league(league_info):
           best_tot_str = f"ต่ำ {line} @ {u_odds} (EV: {ev_u}%)"
           k_tot = calculate_kelly(ev_u, u_odds)
 
-    # ----------------------------------------------------
-    # 3. สรุปสถานะความคุ้มค่าและคะแนนความสมบูรณ์
-    # ----------------------------------------------------
+    # 3. สรุปสถานะความคุ้มค่า
     is_hdc_v = ev_hdc >= 1.5
     is_tot_v = ev_tot >= 1.5
 
