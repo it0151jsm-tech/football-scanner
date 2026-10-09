@@ -9,14 +9,18 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro + ATS & BTTS", page_icon="⚽", layout="wide"
+    page_title="Value Bet Pro + ATS, BTTS & 4 Slips",
+    page_icon="⚽",
+    layout="wide",
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (ATS + BTTS + สเต็ป 3 ระดับ)")
+st.title(
+    "⚽ ระบบวิเคราะห์บอล Value Bet Pro (ATS + BTTS + จัดสเต็ป 4 ระดับ)"
+)
 st.caption(
     "วิเคราะห์เจาะลึกราคาต่อรอง **Asian Handicap** และ **Over/Under** "
     "ถอดค่าต๋งเจ้ามือ + xG + ฟอร์มสุทธิ + สถิติ ATS & BTTS พร้อมจัดบิลสเต็ป"
-    " (6, 9, 13 คู่) อัตโนมัติ"
+    " (6, 9, 13, 20 คู่) อัตโนมัติ"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -189,14 +193,12 @@ def calculate_advanced_metrics(df, home_api, away_api, match_date):
         40,
     )
 
-  # คำนวณ ATS (Against The Spread - ชนะราคา) และ BTTS ( Both Teams To Score )
   h_btts_count, a_btts_count = 0, 0
   h_cover_count = 0
 
   for _, row in h_df.iterrows():
     if row["FTHG"] > 0 and row["FTAG"] > 0:
       h_btts_count += 1
-    # ประเมินชนะราคาเบื้องต้นจากส่วนต่างประตู > 0
     diff = (
         (row["FTHG"] - row["FTAG"])
         if row["HomeTeam"] == home_team
@@ -217,7 +219,6 @@ def calculate_advanced_metrics(df, home_api, away_api, match_date):
   ats_str = f"ชนะ {h_cover_count}/{len(h_df)} ({ats_pct}%)"
   btts_str = f"{btts_avg_pct}% ({'สูง' if btts_avg_pct >= 55 else 'ต่ำ'})"
 
-  # xG & Net Form
   def get_stats(t_df, team):
     scored, conceded = [], []
     for _, r in t_df.iterrows():
@@ -531,7 +532,7 @@ budget_input = st.sidebar.number_input(
     "งบประมาณลงทุนรวมวันนี้ (บาท)", value=1000, step=100
 )
 
-scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro + ATS/BTTS", type="primary")
+scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro + จัด 4 บิล", type="primary")
 
 if scan_btn:
   if not selected:
@@ -556,7 +557,7 @@ if scan_btn:
         )
 
         tab1, tab2 = st.tabs(
-            ["📊 ผลการวิเคราะห์ทั้งหมด", "🎫 ระบบจัดบิลสเต็ป 3 ระดับ"]
+            ["📊 ผลการวิเคราะห์ทั้งหมด", "🎫 ระบบจัดบิลสเต็ป 4 ระดับ"]
         )
 
         with tab1:
@@ -572,7 +573,7 @@ if scan_btn:
           st.dataframe(df_display, use_container_width=True, hide_index=True)
 
         with tab2:
-          st.subheader("🎯 บิลสเต็ปแนะนำ 3 ระดับ (เรียงตามคะแนน +EV สูงสุด)")
+          st.subheader("🎯 บิลสเต็ปแนะนำ 4 ระดับ (เรียงตามคะแนน +EV สูงสุด)")
           candidates = df[df["is_value"] == True].sort_values(
               by=["max_ev", "data_score_num"], ascending=[False, False]
           )
@@ -583,18 +584,19 @@ if scan_btn:
                 " คู่เพื่อจัดบิล)"
             )
           else:
-            top13 = candidates.head(13).reset_index(drop=True)
+            top20 = candidates.head(20).reset_index(drop=True)
 
-            slip_6 = top13.head(6)
-            slip_9 = top13.head(min(9, len(top13)))
-            slip_13 = top13.head(min(13, len(top13)))
+            slip_6 = top20.head(6)
+            slip_9 = top20.head(min(9, len(top20)))
+            slip_13 = top20.head(min(13, len(top20)))
+            slip_20 = top20.head(min(20, len(top20)))
 
             st.markdown("### 💰 การแบ่งเงินลงทุนแนะนำ (Staking Plan)")
             stake_data = [
                 {
                     "บิล": "บิลที่ 1 (สเต็ป 6 - บิลหลัก)",
-                    "สัดส่วน": "60%",
-                    "จำนวนเงิน (บาท)": round(budget_input * 0.60),
+                    "สัดส่วน": "50%",
+                    "จำนวนเงิน (บาท)": round(budget_input * 0.50),
                     "เป้าหมาย": "บิลหลักเน้นทำกำไร/คืนทุน",
                 },
                 {
@@ -604,10 +606,16 @@ if scan_btn:
                     "เป้าหมาย": "บิลต่อยอดกำไร",
                 },
                 {
-                    "บิล": "บิลที่ 3 (สเต็ป 13 - บิลแจ็คพอต)",
+                    "บิล": "บิลที่ 3 (สเต็ป 13 - บิลโบนัส)",
                     "สัดส่วน": "15%",
                     "จำนวนเงิน (บาท)": round(budget_input * 0.15),
-                    "เป้าหมาย": "บิลลุ้นโบนัสรางวัลใหญ่",
+                    "เป้าหมาย": "บิลลุ้นโบนัสค่าน้ำสูง",
+                },
+                {
+                    "บิล": "บิลที่ 4 (สเต็ป 20 - บิลแจ็คพอต)",
+                    "สัดส่วน": "10%",
+                    "จำนวนเงิน (บาท)": round(budget_input * 0.10),
+                    "เป้าหมาย": "บิลแจ็คพอต (ขำๆ)",
                 },
             ]
             st.table(pd.DataFrame(stake_data))
@@ -616,7 +624,7 @@ if scan_btn:
             col1, col2 = st.columns(2)
             with col1:
               st.markdown("#### 🟢 บิลที่ 1: สเต็ป 6 คู่ (บิลหลัก)")
-              st.caption(f"งบแนะนำ: {round(budget_input * 0.60)} บาท")
+              st.caption(f"งบแนะนำ: {round(budget_input * 0.50)} บาท")
               st.dataframe(
                   slip_6[
                       [
@@ -662,10 +670,33 @@ if scan_btn:
               )
 
             with col2:
-              st.markdown("#### 🟡 บิลที่ 3: สเต็ป 13 คู่ (บิลแจ็คพอต)")
+              st.markdown("#### 🟡 บิลที่ 3: สเต็ป 13 คู่ (บิลโบนัส)")
               st.caption(f"งบแนะนำ: {round(budget_input * 0.15)} บาท")
               st.dataframe(
                   slip_13[
+                      [
+                          "เวลาเตะ (ไทย)",
+                          "คู่แข่งขัน",
+                          "best_pick_label",
+                          "best_pick_odds",
+                          "สถิติ ATS (7 นัด)",
+                          "max_ev",
+                      ]
+                  ].rename(
+                      columns={
+                          "best_pick_label": "ตัวเลือกแนะนำ",
+                          "best_pick_odds": "ค่าน้ำ",
+                          "max_ev": "EV (%)",
+                      }
+                  ),
+                  hide_index=True,
+                  use_container_width=True,
+              )
+
+              st.markdown("#### 🔴 บิลที่ 4: สเต็ป 20 คู่ (บิลแจ็คพอต)")
+              st.caption(f"งบแนะนำ: {round(budget_input * 0.10)} บาท")
+              st.dataframe(
+                  slip_20[
                       [
                           "เวลาเตะ (ไทย)",
                           "คู่แข่งขัน",
