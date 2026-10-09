@@ -18,7 +18,6 @@ st.markdown(
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
 KNOWN_LEAGUES = {
-    # เนเธอร์แลนด์ (ฮอลแลนด์)
     "soccer_netherlands_eredivisie": {
         "name": "Eredivisie - Netherlands",
         "csv": "N1",
@@ -27,21 +26,17 @@ KNOWN_LEAGUES = {
         "name": "Eerste Divisie - Netherlands (ลีกรองฮอลแลนด์)",
         "csv": None,
     },
-    # อังกฤษ
     "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
     "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
     "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
     "soccer_england_league2": {"name": "League 2 - England", "csv": "E3"},
-    # สเปน
     "soccer_spain_la_liga": {"name": "La Liga - Spain", "csv": "SP1"},
     "soccer_spain_segunda_division": {
         "name": "Segunda Division - Spain",
         "csv": "SP2",
     },
-    # อิตาลี
     "soccer_italy_serie_a": {"name": "Serie A - Italy", "csv": "I1"},
     "soccer_italy_serie_b": {"name": "Serie B - Italy", "csv": "I2"},
-    # เยอรมนี
     "soccer_germany_bundesliga": {
         "name": "Bundesliga - Germany",
         "csv": "D1",
@@ -50,10 +45,8 @@ KNOWN_LEAGUES = {
         "name": "2. Bundesliga - Germany",
         "csv": "D2",
     },
-    # ฝรั่งเศส
     "soccer_france_league1": {"name": "Ligue 1 - France", "csv": "F1"},
     "soccer_france_league2": {"name": "Ligue 2 - France", "csv": "F2"},
-    # โปรตุเกส
     "soccer_portugal_primeira_liga": {
         "name": "Primeira Liga - Portugal",
         "csv": "P1",
@@ -62,7 +55,6 @@ KNOWN_LEAGUES = {
         "name": "Liga Portugal 2 (ลีกรองโปรตุเกส)",
         "csv": None,
     },
-    # เบลเยียม / ตุรกี / กรีซ / สกอตแลนด์
     "soccer_belgium_first_div": {
         "name": "First Division A - Belgium",
         "csv": "B1",
@@ -76,7 +68,6 @@ KNOWN_LEAGUES = {
         "csv": "G1",
     },
     "soccer_spl": {"name": "Premiership - Scotland", "csv": "SC0"},
-    # ไอร์แลนด์
     "soccer_ireland_premier_division": {
         "name": "Premier Division - Ireland",
         "csv": None,
@@ -85,7 +76,6 @@ KNOWN_LEAGUES = {
         "name": "First Division - Ireland (ลีกรองไอร์แลนด์)",
         "csv": None,
     },
-    # อเมริกาเหนือ / ใต้
     "soccer_brazil_campeonato": {
         "name": "Serie A - Brazil",
         "csv": "BRA",
@@ -299,14 +289,16 @@ def scan_league(league_info):
 
   try:
     res = requests.get(url, params=params)
-    if res.status_code != 200:
+    if res.status_code == 429:
+      st.error("⚠️ โควตา API รายเดือนของคุณหมดแล้ว (429 Exceeded Quota)")
+      return []
+    elif res.status_code != 200:
       return []
     matches = res.json()
   except Exception:
     return []
 
   now_utc = datetime.now(timezone.utc)
-  # กำหนดช่วงเวลาดึงเฉพาะบอลเตะภายใน 24 ชั่วโมงข้างหน้า (วันต่อวัน)
   next_24h_utc = now_utc + timedelta(hours=24)
   tz_th = timezone(timedelta(hours=7))
 
@@ -344,7 +336,6 @@ def scan_league(league_info):
         stats_df, home, away, match_dt_naive
     )
 
-    # 1. วิเคราะห์ฝั่ง 1X2
     best_1x2_str = "รอค่าน้ำเปิด"
     ev_1x2_best = -999.0
     kelly_1x2_str = "-"
@@ -385,7 +376,6 @@ def scan_league(league_info):
         best_1x2_str = f"{side_name} @ {odds_best_1x2} (EV: {'+' if ev_1x2_best > 0 else ''}{ev_1x2_best}%)"
         kelly_1x2_str = f"{k_pct}%" if ev_1x2_best > 2.0 and k_pct > 0 else "0%"
 
-    # 2. วิเคราะห์ สูง/ต่ำ
     best_totals_str = "รอค่าน้ำเปิด"
     ev_totals_best = -999.0
     kelly_totals_str = "-"
@@ -427,7 +417,6 @@ def scan_league(league_info):
             f"{k_pct_tot}%" if ev_totals_best > 2.0 and k_pct_tot > 0 else "0%"
         )
 
-    # 3. สรุปสถานะความน่าลงทุน
     is_1x2_value = ev_1x2_best > 2.0
     is_totals_value = ev_totals_best > 2.0
 
