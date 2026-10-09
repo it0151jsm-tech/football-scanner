@@ -5,12 +5,12 @@ import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="Value Bet Scanner Ultimate", page_icon="⚽", layout="wide"
+    page_title="Value Bet Scanner All-in-One", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบสแกนบอล Value Bet Ultimate")
+st.title("⚽ ระบบสแกนบอล Value Bet (รวมฝั่ง + สูง/ต่ำ)")
 st.markdown(
-    "วิเคราะห์ **1X2 และ สกอร์สูง/ต่ำ (Dynamic Line)** ด้วยโมเดล **xG + Poisson + Kelly Criterion**"
+    "วิเคราะห์ทั้ง **ราคาแพ้ชนะ/ต่อรอง (1X2)** และ **สกอร์ สูง/ต่ำ** ในการสแกนครั้งเดียวด้วยโมเดล **xG + Poisson + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -148,7 +148,6 @@ def get_1x2_probabilities(home_xg, away_xg):
 
 
 def get_totals_probabilities(home_xg, away_xg, line):
-    """คำนวณโอกาส สูง/ต่ำ ตามเรตราคา (Line) ที่เจ้ามือเปิดสด"""
     p_over = 0.0
     for i in range(8):
         for j in range(8):
@@ -169,19 +168,18 @@ def calculate_kelly(prob, decimal_odds, fraction=0.25):
     return round(kelly_full * fraction * 100, 1)
 
 
-def scan_league(league_info, market_choice):
+def scan_league(league_info):
     league_key = league_info["key"]
     csv_code = league_info["csv"]
     league_name = league_info["name"]
 
-    market_param = "h2h" if market_choice == "1X2" else "totals"
-
     stats_df = fetch_historical_stats(csv_code)
     url = f"https://api.the-odds-api.com/v4/sports/{league_key}/odds/"
+    # ดึงพร้อมกันทั้ง h2h (แพ้/ชนะ) และ totals (สูง/ต่ำ)
     params = {
         "apiKey": API_KEY,
         "regions": "eu",
-        "markets": market_param,
+        "markets": "h2h,totals",
         "oddsFormat": "decimal",
     }
 
@@ -217,16 +215,24 @@ def scan_league(league_info, market_choice):
             continue
         bm = m["bookmakers"][0]
 
+        h2h_market = next(
+            (k for k in bm.get("markets", []) if k["key"] == "h2h"), None
+        )
+        totals_market = next(
+            (k for k in bm.get("markets", []) if k["key"] == "totals"), None
+        )
+
         h_xg, a_xg = calculate_xg(stats_df, home, away)
 
-        if market_choice == "1X2":
-            market_obj = next(
-                (k for k in bm["markets"] if k["key"] == "h2h"), None
-            )
-            if not market_obj:
-                continue
-            odds_list = market_obj["outcomes"]
+        # ----------------------------------------------------
+        # 1. วิเคราะห์ฝั่งแพ้/ชนะ/ต่อรอง (1X2)
+        # ----------------------------------------------------
+        best_1x2_str = "N/A"
+        ev_1x2_best = -999.0
+        kelly_1x2_str = "-"
 
+        if h2h_market:
+            odds_list = h2h_market["outcomes"]
             h_odds = next(
                 (o["price"] for o in odds_list if o["name"] == home), None
             )
@@ -236,121 +242,125 @@ def scan_league(league_info, market_choice):
             a_odds = next(
                 (o["price"] for o in odds_list if o["name"] == away), None
             )
-            if not h_odds or not a_odds:
-                continue
 
-            if h_xg is not None and a_xg is not None:
-                p_home, p_draw, p_away = get_1x2_probabilities(h_xg, a_xg)
-            else:
-                total_prob = (
-                    (1 / h_odds)
-                    + (1 / d_odds if d_odds else 0)
-                    + (1 / a_odds)
+            if h_odds and a_odds:
+                if h_xg is not None and a_xg is not None:
+                    p_home, p_draw, p_away = get_1x2_probabilities(h_xg, a_xg)
+                else:
+                    total_prob = (
+                        (1 / h_odds)
+                        + (1 / d_odds if d_odds else 0)
+                        + (1 / a_odds)
+                    )
+                    p_home = (1 / h_odds) / total_prob
+                    p_away = (1 / a_odds) / total_prob
+
+                ev_home = round(((p_home * h_odds) - 1) * 100, 2)
+                ev_away = round(((p_away * a_odds) - 1) * 100, 2)
+
+                if ev_home >= ev_away:
+                    ev_1x2_best = ev_home
+                    p_best_1x2 = p_home
+                    odds_best_1x2 = h_odds
+                    side_name = f"เจ้าบ้าน ({home})"
+                else:
+                    ev_1x2_best = ev_away
+                    p_best_1x2 = p_away
+                    odds_best_1x2 = a_odds
+                    side_name = f"ทีมเยือน ({away})"
+
+                k_pct = calculate_kelly(p_best_1x2, odds_best_1x2)
+                best_1x2_str = f"{side_name} @ {odds_best_1x2} (EV: {'+' if ev_1x2_best > 0 else ''}{ev_1x2_best}%)"
+                kelly_1x2_str = (
+                    f"{k_pct}%" if ev_1x2_best > 2.0 and k_pct > 0 else "0%"
                 )
-                p_home = (1 / h_odds) / total_prob
-                p_away = (1 / a_odds) / total_prob
 
-            ev_home = round(((p_home * h_odds) - 1) * 100, 2)
-            ev_away = round(((p_away * a_odds) - 1) * 100, 2)
+        # ----------------------------------------------------
+        # 2. วิเคราะห์ สกอร์ สูง/ต่ำ (Totals)
+        # ----------------------------------------------------
+        best_totals_str = "N/A"
+        ev_totals_best = -999.0
+        kelly_totals_str = "-"
 
-            if ev_home >= ev_away:
-                best_side, best_odds, best_prob, best_ev = (
-                    f"เจ้าบ้าน ({home})",
-                    h_odds,
-                    round(p_home * 100, 1),
-                    ev_home,
-                )
-                kelly_pct = calculate_kelly(p_home, h_odds)
-            else:
-                best_side, best_odds, best_prob, best_ev = (
-                    f"ทีมเยือน ({away})",
-                    a_odds,
-                    round(p_away * 100, 1),
-                    ev_away,
-                )
-                kelly_pct = calculate_kelly(p_away, a_odds)
-
-        else:  # ตลาด สกอร์สูง/ต่ำ (Dynamic Line)
-            market_obj = next(
-                (k for k in bm["markets"] if k["key"] == "totals"), None
-            )
-            if not market_obj:
-                continue
-            odds_list = market_obj["outcomes"]
-
-            # ดึงเรตราคาหลัก (point) ที่เจ้ามือเปิดไว้จริงสำหรับคู่นี้ (เช่น 1.5, 2.5, 3.5, 4.5)
+        if totals_market:
+            odds_list = totals_market["outcomes"]
             over_obj = next((o for o in odds_list if o["name"] == "Over"), None)
             under_obj = next(
                 (o for o in odds_list if o["name"] == "Under"), None
             )
-            if not over_obj or not under_obj:
-                continue
 
-            line = over_obj.get("point", 2.5)  # ดึงเรตราคาต่อรองเปิดสด
-            over_odds = over_obj["price"]
-            under_odds = under_obj["price"]
+            if over_obj and under_obj:
+                line = over_obj.get("point", 2.5)
+                over_odds = over_obj["price"]
+                under_odds = under_obj["price"]
 
-            if h_xg is not None and a_xg is not None:
-                p_over, p_under = get_totals_probabilities(h_xg, a_xg, line)
-            else:
-                total_prob = (1 / over_odds) + (1 / under_odds)
-                p_over = (1 / over_odds) / total_prob
-                p_under = (1 / under_odds) / total_prob
+                if h_xg is not None and a_xg is not None:
+                    p_over, p_under = get_totals_probabilities(
+                        h_xg, a_xg, line
+                    )
+                else:
+                    total_prob = (1 / over_odds) + (1 / under_odds)
+                    p_over = (1 / over_odds) / total_prob
+                    p_under = (1 / under_odds) / total_prob
 
-            ev_over = round(((p_over * over_odds) - 1) * 100, 2)
-            ev_under = round(((p_under * under_odds) - 1) * 100, 2)
+                ev_over = round(((p_over * over_odds) - 1) * 100, 2)
+                ev_under = round(((p_under * under_odds) - 1) * 100, 2)
 
-            if ev_over >= ev_under:
-                best_side, best_odds, best_prob, best_ev = (
-                    f"สูง {line} (Over)",
-                    over_odds,
-                    round(p_over * 100, 1),
-                    ev_over,
+                if ev_over >= ev_under:
+                    ev_totals_best = ev_over
+                    p_best_tot = p_over
+                    odds_best_tot = over_odds
+                    tot_side = f"สูง {line}"
+                else:
+                    ev_totals_best = ev_under
+                    p_best_tot = p_under
+                    odds_best_tot = under_odds
+                    tot_side = f"ต่ำ {line}"
+
+                k_pct_tot = calculate_kelly(p_best_tot, odds_best_tot)
+                best_totals_str = f"{tot_side} @ {odds_best_tot} (EV: {'+' if ev_totals_best > 0 else ''}{ev_totals_best}%)"
+                kelly_totals_str = (
+                    f"{k_pct_tot}%"
+                    if ev_totals_best > 2.0 and k_pct_tot > 0
+                    else "0%"
                 )
-                kelly_pct = calculate_kelly(p_over, over_odds)
-            else:
-                best_side, best_odds, best_prob, best_ev = (
-                    f"ต่ำ {line} (Under)",
-                    under_odds,
-                    round(p_under * 100, 1),
-                    ev_under,
-                )
-                kelly_pct = calculate_kelly(p_under, under_odds)
 
-        recommendation = (
-            "🔥 น่าลงทุน (+EV)" if best_ev > 2.0 else "➖ สูสี/ไม่คุ้ม"
-        )
-        kelly_display = (
-            f"{kelly_pct}% ของทุน" if best_ev > 2.0 and kelly_pct > 0 else "0%"
-        )
+        # ----------------------------------------------------
+        # 3. สรุปสถานะความน่าลงทุน
+        # ----------------------------------------------------
+        is_1x2_value = ev_1x2_best > 2.0
+        is_totals_value = ev_totals_best > 2.0
+
+        if is_1x2_value and is_totals_value:
+            status = "🔥 น่าเล่นทั้ง 2 ตลาด"
+        elif is_1x2_value:
+            status = "🔥 น่าเล่นฝั่ง (1X2)"
+        elif is_totals_value:
+            status = "🔥 น่าเล่น สูง/ต่ำ"
+        else:
+            status = "➖ ไม่คุ้ม/สูสี"
 
         results.append(
             {
                 "เวลาเตะ (ไทย)": match_time_th,
                 "รายการ/ลีก": league_name,
                 "คู่แข่งขัน": f"{home} vs {away}",
-                "ฝั่งที่น่าเล่น": best_side,
-                "ค่าน้ำ": best_odds,
-                "โอกาสเกิด": f"{best_prob}%",
-                "ค่า EV": f"{'+' if best_ev > 0 else ''}{best_ev}%",
-                "ทุนแนะนำ (Kelly)": kelly_display,
-                "สถานะ": recommendation,
+                "แนะนำฝั่ง (1X2)": best_1x2_str,
+                "แนะนำ สูง/ต่ำ": best_totals_str,
+                "ทุนแนะนำ (Kelly)": (
+                    f"ฝั่ง: {kelly_1x2_str} | สูงต่ำ: {kelly_totals_str}"
+                ),
+                "สถานะ": status,
+                "is_value": is_1x2_value or is_totals_value,
             }
         )
+
     return results
 
 
 active_leagues = get_active_soccer_leagues()
 
 st.sidebar.header("🔍 ตัวเลือกการสแกน")
-
-market_choice = st.sidebar.radio(
-    "เลือกประเภทตลาดที่ต้องการวิเคราะห์",
-    options=["1X2", "Totals"],
-    format_func=lambda x: (
-        "⚽ ชนะ/แพ้/เสมอ (1X2)" if x == "1X2" else "🎯 สกอร์ สูง/ต่ำ (ราคาเปิดสด)"
-    ),
-)
 
 options_dict = {"all": f"🔥 ทุกลีก/บอลถ้วยทั้งหมด ({len(active_leagues)} รายการ)"}
 for k, v in active_leagues.items():
@@ -363,28 +373,29 @@ selected_league_id = st.sidebar.selectbox(
 )
 
 only_value_bets = st.sidebar.checkbox(
-    "แสดงเฉพาะคู่ที่น่าลงทุน (+EV > 2%)", value=False
+    "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV > 2%)", value=False
 )
 scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล", type="primary")
 
 if scan_btn:
-    with st.spinner("กำลังดึงข้อมูลและคำนวณราคา..."):
+    with st.spinner("กำลังดึงข้อมูลและคำนวณราคาสำหรับทุกตลาด..."):
         all_results = []
         if selected_league_id == "all":
             for k, league in active_leagues.items():
-                all_results.extend(scan_league(league, market_choice))
+                all_results.extend(scan_league(league))
         else:
             if selected_league_id in active_leagues:
-                all_results = scan_league(
-                    active_leagues[selected_league_id], market_choice
-                )
+                all_results = scan_league(active_leagues[selected_league_id])
 
         if all_results:
             df = pd.DataFrame(all_results)
             if only_value_bets:
-                df = df[df["สถานะ"].str.contains("🔥")]
+                df = df[df["is_value"] == True]
 
-            st.success(f"พบรายการแข่งขันทั้งหมด {len(df)} รายการ")
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            # ลบ column ช่วยกรองออกก่อนแสดงผล
+            df_display = df.drop(columns=["is_value"])
+
+            st.success(f"พบรายการแข่งขันทั้งหมด {len(df_display)} รายการ")
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
         else:
-            st.warning("ไม่พบคู่แข่งขันในตลาดที่เลือกในช่วงเวลานี้")
+            st.warning("ไม่พบคู่แข่งขันในช่วงเวลานี้")
