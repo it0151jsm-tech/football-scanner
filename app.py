@@ -6,69 +6,125 @@ import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="Value Bet Scanner Pro Analytics", page_icon="⚽", layout="wide"
+    page_title="Value Bet Scanner (HDC + Totals)", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics (36 ชั่วโมง)")
+st.title("⚽ ระบบสแกนบอล Value Bet Pro (ราคาต่อรอง HDC + สูง/ต่ำ)")
 st.markdown(
-    "วิเคราะห์แม่นยำเน้นบอลเตะภายใน **36 ชั่วโมง (1X2 + สูง/ต่ำ)** ด้วย **xG"
-    " ถ่วงน้ำหนัก + H2H + วันพัก/ความล้า + Kelly Criterion**"
+    "วิเคราะห์แม่นยำด้วยตลาด **ราคาต่อรอง (Asian Handicap)** และ **สกอร์"
+    " สูง/ต่ำ** โดยใช้โมเดล **xG ถ่วงน้ำหนัก + H2H + ความล้า + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
-# ผูกรหัสไฟล์สถิติ CSV กับ Key ของ The-Odds-API
-CSV_MAPPING = {
-    "soccer_epl": "E0",
-    "soccer_efl_champ": "E1",
-    "soccer_england_league1": "E2",
-    "soccer_england_league2": "E3",
-    "soccer_spain_la_liga": "SP1",
-    "soccer_spain_segunda_division": "SP2",
-    "soccer_italy_serie_a": "I1",
-    "soccer_italy_serie_b": "I2",
-    "soccer_germany_bundesliga": "D1",
-    "soccer_germany_bundesliga2": "D2",
-    "soccer_france_league1": "F1",
-    "soccer_france_league2": "F2",
-    "soccer_netherlands_eredivisie": "N1",
-    "soccer_portugal_primeira_liga": "P1",
-    "soccer_belgium_first_div": "B1",
-    "soccer_turkey_super_league": "T1",
-    "soccer_greece_super_league": "G1",
-    "soccer_spl": "SC0",
-    "soccer_brazil_campeonato": "BRA",
-    "soccer_brazil_serie_b": "BRA2",
-    "soccer_argentina_primera_division": "ARG",
-    "soccer_colombia_categoria_primera_a": "COL",
-    "soccer_peru_liga_1": "PER",
-    "soccer_mexico_ligamx": "MEX",
-    "soccer_usa_mls": "USA",
+# ฐานข้อมูลลีกและรหัส CSV ย้อนหลัง (ล็อคให้แสดงผลเสมอ)
+KNOWN_LEAGUES = {
+    # เนเธอร์แลนด์ (ฮอลแลนด์)
+    "soccer_netherlands_eredivisie": {
+        "name": "Eredivisie - Netherlands",
+        "csv": "N1",
+    },
+    "soccer_netherlands_eerste_divisie": {
+        "name": "Eerste Divisie - Netherlands (ลีกรองฮอลแลนด์)",
+        "csv": None,
+    },
+    # อังกฤษ
+    "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
+    "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
+    "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
+    "soccer_england_league2": {"name": "League 2 - England", "csv": "E3"},
+    # สเปน
+    "soccer_spain_la_liga": {"name": "La Liga - Spain", "csv": "SP1"},
+    "soccer_spain_segunda_division": {
+        "name": "Segunda Division - Spain",
+        "csv": "SP2",
+    },
+    # อิตาลี
+    "soccer_italy_serie_a": {"name": "Serie A - Italy", "csv": "I1"},
+    "soccer_italy_serie_b": {"name": "Serie B - Italy", "csv": "I2"},
+    # เยอรมนี
+    "soccer_germany_bundesliga": {
+        "name": "Bundesliga - Germany",
+        "csv": "D1",
+    },
+    "soccer_germany_bundesliga2": {
+        "name": "2. Bundesliga - Germany",
+        "csv": "D2",
+    },
+    # ฝรั่งเศส
+    "soccer_france_league1": {"name": "Ligue 1 - France", "csv": "F1"},
+    "soccer_france_league2": {"name": "Ligue 2 - France", "csv": "F2"},
+    # โปรตุเกส
+    "soccer_portugal_primeira_liga": {
+        "name": "Primeira Liga - Portugal",
+        "csv": "P1",
+    },
+    "soccer_portugal_liga_pro": {
+        "name": "Liga Portugal 2 (ลีกรองโปรตุเกส)",
+        "csv": None,
+    },
+    # เบลเยียม / ตุรกี / กรีซ / สกอตแลนด์
+    "soccer_belgium_first_div": {
+        "name": "First Division A - Belgium",
+        "csv": "B1",
+    },
+    "soccer_turkey_super_league": {
+        "name": "Super Lig - Turkey",
+        "csv": "T1",
+    },
+    "soccer_greece_super_league": {
+        "name": "Super League - Greece",
+        "csv": "G1",
+    },
+    "soccer_spl": {"name": "Premiership - Scotland", "csv": "SC0"},
+    # ไอร์แลนด์
+    "soccer_ireland_premier_division": {
+        "name": "Premier Division - Ireland",
+        "csv": None,
+    },
+    "soccer_ireland_first_division": {
+        "name": "First Division - Ireland (ลีกรองไอร์แลนด์)",
+        "csv": None,
+    },
+    # อเมริกาเหนือ / ใต้
+    "soccer_brazil_campeonato": {
+        "name": "Serie A - Brazil",
+        "csv": "BRA",
+    },
+    "soccer_brazil_serie_b": {"name": "Serie B - Brazil", "csv": "BRA2"},
+    "soccer_argentina_primera_division": {
+        "name": "Primera Division - Argentina",
+        "csv": "ARG",
+    },
+    "soccer_colombia_categoria_primera_a": {
+        "name": "Primera A - Colombia",
+        "csv": "COL",
+    },
+    "soccer_peru_liga_1": {"name": "Liga 1 - Peru", "csv": "PER"},
+    "soccer_mexico_ligamx": {"name": "Liga MX - Mexico", "csv": "MEX"},
+    "soccer_usa_mls": {"name": "MLS - USA", "csv": "USA"},
 }
 
 
 @st.cache_data(ttl=1800)
 def get_active_soccer_leagues():
-  """ดึงเฉพาะลีกฟุตบอลที่มีอยู่จริงและเปิดใช้งานใน API สด"""
-  url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
   soccer_leagues = {}
+  for k, v in KNOWN_LEAGUES.items():
+    soccer_leagues[k] = {"name": v["name"], "key": k, "csv": v["csv"]}
+
+  url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
   try:
     res = requests.get(url)
     if res.status_code == 200:
       data = res.json()
       for item in data:
-        if item.get("group") == "Soccer" and item.get("active"):
+        if item.get("group") == "Soccer":
           key = item["key"]
           title = item["title"]
-          csv_code = CSV_MAPPING.get(key, None)
-          soccer_leagues[key] = {
-              "name": title,
-              "key": key,
-              "csv": csv_code,
-          }
+          if key not in soccer_leagues:
+            soccer_leagues[key] = {"name": title, "key": key, "csv": None}
   except Exception:
     pass
-
   return soccer_leagues
 
 
@@ -192,18 +248,28 @@ def poisson_prob(lmbda, k):
   return (math.pow(lmbda, k) * math.exp(-lmbda)) / math.factorial(k)
 
 
-def get_1x2_probabilities(home_xg, away_xg):
-  p_home, p_draw, p_away = 0.0, 0.0, 0.0
+def get_handicap_ev(home_xg, away_xg, h_line, odds):
+  """คำนวณ EV สำหรับราคาต่อรอง Asian Handicap (รองรับทุกราคาต่อรอง)"""
+  net_ev = 0.0
   for i in range(8):
     for j in range(8):
       prob = poisson_prob(home_xg, i) * poisson_prob(away_xg, j)
-      if i > j:
-        p_home += prob
-      elif i == j:
-        p_draw += prob
-      else:
-        p_away += prob
-  return p_home, p_draw, p_away
+      diff = (i - j) + h_line
+
+      if diff > 0.1:  # ชนะราคาเต็ม
+        profit = odds - 1.0
+      elif abs(diff) < 0.1:  # ยก/เสมอราคา
+        profit = 0.0
+      elif abs(diff - 0.25) < 0.1:  # ได้ครึ่ง
+        profit = 0.5 * (odds - 1.0)
+      elif abs(diff + 0.25) < 0.1:  # เสียครึ่ง
+        profit = -0.5
+      else:  # เสียเต็ม
+        profit = -1.0
+
+      net_ev += prob * profit
+
+  return round(net_ev * 100, 2)
 
 
 def get_totals_probabilities(home_xg, away_xg, line):
@@ -217,11 +283,13 @@ def get_totals_probabilities(home_xg, away_xg, line):
   return p_over, p_under
 
 
-def calculate_kelly(prob, decimal_odds, fraction=0.25):
+def calculate_kelly(ev_pct, decimal_odds, fraction=0.25):
+  if ev_pct <= 0 or decimal_odds <= 1.0:
+    return 0.0
   b = decimal_odds - 1.0
-  p = prob
-  q = 1.0 - p
-  kelly_full = (p * b - q) / b
+  p_eq = ((ev_pct / 100.0) + 1.0) / decimal_odds
+  q_eq = 1.0 - p_eq
+  kelly_full = (p_eq * b - q_eq) / b
   if kelly_full <= 0:
     return 0.0
   return round(kelly_full * fraction * 100, 1)
@@ -237,7 +305,7 @@ def scan_league(league_info):
   params = {
       "apiKey": API_KEY,
       "regions": "eu",
-      "markets": "h2h,totals",
+      "markets": "spreads,totals",
       "oddsFormat": "decimal",
   }
 
@@ -272,13 +340,15 @@ def scan_league(league_info):
 
     bookmakers = m.get("bookmakers", [])
 
-    h2h_market = None
+    spreads_market = None
     totals_market = None
     if bookmakers:
       for bm in bookmakers:
-        mk = next((k for k in bm.get("markets", []) if k["key"] == "h2h"), None)
-        if mk and not h2h_market:
-          h2h_market = mk
+        mk_sp = next(
+            (k for k in bm.get("markets", []) if k["key"] == "spreads"), None
+        )
+        if mk_sp and not spreads_market:
+          spreads_market = mk_sp
 
         mk_tot = next(
             (k for k in bm.get("markets", []) if k["key"] == "totals"), None
@@ -290,49 +360,42 @@ def scan_league(league_info):
         stats_df, home, away, match_dt_naive
     )
 
-    best_1x2_str = "รอค่าน้ำเปิด"
-    ev_1x2_best = -999.0
-    kelly_1x2_str = "-"
+    # 1. วิเคราะห์ ราคาต่อรอง (Asian Handicap - Spreads)
+    best_hdc_str = "รอค่าน้ำเปิด"
+    ev_hdc_best = -999.0
+    kelly_hdc_str = "0%"
 
-    if h2h_market:
-      odds_list = h2h_market.get("outcomes", [])
-      h_odds = next((o["price"] for o in odds_list if o["name"] == home), None)
-      d_odds = next(
-          (o["price"] for o in odds_list if o["name"] == "Draw"), None
-      )
-      a_odds = next((o["price"] for o in odds_list if o["name"] == away), None)
+    if spreads_market and h_xg is not None and a_xg is not None:
+      outcomes = spreads_market.get("outcomes", [])
+      h_obj = next((o for o in outcomes if o["name"] == home), None)
+      a_obj = next((o for o in outcomes if o["name"] == away), None)
 
-      if h_odds and a_odds:
-        if h_xg is not None and a_xg is not None:
-          p_home, p_draw, p_away = get_1x2_probabilities(h_xg, a_xg)
-        else:
-          total_prob = (
-              (1 / h_odds) + (1 / d_odds if d_odds else 0) + (1 / a_odds)
-          )
-          p_home = (1 / h_odds) / total_prob
-          p_away = (1 / a_odds) / total_prob
+      if h_obj and a_obj:
+        h_line = h_obj.get("point", 0.0)
+        h_odds = h_obj["price"]
+        a_line = a_obj.get("point", 0.0)
+        a_odds = a_obj["price"]
 
-        ev_home = round(((p_home * h_odds) - 1) * 100, 2)
-        ev_away = round(((p_away * a_odds) - 1) * 100, 2)
+        ev_home = get_handicap_ev(h_xg, a_xg, h_line, h_odds)
+        ev_away = get_handicap_ev(a_xg, h_xg, a_line, a_odds)
 
         if ev_home >= ev_away:
-          ev_1x2_best = ev_home
-          p_best_1x2 = p_home
-          odds_best_1x2 = h_odds
-          side_name = f"เจ้าบ้าน ({home})"
+          ev_hdc_best = ev_home
+          line_str = f"+{h_line}" if h_line > 0 else f"{h_line}"
+          best_hdc_str = f"เจ้าบ้าน ({home}) {line_str} @ {h_odds} (EV: {'+' if ev_home > 0 else ''}{ev_home}%)"
+          k_pct = calculate_kelly(ev_home, h_odds)
         else:
-          ev_1x2_best = ev_away
-          p_best_1x2 = p_away
-          odds_best_1x2 = a_odds
-          side_name = f"ทีมเยือน ({away})"
+          ev_hdc_best = ev_away
+          line_str = f"+{a_line}" if a_line > 0 else f"{a_line}"
+          best_hdc_str = f"ทีมเยือน ({away}) {line_str} @ {a_odds} (EV: {'+' if ev_away > 0 else ''}{ev_away}%)"
+          k_pct = calculate_kelly(ev_away, a_odds)
 
-        k_pct = calculate_kelly(p_best_1x2, odds_best_1x2)
-        best_1x2_str = f"{side_name} @ {odds_best_1x2} (EV: {'+' if ev_1x2_best > 0 else ''}{ev_1x2_best}%)"
-        kelly_1x2_str = f"{k_pct}%" if ev_1x2_best > 2.0 and k_pct > 0 else "0%"
+        kelly_hdc_str = f"{k_pct}%" if ev_hdc_best > 2.0 else "0%"
 
+    # 2. วิเคราะห์ สกอร์ สูง/ต่ำ (Totals)
     best_totals_str = "รอค่าน้ำเปิด"
     ev_totals_best = -999.0
-    kelly_totals_str = "-"
+    kelly_totals_str = "0%"
 
     if totals_market:
       odds_list = totals_market.get("outcomes", [])
@@ -356,31 +419,28 @@ def scan_league(league_info):
 
         if ev_over >= ev_under:
           ev_totals_best = ev_over
-          p_best_tot = p_over
           odds_best_tot = over_odds
           tot_side = f"สูง {line}"
         else:
           ev_totals_best = ev_under
-          p_best_tot = p_under
           odds_best_tot = under_odds
           tot_side = f"ต่ำ {line}"
 
-        k_pct_tot = calculate_kelly(p_best_tot, odds_best_tot)
+        k_pct_tot = calculate_kelly(ev_totals_best, odds_best_tot)
         best_totals_str = f"{tot_side} @ {odds_best_tot} (EV: {'+' if ev_totals_best > 0 else ''}{ev_totals_best}%)"
-        kelly_totals_str = (
-            f"{k_pct_tot}%" if ev_totals_best > 2.0 and k_pct_tot > 0 else "0%"
-        )
+        kelly_totals_str = f"{k_pct_tot}%" if ev_totals_best > 2.0 else "0%"
 
-    is_1x2_value = ev_1x2_best > 2.0
+    # 3. สรุปสถานะความน่าลงทุน
+    is_hdc_value = ev_hdc_best > 2.0
     is_totals_value = ev_totals_best > 2.0
 
-    if is_1x2_value and is_totals_value:
+    if is_hdc_value and is_totals_value:
       status = "🔥 น่าเล่นทั้ง 2 ตลาด"
-    elif is_1x2_value:
-      status = "🔥 น่าเล่นฝั่ง (1X2)"
+    elif is_hdc_value:
+      status = "🔥 น่าเล่น ราคาต่อรอง"
     elif is_totals_value:
       status = "🔥 น่าเล่น สูง/ต่ำ"
-    elif not h2h_market and not totals_market:
+    elif not spreads_market and not totals_market:
       status = "⏳ ค่าน้ำยังไม่เปิด"
     else:
       status = "➖ ไม่คุ้ม/สูสี"
@@ -395,13 +455,13 @@ def scan_league(league_info):
         "คู่แข่งขัน": f"{home} vs {away}",
         "สภาพความฟิต (วันพัก)": f"เจ้าบ้าน: {h_info} | เยือน: {a_info}",
         "xG ประเมิน": xg_display,
-        "แนะนำฝั่ง (1X2)": best_1x2_str,
+        "แนะนำ ราคาต่อรอง (HDC)": best_hdc_str,
         "แนะนำ สูง/ต่ำ": best_totals_str,
         "ทุนแนะนำ (Kelly)": (
-            f"ฝั่ง: {kelly_1x2_str} | สูงต่ำ: {kelly_totals_str}"
+            f"ต่อรอง: {kelly_hdc_str} | สูงต่ำ: {kelly_totals_str}"
         ),
         "สถานะ": status,
-        "is_value": is_1x2_value or is_totals_value,
+        "is_value": is_hdc_value or is_totals_value,
     })
 
   return results
@@ -417,7 +477,6 @@ options_dict = {
 for k, v in active_leagues.items():
   options_dict[k] = v["name"]
 
-# คืนค่า Default ให้เป็น 'all' (สแกนทุกลีกเหมือนเมื่อเช้า)
 selected_leagues = st.sidebar.multiselect(
     "เลือกรายการแข่งขัน/บอลถ้วย (เลือกได้มากกว่า 1 ลีก)",
     options=list(options_dict.keys()),
@@ -435,7 +494,7 @@ if scan_btn:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 รายการแข่งขัน")
   else:
     with st.spinner(
-        "กำลังวิเคราะห์สถิติวันพัก xG H2H และค่าน้ำบอลเตะภายใน 36 ชม...."
+        "กำลังวิเคราะห์ราคาต่อรอง HDC + สูง/ต่ำ แบบ Real-time..."
     ):
       all_results = []
       if "all" in selected_leagues:
