@@ -9,13 +9,14 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro Framework", page_icon="⚽", layout="wide"
+    page_title="Value Bet Pro + Auto Slips", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (วิเคราะห์ ต่อ-รอง & สูง-ต่ำ สมดุล)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (วิเคราะห์ละเอียด + จัดสเต็ป 4 บิล)")
 st.caption(
-    "วิเคราะห์เปรียบเทียบ **ฟอร์มส่วนต่างประตูสุทธิ (Net Form Delta)** กับ"
-    " **ราคาเปิดเจ้ามือ** อย่างสมดุล (กระจาย ต่อ/รอง/ผ่าน)"
+    "วิเคราะห์เจาะลึกราคาต่อรอง **Asian Handicap** และ **Over/Under** "
+    "ถอดค่าต๋งเจ้ามือ + xG + ฟอร์มสุทธิ + ความล้า พร้อมระบบจัดบิลสเต็ป (6, 10, 14,"
+    " 20 คู่) อัตโนมัติ"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -137,7 +138,7 @@ def norm_cdf(x):
 
 
 def calculate_form_metrics(df, home_api, away_api, match_date):
-  """คำนวณ Net Form (ฟอร์มเกมรุก-เกมรับสุทธิ) + xG"""
+  """คำนวณ Net Form (ฟอร์มยิง-เสียสุทธิ) + xG + ตัวคูณวันพัก"""
   if df is None or df.empty:
     return None, None, None, None, "พักปกติ (7 วัน)", "พักปกติ (7 วัน)", 25
 
@@ -216,6 +217,7 @@ def calculate_form_metrics(df, home_api, away_api, match_date):
 
 
 def devig_odds(odds_1, odds_2):
+  """ถอดค่าต๋งเจ้ามือ (De-vig) เพื่อหา Fair Probability"""
   imp1, imp2 = 1.0 / odds_1, 1.0 / odds_2
   tot = imp1 + imp2
   return imp1 / tot, imp2 / tot
@@ -232,7 +234,7 @@ def calculate_kelly(ev_pct, odds):
 
 
 # ==============================================================================
-# 4. SCANNER CORE LOGIC (สมดุล ต่อ/รอง/ผ่าน)
+# 4. SCANNER CORE LOGIC
 # ==============================================================================
 def scan_league(league_info):
   csv_df = fetch_csv_stats(league_info["csv"])
@@ -296,10 +298,9 @@ def scan_league(league_info):
         calculate_form_metrics(csv_df, home, away, match_dt)
     )
 
-    # ----------------------------------------------------
-    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap - สมดุล)
-    # ----------------------------------------------------
+    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap)
     best_hdc_str, ev_hdc, k_hdc = "รอค่าน้ำเปิด", -999.0, "0%"
+    hdc_selection, hdc_odds_val = "", 1.0
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
       h_obj = next((o for o in outcomes if o["name"] == home), None)
@@ -312,11 +313,8 @@ def scan_league(league_info):
         mkt_p_h, mkt_p_a = devig_odds(h_odds, a_odds)
 
         if h_net_form is not None and a_net_form is not None:
-          # คำนวณส่วนต่างฟอร์มเทียบกับราคาแฮนดิแคป
           form_delta = h_net_form - a_net_form
           edge = form_delta + h_line
-
-          # ปรับโอกาสชนะแบบสองฝั่ง (Symmetric Probability Shift)
           prob_shift = (norm_cdf(edge / 1.1) - 0.5) * 0.35
           final_p_h = max(min(mkt_p_h + prob_shift, 0.85), 0.15)
           final_p_a = 1.0 - final_p_h
@@ -328,33 +326,40 @@ def scan_league(league_info):
 
         if ev_h >= ev_a:
           ev_hdc = ev_h
-          if h_line < 0:
-            label = f"ต่อ {home} ({h_line})"
-          elif h_line > 0:
-            label = f"รอง {home} (+{h_line})"
-          else:
-            label = f"เสมอ/เลือก {home} (0.0)"
+          label = (
+              f"ต่อ {home} ({h_line})"
+              if h_line < 0
+              else (
+                  f"รอง {home} (+{h_line})"
+                  if h_line > 0
+                  else f"เสมอ {home} (0.0)"
+              )
+          )
           best_hdc_str = (
               f"{label} @ {h_odds} (EV: {'+' if ev_h > 0 else ''}{ev_h}%)"
           )
           k_hdc = calculate_kelly(ev_h, h_odds)
+          hdc_selection, hdc_odds_val = label, h_odds
         else:
           ev_hdc = ev_a
-          if a_line < 0:
-            label = f"ต่อ {away} ({a_line})"
-          elif a_line > 0:
-            label = f"รอง {away} (+{a_line})"
-          else:
-            label = f"เสมอ/เลือก {away} (0.0)"
+          label = (
+              f"ต่อ {away} ({a_line})"
+              if a_line < 0
+              else (
+                  f"รอง {away} (+{a_line})"
+                  if a_line > 0
+                  else f"เสมอ {away} (0.0)"
+              )
+          )
           best_hdc_str = (
               f"{label} @ {a_odds} (EV: {'+' if ev_a > 0 else ''}{ev_a}%)"
           )
           k_hdc = calculate_kelly(ev_a, a_odds)
+          hdc_selection, hdc_odds_val = label, a_odds
 
-    # ----------------------------------------------------
-    # 2. วิเคราะห์ราคาสูง/ต่ำ (Totals - Over/Under)
-    # ----------------------------------------------------
+    # 2. วิเคราะห์ราคาสูง/ต่ำ (Totals)
     best_tot_str, ev_tot, k_tot = "รอค่าน้ำเปิด", -999.0, "0%"
+    tot_selection, tot_odds_val = "", 1.0
     if tot_mkt:
       outcomes = tot_mkt.get("outcomes", [])
       over = next((o for o in outcomes if o["name"] == "Over"), None)
@@ -383,16 +388,16 @@ def scan_league(league_info):
               f"สูง {line} @ {o_odds} (EV: {'+' if ev_o > 0 else ''}{ev_o}%)"
           )
           k_tot = calculate_kelly(ev_o, o_odds)
+          tot_selection, tot_odds_val = f"สูง {line}", o_odds
         else:
           ev_tot = ev_u
           best_tot_str = (
               f"ต่ำ {line} @ {u_odds} (EV: {'+' if ev_u > 0 else ''}{ev_u}%)"
           )
           k_tot = calculate_kelly(ev_u, u_odds)
+          tot_selection, tot_odds_val = f"ต่ำ {line}", u_odds
 
-    # ----------------------------------------------------
-    # 3. สรุปสถานะความคุ้มค่า
-    # ----------------------------------------------------
+    # 3. สรุปสถานะ
     is_hdc_v = ev_hdc >= 2.0
     is_tot_v = ev_tot >= 2.0
 
@@ -417,6 +422,18 @@ def scan_league(league_info):
         else "N/A"
     )
 
+    # เลือกตัวการเล่นที่ดีที่สุด 1 ตลาดต่อคู่สำหรับจัดบิล
+    if ev_hdc >= ev_tot:
+      best_pick_label = hdc_selection
+      best_pick_odds = hdc_odds_val
+      best_ev = ev_hdc
+      market_type = "HDC"
+    else:
+      best_pick_label = tot_selection
+      best_pick_odds = tot_odds_val
+      best_ev = ev_tot
+      market_type = "Totals"
+
     results.append({
         "เวลาเตะ (ไทย)": match_time,
         "รายการ/ลีก": league_info["name"],
@@ -429,13 +446,18 @@ def scan_league(league_info):
         "ความสมบูรณ์ข้อมูล": f"{min(final_score, 100)}/100",
         "สถานะ": status,
         "is_value": is_hdc_v or is_tot_v,
+        "max_ev": best_ev,
+        "data_score_num": min(final_score, 100),
+        "best_pick_label": best_pick_label,
+        "best_pick_odds": best_pick_odds,
+        "market_type": market_type,
     })
 
   return results
 
 
 # ==============================================================================
-# 5. USER INTERFACE (STREAMLIT)
+# 5. USER INTERFACE & AUTO SLIP GENERATOR
 # ==============================================================================
 active_leagues = get_active_leagues()
 
@@ -454,13 +476,19 @@ selected = st.sidebar.multiselect(
 only_value = st.sidebar.checkbox(
     "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV >= 2.0%)", value=False
 )
-scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro Framework", type="primary")
+budget_input = st.sidebar.number_input(
+    "งบประมาณลงทุนรวมวันนี้ (บาท)", value=1000, step=100
+)
+
+scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro + จัดบิล", type="primary")
 
 if scan_btn:
   if not selected:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
   else:
-    with st.spinner("กำลังวิเคราะห์ตามหลักการ 10 ขั้นตอน แบบ Real-time..."):
+    with st.spinner(
+        "กำลังวิเคราะห์ข้อมูลเชิงลึก Real-time และจัดบิลสเต็ป..."
+    ):
       results = []
       target_leagues = (
           list(active_leagues.keys()) if "all" in selected else selected
@@ -477,10 +505,168 @@ if scan_btn:
         st.success(
             f"พบรายการแข่งขันเตะภายใน 36 ชม. ทั้งหมด {len(df)} รายการ"
         )
-        st.dataframe(
-            df.drop(columns=["is_value"]),
-            use_container_width=True,
-            hide_index=True,
+
+        tab1, tab2 = st.tabs(
+            ["📊 ผลการวิเคราะห์ทั้งหมด", "🎫 ระบบจัดบิลสเต็ป 4 ระดับ"]
         )
+
+        with tab1:
+          df_display = df.drop(
+              columns=[
+                  "is_value",
+                  "max_ev",
+                  "data_score_num",
+                  "best_pick_label",
+                  "best_pick_odds",
+                  "market_type",
+              ]
+          )
+          st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+        with tab2:
+          st.subheader("🎯 บิลสเต็ปแนะนำ 4 ระดับ (เรียงตามคะแนน +EV สูงสุด)")
+
+          # คัดเลือกคู่แข่งขันที่ผ่านเกณฑ์ +EV มาเรียงลำดับจากดีที่สุดไปหาน้อยที่สุด
+          candidates = df[df["is_value"] == True].sort_values(
+              by=["max_ev", "data_score_num"], ascending=[False, False]
+          )
+
+          if len(candidates) < 6:
+            st.warning(
+                f"พบคู่ที่มี +EV เพียง {len(candidates)} คู่ (ต้องการอย่างน้อย 6"
+                " คู่เพื่อจัดบิลสเต็ป)"
+            )
+          else:
+            # ดึง 20 คู่แรก
+            top20 = candidates.head(20).reset_index(drop=True)
+
+            slip_6 = top20.head(6)
+            slip_10 = top20.head(min(10, len(top20)))
+            slip_14 = top20.head(min(14, len(top20)))
+            slip_20 = top20.head(min(20, len(top20)))
+
+            # ตารางเดินเงิน
+            st.markdown("### 💰 การแบ่งเงินลงทุนแนะนำ (Staking Plan)")
+            stake_data = [
+                {
+                    "บิล": "บิลที่ 1 (สเต็ป 6)",
+                    "สัดส่วน": "55%",
+                    "จำนวนเงิน (บาท)": round(budget_input * 0.55),
+                    "เป้าหมาย": "บิลหลักเน้นทำกำไร/คืนทุน",
+                },
+                {
+                    "บิล": "บิลที่ 2 (สเต็ป 10)",
+                    "สัดส่วน": "25%",
+                    "จำนวนเงิน (บาท)": round(budget_input * 0.25),
+                    "เป้าหมาย": "บิลต่อยอดกำไร",
+                },
+                {
+                    "บิล": "บิลที่ 3 (สเต็ป 14)",
+                    "สัดส่วน": "12%",
+                    "จำนวนเงิน (บาท)": round(budget_input * 0.12),
+                    "เป้าหมาย": "บิลลุ้นโบนัสค่าน้ำสูง",
+                },
+                {
+                    "บิล": "บิลที่ 4 (สเต็ป 20)",
+                    "สัดส่วน": "8%",
+                    "จำนวนเงิน (บาท)": round(budget_input * 0.08),
+                    "เป้าหมาย": "บิลแจ็คพอต",
+                },
+            ]
+            st.table(pd.DataFrame(stake_data))
+            st.markdown("---")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+              st.markdown("#### 🟢 บิลที่ 1: สเต็ป 6 คู่ (บิลหวังผลหลัก)")
+              st.caption(
+                  f"งบลงทุนแนะนำ: {round(budget_input * 0.55)} บาท | รวม 6"
+                  " คู่ที่ EV สูงที่สุด"
+              )
+              s6_df = slip_6[
+                  [
+                      "เวลาเตะ (ไทย)",
+                      "คู่แข่งขัน",
+                      "best_pick_label",
+                      "best_pick_odds",
+                      "max_ev",
+                  ]
+              ].rename(
+                  columns={
+                      "best_pick_label": "ตัวเลือกแนะนำ",
+                      "best_pick_odds": "ค่าน้ำ",
+                      "max_ev": "EV (%)",
+                  }
+              )
+              st.dataframe(s6_df, hide_index=True, use_container_width=True)
+
+              st.markdown("#### 🔵 บิลที่ 2: สเต็ป 10 คู่ (บิลต่อยอด)")
+              st.caption(
+                  f"งบลงทุนแนะนำ: {round(budget_input * 0.25)} บาท | รวม 10"
+                  " คู่ที่ดีที่สุด"
+              )
+              s10_df = slip_10[
+                  [
+                      "เวลาเตะ (ไทย)",
+                      "คู่แข่งขัน",
+                      "best_pick_label",
+                      "best_pick_odds",
+                      "max_ev",
+                  ]
+              ].rename(
+                  columns={
+                      "best_pick_label": "ตัวเลือกแนะนำ",
+                      "best_pick_odds": "ค่าน้ำ",
+                      "max_ev": "EV (%)",
+                  }
+              )
+              st.dataframe(s10_df, hide_index=True, use_container_width=True)
+
+            with col2:
+              st.markdown("#### 🟡 บิลที่ 3: สเต็ป 14 คู่ (บิลลุ้นใหญ่)")
+              st.caption(
+                  f"งบลงทุนแนะนำ: {round(budget_input * 0.12)} บาท | รวม 14"
+                  " คู่"
+              )
+              s14_df = slip_14[
+                  [
+                      "เวลาเตะ (ไทย)",
+                      "คู่แข่งขัน",
+                      "best_pick_label",
+                      "best_pick_odds",
+                      "max_ev",
+                  ]
+              ].rename(
+                  columns={
+                      "best_pick_label": "ตัวเลือกแนะนำ",
+                      "best_pick_odds": "ค่าน้ำ",
+                      "max_ev": "EV (%)",
+                  }
+              )
+              st.dataframe(s14_df, hide_index=True, use_container_width=True)
+
+              st.markdown("#### 🔴 บิลที่ 4: สเต็ป 20 คู่ (บิลแจ็คพอต)")
+              st.caption(
+                  f"งบลงทุนแนะนำ: {round(budget_input * 0.08)} บาท | รวม 20"
+                  " คู่ครบเซ็ต"
+              )
+              s20_df = slip_20[
+                  [
+                      "เวลาเตะ (ไทย)",
+                      "คู่แข่งขัน",
+                      "best_pick_label",
+                      "best_pick_odds",
+                      "max_ev",
+                  ]
+              ].rename(
+                  columns={
+                      "best_pick_label": "ตัวเลือกแนะนำ",
+                      "best_pick_odds": "ค่าน้ำ",
+                      "max_ev": "EV (%)",
+                  }
+              )
+              st.dataframe(s20_df, hide_index=True, use_container_width=True)
+
       else:
         st.warning("ไม่พบคู่แข่งขันที่เตะภายใน 36 ชั่วโมงในลีกที่เลือก")
