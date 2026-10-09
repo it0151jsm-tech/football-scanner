@@ -21,7 +21,6 @@ st.caption(
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
 KNOWN_LEAGUES = {
-    # อเมริกาเหนือ / ใต้
     "soccer_brazil_campeonato": {
         "name": "Serie A - Brazil (บราซิล)",
         "csv": "BRA",
@@ -44,7 +43,6 @@ KNOWN_LEAGUES = {
         "csv": "MEX",
     },
     "soccer_usa_mls": {"name": "MLS - USA (สหรัฐอเมริกา)", "csv": "USA"},
-    # ยุโรปหลัก & ลีกรอง
     "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
     "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
     "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
@@ -139,7 +137,6 @@ def poisson_prob(lmbda, k):
 
 
 def calculate_advanced_xg(df, home_api, away_api, match_date):
-  """คำนวณ xG ถ่วงน้ำหนักฟอร์มล่าสุด + วันพักล้า + สถิติ H2H (แก้ไขปัญหาวันพักเพี้ยน)"""
   if df is None or df.empty:
     return None, None, "พักปกติ (7 วัน)", "พักปกติ (7 วัน)", 20
 
@@ -152,7 +149,6 @@ def calculate_advanced_xg(df, home_api, away_api, match_date):
   home_team = home[0] if home else home_api
   away_team = away[0] if away else away_api
 
-  # แก้ไขจุดนี้: ควบคุมวันพักหากเกมนานเกิน 14 วัน (ปิดซีซั่น/ไฟล์ CSV ไม่อัปเดต) ให้เป็น 7 วัน
   def get_rest(team):
     t_df = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
     past = t_df[t_df["Date_dt"] < match_date].sort_values("Date_dt")
@@ -191,7 +187,6 @@ def calculate_advanced_xg(df, home_api, away_api, match_date):
       * league_avg
   )
 
-  # ตัวคูณความล้าจากการเตะถี่
   fatigue_h = 0.90 if h_rest <= 3 else (1.04 if h_rest >= 6 else 1.0)
   fatigue_a = 0.90 if a_rest <= 3 else (1.04 if a_rest >= 6 else 1.0)
 
@@ -209,7 +204,6 @@ def calculate_advanced_xg(df, home_api, away_api, match_date):
 
 
 def devig_odds(odds_1, odds_2):
-  """ถอดค่าต๋งเจ้ามือเพื่อคำนวณโอกาสชนะที่แท้จริง (Fair Implied Probability)"""
   implied_1 = 1.0 / odds_1
   implied_2 = 1.0 / odds_2
   total_margin = implied_1 + implied_2
@@ -219,7 +213,6 @@ def devig_odds(odds_1, odds_2):
 
 
 def calculate_asian_handicap_prob(home_xg, away_xg, h_line):
-  """คำนวณความน่าจะเป็นของ Asian Handicap ด้วย Poisson"""
   p_home_win_cover = 0.0
   p_away_win_cover = 0.0
 
@@ -228,25 +221,24 @@ def calculate_asian_handicap_prob(home_xg, away_xg, h_line):
       p = poisson_prob(home_xg, i) * poisson_prob(away_xg, j)
       diff = (i - j) + h_line
 
-      if diff > 0.1:  # เจ้าบ้านชนะราคาเต็ม
+      if diff > 0.1:
         p_home_win_cover += p
-      elif abs(diff - 0.25) < 0.1:  # เจ้าบ้านได้ครึ่ง
+      elif abs(diff - 0.25) < 0.1:
         p_home_win_cover += p * 0.75
         p_away_win_cover += p * 0.25
-      elif abs(diff) < 0.1:  # เสมอ/คืนทุน
+      elif abs(diff) < 0.1:
         p_home_win_cover += p * 0.5
         p_away_win_cover += p * 0.5
-      elif abs(diff + 0.25) < 0.1:  # เจ้าบ้านเสียครึ่ง
+      elif abs(diff + 0.25) < 0.1:
         p_home_win_cover += p * 0.25
         p_away_win_cover += p * 0.75
-      else:  # ทีมเยือนชนะราคาเต็ม
+      else:
         p_away_win_cover += p
 
   return p_home_win_cover, p_away_win_cover
 
 
 def calculate_kelly(ev_pct, odds):
-  """คำนวณสัดส่วนเงินทุนด้วย Fractional Kelly (0.25)"""
   if ev_pct <= 0 or odds <= 1.0:
     return "0%"
   b = odds - 1.0
@@ -254,6 +246,16 @@ def calculate_kelly(ev_pct, odds):
   q = 1.0 - p
   k = (p * b - q) / b
   return f"{round(max(k * 0.25 * 100, 0), 1)}%"
+
+
+def format_hdc_label(point, team_name):
+  """แก้ไขป้ายกำกับ ต่อ / รอง / เสมอ ให้ถูกต้องตามราคาจริง"""
+  if point < 0:
+    return f"ต่อ {team_name} ({point})"
+  elif point > 0:
+    return f"รอง {team_name} (+{point})"
+  else:
+    return f"เสมอ/เลือก {team_name} (0.0)"
 
 
 # ==============================================================================
@@ -321,7 +323,7 @@ def scan_league(league_info):
         csv_df, home, away, match_dt
     )
 
-    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap - ต่อ/รอง)
+    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap)
     best_hdc_str, ev_hdc, k_hdc = "รอค่าน้ำเปิด", -999.0, "0%"
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
@@ -350,19 +352,13 @@ def scan_league(league_info):
 
         if ev_h >= ev_a:
           ev_hdc = ev_h
-          side_label = "ต่อ" if h_line < 0 else "รอง"
-          pt_str = f"{h_line}" if h_line < 0 else f"+{h_line}"
-          best_hdc_str = (
-              f"{side_label} {home} ({pt_str}) @ {h_odds} (EV: {ev_h}%)"
-          )
+          label = format_hdc_label(h_line, home)
+          best_hdc_str = f"{label} @ {h_odds} (EV: {ev_h}%)"
           k_hdc = calculate_kelly(ev_h, h_odds)
         else:
           ev_hdc = ev_a
-          side_label = "ต่อ" if a_line < 0 else "รอง"
-          pt_str = f"{a_line}" if a_line < 0 else f"+{a_line}"
-          best_hdc_str = (
-              f"{side_label} {away} ({pt_str}) @ {a_odds} (EV: {ev_a}%)"
-          )
+          label = format_hdc_label(a_line, away)
+          best_hdc_str = f"{label} @ {a_odds} (EV: {ev_a}%)"
           k_hdc = calculate_kelly(ev_a, a_odds)
 
     # 2. วิเคราะห์ราคาสูง/ต่ำ (Totals - Over/Under)
