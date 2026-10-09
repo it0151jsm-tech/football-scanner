@@ -9,15 +9,14 @@ st.set_page_config(
     page_title="Value Bet Scanner Pro Analytics", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics (Full Version)")
+st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics (24 ชั่วโมงวันต่อวัน)")
 st.markdown(
-    "วิเคราะห์แม่นยำครบทุกตลาด **(1X2 + สูง/ต่ำ)** ด้วย **xG ถ่วงน้ำหนัก + H2H"
-    " + วันพัก/ความล้า (Fatigue Index) + Kelly Criterion**"
+    "วิเคราะห์แม่นยำเน้นบอลเตะภายใน **24 ชั่วโมง (1X2 + สูง/ต่ำ)** ด้วย **xG"
+    " ถ่วงน้ำหนัก + H2H + วันพัก/ความล้า + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
-# ฐานข้อมูลลีกและรหัส CSV ทั้งหมด (ครอบคลุมทั้งลีกหลักและลีกรอง)
 KNOWN_LEAGUES = {
     # เนเธอร์แลนด์ (ฮอลแลนด์)
     "soccer_netherlands_eredivisie": {
@@ -108,12 +107,10 @@ KNOWN_LEAGUES = {
 
 @st.cache_data(ttl=1800)
 def get_active_soccer_leagues():
-  # เริ่มต้นจากรายการลีกในฐานข้อมูลที่ตั้งไว้
   soccer_leagues = {}
   for k, v in KNOWN_LEAGUES.items():
     soccer_leagues[k] = {"name": v["name"], "key": k, "csv": v["csv"]}
 
-  # ดึงรายการเพิ่มเติมจาก API สด
   url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
   try:
     res = requests.get(url)
@@ -153,7 +150,6 @@ def fetch_historical_stats(csv_code):
 
 
 def match_team_name(api_name, csv_teams):
-  """จับคู่ชื่อทีมจาก API และ CSV อัตโนมัติด้วย Fuzzy Matching"""
   if not csv_teams:
     return api_name
   matches = get_close_matches(api_name, csv_teams, n=1, cutoff=0.4)
@@ -161,7 +157,6 @@ def match_team_name(api_name, csv_teams):
 
 
 def get_rest_days(df, team, current_match_date):
-  """คำนวณจำนวนวันพักนับจากแมตช์ล่าสุด"""
   team_df = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
   if team_df.empty:
     return 7
@@ -184,11 +179,9 @@ def calculate_advanced_xg(df, api_home, api_away, match_date):
   home_team = match_team_name(api_home, csv_teams)
   away_team = match_team_name(api_away, csv_teams)
 
-  # 1. คำนวณวันพัก (Rest Days)
   home_rest = get_rest_days(df, home_team, match_date)
   away_rest = get_rest_days(df, away_team, match_date)
 
-  # 2. คำนวณ xG แบบถ่วงน้ำหนัก (60% นัด 1-3, 40% นัด 4-10)
   h_df = df[df["HomeTeam"] == home_team].tail(10)
   a_df = df[df["AwayTeam"] == away_team].tail(10)
 
@@ -212,7 +205,6 @@ def calculate_advanced_xg(df, api_home, api_away, match_date):
   base_h_xg = (h_att / league_avg) * (a_def / league_avg) * league_avg
   base_a_xg = (a_att / league_avg) * (h_def / league_avg) * league_avg
 
-  # 3. คำนวณสถิติ H2H (พบกันย้อนหลัง)
   h2h_df = df[
       ((df["HomeTeam"] == home_team) & (df["AwayTeam"] == away_team))
       | ((df["HomeTeam"] == away_team) & (df["AwayTeam"] == home_team))
@@ -236,7 +228,6 @@ def calculate_advanced_xg(df, api_home, api_away, match_date):
     elif avg_h2h_a > avg_h2h_h:
       h2h_a_adj = 1.08
 
-  # 4. ตัวคูณความล้า (Fatigue Factor)
   fatigue_h = 0.88 if home_rest <= 3 else (1.05 if home_rest >= 6 else 1.0)
   fatigue_a = 0.88 if away_rest <= 3 else (1.05 if away_rest >= 6 else 1.0)
 
@@ -315,7 +306,8 @@ def scan_league(league_info):
     return []
 
   now_utc = datetime.now(timezone.utc)
-  next_36h_utc = now_utc + timedelta(hours=36)
+  # กำหนดช่วงเวลาดึงเฉพาะบอลเตะภายใน 24 ชั่วโมงข้างหน้า (วันต่อวัน)
+  next_24h_utc = now_utc + timedelta(hours=24)
   tz_th = timezone(timedelta(hours=7))
 
   results = []
@@ -323,7 +315,7 @@ def scan_league(league_info):
     commence_time = datetime.fromisoformat(
         m["commence_time"].replace("Z", "+00:00")
     )
-    if not (now_utc - timedelta(hours=2) <= commence_time <= next_36h_utc):
+    if not (now_utc - timedelta(hours=2) <= commence_time <= next_24h_utc):
       continue
 
     match_time_th = commence_time.astimezone(tz_th).strftime("%d/%m %H:%M น.")
@@ -333,30 +325,27 @@ def scan_league(league_info):
     away = m["away_team"]
 
     bookmakers = m.get("bookmakers", [])
-    if not bookmakers:
-      continue
 
-    # ค้นหาตลาด h2h และ totals
     h2h_market = None
-    for bm in bookmakers:
-      mk = next((k for k in bm.get("markets", []) if k["key"] == "h2h"), None)
-      if mk:
-        h2h_market = mk
-        break
-
     totals_market = None
-    for bm in bookmakers:
-      mk = next((k for k in bm.get("markets", []) if k["key"] == "totals"), None)
-      if mk:
-        totals_market = mk
-        break
+    if bookmakers:
+      for bm in bookmakers:
+        mk = next((k for k in bm.get("markets", []) if k["key"] == "h2h"), None)
+        if mk and not h2h_market:
+          h2h_market = mk
+
+        mk_tot = next(
+            (k for k in bm.get("markets", []) if k["key"] == "totals"), None
+        )
+        if mk_tot and not totals_market:
+          totals_market = mk_tot
 
     h_xg, a_xg, h_info, a_info = calculate_advanced_xg(
         stats_df, home, away, match_dt_naive
     )
 
     # 1. วิเคราะห์ฝั่ง 1X2
-    best_1x2_str = "N/A"
+    best_1x2_str = "รอค่าน้ำเปิด"
     ev_1x2_best = -999.0
     kelly_1x2_str = "-"
 
@@ -397,7 +386,7 @@ def scan_league(league_info):
         kelly_1x2_str = f"{k_pct}%" if ev_1x2_best > 2.0 and k_pct > 0 else "0%"
 
     # 2. วิเคราะห์ สูง/ต่ำ
-    best_totals_str = "N/A"
+    best_totals_str = "รอค่าน้ำเปิด"
     ev_totals_best = -999.0
     kelly_totals_str = "-"
 
@@ -448,6 +437,8 @@ def scan_league(league_info):
       status = "🔥 น่าเล่นฝั่ง (1X2)"
     elif is_totals_value:
       status = "🔥 น่าเล่น สูง/ต่ำ"
+    elif not h2h_market and not totals_market:
+      status = "⏳ ค่าน้ำยังไม่เปิด"
     else:
       status = "➖ ไม่คุ้ม/สูสี"
 
@@ -486,21 +477,21 @@ for k, v in active_leagues.items():
 selected_leagues = st.sidebar.multiselect(
     "เลือกรายการแข่งขัน/บอลถ้วย (เลือกได้มากกว่า 1 ลีก)",
     options=list(options_dict.keys()),
-    default=["soccer_netherlands_eerste_divisie"],  # ตั้งค่าเริ่มต้นเป็นลีกรองฮอลแลนด์
+    default=["soccer_netherlands_eerste_divisie"],
     format_func=lambda x: options_dict[x],
 )
 
 only_value_bets = st.sidebar.checkbox(
     "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV > 2%)", value=False
 )
-scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro", type="primary")
+scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro (24 ชม.)", type="primary")
 
 if scan_btn:
   if not selected_leagues:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 รายการแข่งขัน")
   else:
     with st.spinner(
-        "กำลังวิเคราะห์สถิติความล้า xG H2H และค่าน้ำบอลแบบ Real-time..."
+        "กำลังวิเคราะห์สถิติวันพัก xG H2H และค่าน้ำบอลเตะภายใน 24 ชม...."
     ):
       all_results = []
       if "all" in selected_leagues:
@@ -518,7 +509,9 @@ if scan_btn:
 
         df_display = df.drop(columns=["is_value"])
 
-        st.success(f"พบรายการแข่งขันทั้งหมด {len(df_display)} รายการ")
+        st.success(
+            f"พบรายการแข่งขันเตะภายใน 24 ชม. ทั้งหมด {len(df_display)} รายการ"
+        )
         st.dataframe(df_display, use_container_width=True, hide_index=True)
       else:
-        st.warning("ไม่พบคู่แข่งขันในช่วงเวลานี้")
+        st.warning("ไม่พบคู่แข่งขันที่เตะภายใน 24 ชั่วโมงในลีกที่เลือก")
