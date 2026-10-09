@@ -12,39 +12,15 @@ st.set_page_config(
     page_title="Value Bet Pro Framework", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (ตามหลักการ 10 ขั้นตอน)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (วิเคราะห์ ต่อ-รอง & สูง-ต่ำ สมดุล)")
 st.caption(
-    "วิเคราะห์เจาะลึกราคาต่อรอง **Asian Handicap** และ **Over/Under** "
-    "โดยเปรียบเทียบส่วนต่างประตูคาดหมาย (xG) กับราคาเจ้ามือ พร้อมคำนวณคะแนนข้อมูล"
+    "วิเคราะห์เปรียบเทียบ **ฟอร์มส่วนต่างประตูสุทธิ (Net Form Delta)** กับ"
+    " **ราคาเปิดเจ้ามือ** อย่างสมดุล (กระจาย ต่อ/รอง/ผ่าน)"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
 KNOWN_LEAGUES = {
-    # อเมริกาเหนือ / ใต้
-    "soccer_brazil_campeonato": {
-        "name": "Serie A - Brazil (บราซิล)",
-        "csv": "BRA",
-    },
-    "soccer_brazil_serie_b": {
-        "name": "Serie B - Brazil (บราซิล ลีกรอง)",
-        "csv": "BRA2",
-    },
-    "soccer_argentina_primera_division": {
-        "name": "Primera Division - Argentina (อาร์เจนตินา)",
-        "csv": "ARG",
-    },
-    "soccer_colombia_categoria_primera_a": {
-        "name": "Primera A - Colombia (โคลอมเบีย)",
-        "csv": "COL",
-    },
-    "soccer_peru_liga_1": {"name": "Liga 1 - Peru (เปรู)", "csv": "PER"},
-    "soccer_mexico_ligamx": {
-        "name": "Liga MX - Mexico (เม็กซิโก)",
-        "csv": "MEX",
-    },
-    "soccer_usa_mls": {"name": "MLS - USA (สหรัฐอเมริกา)", "csv": "USA"},
-    # ยุโรปหลัก & ลีกรอง
     "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
     "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
     "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
@@ -87,6 +63,28 @@ KNOWN_LEAGUES = {
         "csv": "G1",
     },
     "soccer_spl": {"name": "Premiership - Scotland", "csv": "SC0"},
+    "soccer_brazil_campeonato": {
+        "name": "Serie A - Brazil (บราซิล)",
+        "csv": "BRA",
+    },
+    "soccer_brazil_serie_b": {
+        "name": "Serie B - Brazil (บราซิล ลีกรอง)",
+        "csv": "BRA2",
+    },
+    "soccer_argentina_primera_division": {
+        "name": "Primera Division - Argentina (อาร์เจนตินา)",
+        "csv": "ARG",
+    },
+    "soccer_colombia_categoria_primera_a": {
+        "name": "Primera A - Colombia (โคลอมเบีย)",
+        "csv": "COL",
+    },
+    "soccer_peru_liga_1": {"name": "Liga 1 - Peru (เปรู)", "csv": "PER"},
+    "soccer_mexico_ligamx": {
+        "name": "Liga MX - Mexico (เม็กซิโก)",
+        "csv": "MEX",
+    },
+    "soccer_usa_mls": {"name": "MLS - USA (สหรัฐอเมริกา)", "csv": "USA"},
 }
 
 
@@ -138,14 +136,10 @@ def norm_cdf(x):
   return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
 
 
-def poisson_prob(lmbda, k):
-  return (math.pow(lmbda, k) * math.exp(-lmbda)) / math.factorial(k)
-
-
-def calculate_advanced_xg(df, home_api, away_api, match_date):
-  """คำนวณ xG ถ่วงน้ำหนักฟอร์มล่าสุด + วันพักล้า + ควบคุมระบบวันพัก"""
+def calculate_form_metrics(df, home_api, away_api, match_date):
+  """คำนวณ Net Form (ฟอร์มเกมรุก-เกมรับสุทธิ) + xG"""
   if df is None or df.empty:
-    return None, None, "พักปกติ (7 วัน)", "พักปกติ (7 วัน)", 25
+    return None, None, None, None, "พักปกติ (7 วัน)", "พักปกติ (7 วัน)", 25
 
   csv_teams = list(
       set(df["HomeTeam"].unique()).union(set(df["AwayTeam"].unique()))
@@ -168,53 +162,63 @@ def calculate_advanced_xg(df, home_api, away_api, match_date):
 
   h_rest, a_rest = get_rest(home_team), get_rest(away_team)
 
-  h_df = df[df["HomeTeam"] == home_team].tail(10)
-  a_df = df[df["AwayTeam"] == away_team].tail(10)
+  h_df = df[
+      (df["HomeTeam"] == home_team) | (df["AwayTeam"] == home_team)
+  ].tail(8)
+  a_df = df[
+      (df["HomeTeam"] == away_team) | (df["AwayTeam"] == away_team)
+  ].tail(8)
 
   if len(h_df) < 3 or len(a_df) < 3:
-    return None, None, f"พัก {h_rest} วัน", f"พัก {a_rest} วัน", 45
+    return None, None, None, None, f"พัก {h_rest} วัน", f"พัก {a_rest} วัน", 40
 
-  league_avg = (df["FTHG"].mean() + df["FTAG"].mean()) / 2
+  h_scored, h_conceded = [], []
+  for _, row in h_df.iterrows():
+    if row["HomeTeam"] == home_team:
+      h_scored.append(row["FTHG"])
+      h_conceded.append(row["FTAG"])
+    else:
+      h_scored.append(row["FTAG"])
+      h_conceded.append(row["FTHG"])
 
-  def weighted_avg(series):
-    return (
-        (series.tail(3).mean() * 0.6) + (series.iloc[:-3].mean() * 0.4)
-        if len(series) >= 5
-        else series.mean()
-    )
+  a_scored, a_conceded = [], []
+  for _, row in a_df.iterrows():
+    if row["HomeTeam"] == away_team:
+      a_scored.append(row["FTHG"])
+      a_conceded.append(row["FTAG"])
+    else:
+      a_scored.append(row["FTAG"])
+      a_conceded.append(row["FTHG"])
 
-  base_h_xg = (
-      (weighted_avg(h_df["FTHG"]) / league_avg)
-      * (weighted_avg(a_df["FTAG"]) / league_avg)
-      * league_avg
-  )
-  base_a_xg = (
-      (weighted_avg(a_df["FTAG"]) / league_avg)
-      * (weighted_avg(h_df["FTHG"]) / league_avg)
-      * league_avg
-  )
+  def w_avg(s):
+    if len(s) >= 5:
+      return (pd.Series(s[-3:]).mean() * 0.6) + (pd.Series(s[:-3]).mean() * 0.4)
+    return pd.Series(s).mean()
+
+  h_att, h_def = w_avg(h_scored), w_avg(h_conceded)
+  a_att, a_def = w_avg(a_scored), w_avg(a_conceded)
 
   fatigue_h = 0.90 if h_rest <= 3 else (1.04 if h_rest >= 6 else 1.0)
   fatigue_a = 0.90 if a_rest <= 3 else (1.04 if a_rest >= 6 else 1.0)
 
-  final_h_xg = round(base_h_xg * fatigue_h, 2)
-  final_a_xg = round(base_a_xg * fatigue_a, 2)
+  h_net_form = round((h_att - h_def) * fatigue_h, 2)
+  a_net_form = round((a_att - a_def) * fatigue_a, 2)
+
+  h_xg = round(h_att * fatigue_h, 2)
+  a_xg = round(a_att * fatigue_a, 2)
 
   h_info = f"พัก {h_rest} วัน {'⚠️เตะถี่' if h_rest <= 3 else '✅ฟิต'}"
   a_info = f"พัก {a_rest} วัน {'⚠️เตะถี่' if a_rest <= 3 else '✅ฟิต'}"
 
-  score = 60
-  if h_rest > 3 and a_rest > 3:
-    score += 15
+  score = 70 if (h_rest > 3 and a_rest > 3) else 55
 
-  return final_h_xg, final_a_xg, h_info, a_info, score
+  return h_net_form, a_net_form, h_xg, a_xg, h_info, a_info, score
 
 
 def devig_odds(odds_1, odds_2):
-  implied_1 = 1.0 / odds_1
-  implied_2 = 1.0 / odds_2
-  total_margin = implied_1 + implied_2
-  return implied_1 / total_margin, implied_2 / total_margin
+  imp1, imp2 = 1.0 / odds_1, 1.0 / odds_2
+  tot = imp1 + imp2
+  return imp1 / tot, imp2 / tot
 
 
 def calculate_kelly(ev_pct, odds):
@@ -228,7 +232,7 @@ def calculate_kelly(ev_pct, odds):
 
 
 # ==============================================================================
-# 4. SCANNER CORE LOGIC (วิเคราะห์ตามแฮนดิแคปจริง)
+# 4. SCANNER CORE LOGIC (สมดุล ต่อ/รอง/ผ่าน)
 # ==============================================================================
 def scan_league(league_info):
   csv_df = fetch_csv_stats(league_info["csv"])
@@ -288,12 +292,12 @@ def scan_league(league_info):
         None,
     )
 
-    h_xg, a_xg, h_info, a_info, base_score = calculate_advanced_xg(
-        csv_df, home, away, match_dt
+    h_net_form, a_net_form, h_xg, a_xg, h_info, a_info, base_score = (
+        calculate_form_metrics(csv_df, home, away, match_dt)
     )
 
     # ----------------------------------------------------
-    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap - ต่อ/รอง แฟร์ๆ)
+    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap - สมดุล)
     # ----------------------------------------------------
     best_hdc_str, ev_hdc, k_hdc = "รอค่าน้ำเปิด", -999.0, "0%"
     if sp_mkt:
@@ -303,18 +307,18 @@ def scan_league(league_info):
 
       if h_obj and a_obj:
         h_line = h_obj.get("point", 0.0)
+        a_line = a_obj.get("point", 0.0)
         h_odds, a_odds = h_obj["price"], a_obj["price"]
         mkt_p_h, mkt_p_a = devig_odds(h_odds, a_odds)
 
-        if h_xg is not None and a_xg is not None:
-          # ประเมินส่วนต่างประตูคาดหมาย (Expected Goal Difference)
-          expected_gd = h_xg - a_xg
-          # คำนวณส่วนต่างระหว่าง xG กับ ราคาเจ้ามือ
-          line_diff = expected_gd + h_line
+        if h_net_form is not None and a_net_form is not None:
+          # คำนวณส่วนต่างฟอร์มเทียบกับราคาแฮนดิแคป
+          form_delta = h_net_form - a_net_form
+          edge = form_delta + h_line
 
-          # ปรับความน่าจะเป็นตามส่วนต่างประตูจริง
-          prob_adj = norm_cdf(line_diff / 1.35) - 0.5
-          final_p_h = max(min(mkt_p_h + (prob_adj * 0.25), 0.85), 0.15)
+          # ปรับโอกาสชนะแบบสองฝั่ง (Symmetric Probability Shift)
+          prob_shift = (norm_cdf(edge / 1.1) - 0.5) * 0.35
+          final_p_h = max(min(mkt_p_h + prob_shift, 0.85), 0.15)
           final_p_a = 1.0 - final_p_h
         else:
           final_p_h, final_p_a = mkt_p_h, mkt_p_a
@@ -322,7 +326,6 @@ def scan_league(league_info):
         ev_h = round(((final_p_h * h_odds) - 1.0) * 100, 2)
         ev_a = round(((final_p_a * a_odds) - 1.0) * 100, 2)
 
-        # กำหนดข้อความ "ต่อ" หรือ "รอง" ตามจุดยืนจริงของราคา
         if ev_h >= ev_a:
           ev_hdc = ev_h
           if h_line < 0:
@@ -331,18 +334,21 @@ def scan_league(league_info):
             label = f"รอง {home} (+{h_line})"
           else:
             label = f"เสมอ/เลือก {home} (0.0)"
-          best_hdc_str = f"{label} @ {h_odds} (EV: {ev_h}%)"
+          best_hdc_str = (
+              f"{label} @ {h_odds} (EV: {'+' if ev_h > 0 else ''}{ev_h}%)"
+          )
           k_hdc = calculate_kelly(ev_h, h_odds)
         else:
           ev_hdc = ev_a
-          a_line = a_obj.get("point", 0.0)
           if a_line < 0:
             label = f"ต่อ {away} ({a_line})"
           elif a_line > 0:
             label = f"รอง {away} (+{a_line})"
           else:
             label = f"เสมอ/เลือก {away} (0.0)"
-          best_hdc_str = f"{label} @ {a_odds} (EV: {ev_a}%)"
+          best_hdc_str = (
+              f"{label} @ {a_odds} (EV: {'+' if ev_a > 0 else ''}{ev_a}%)"
+          )
           k_hdc = calculate_kelly(ev_a, a_odds)
 
     # ----------------------------------------------------
@@ -360,10 +366,10 @@ def scan_league(league_info):
         mkt_p_o, mkt_p_u = devig_odds(o_odds, u_odds)
 
         if h_xg is not None and a_xg is not None:
-          total_xg = h_xg + a_xg
-          xg_diff = total_xg - line
-          prob_adj = norm_cdf(xg_diff / 1.20) - 0.5
-          final_p_o = max(min(mkt_p_o + (prob_adj * 0.25), 0.85), 0.15)
+          total_expected_goals = h_xg + a_xg
+          xg_edge = total_expected_goals - line
+          prob_shift = (norm_cdf(xg_edge / 1.0) - 0.5) * 0.35
+          final_p_o = max(min(mkt_p_o + prob_shift, 0.85), 0.15)
           final_p_u = 1.0 - final_p_o
         else:
           final_p_o, final_p_u = mkt_p_o, mkt_p_u
@@ -373,15 +379,19 @@ def scan_league(league_info):
 
         if ev_o >= ev_u:
           ev_tot = ev_o
-          best_tot_str = f"สูง {line} @ {o_odds} (EV: {ev_o}%)"
+          best_tot_str = (
+              f"สูง {line} @ {o_odds} (EV: {'+' if ev_o > 0 else ''}{ev_o}%)"
+          )
           k_tot = calculate_kelly(ev_o, o_odds)
         else:
           ev_tot = ev_u
-          best_tot_str = f"ต่ำ {line} @ {u_odds} (EV: {ev_u}%)"
+          best_tot_str = (
+              f"ต่ำ {line} @ {u_odds} (EV: {'+' if ev_u > 0 else ''}{ev_u}%)"
+          )
           k_tot = calculate_kelly(ev_u, u_odds)
 
     # ----------------------------------------------------
-    # 3. สรุปสถานะความคุ้มค่า และคะแนนความสมบูรณ์
+    # 3. สรุปสถานะความคุ้มค่า
     # ----------------------------------------------------
     is_hdc_v = ev_hdc >= 2.0
     is_tot_v = ev_tot >= 2.0
@@ -399,7 +409,7 @@ def scan_league(league_info):
     if sp_mkt and tot_mkt:
       final_score += 15
     if is_hdc_v or is_tot_v:
-      final_score += 10
+      final_score += 15
 
     total_xg_display = (
         f"{round(h_xg + a_xg, 2)} ลูก (H:{h_xg} | A:{a_xg})"
