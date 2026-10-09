@@ -11,77 +11,124 @@ st.set_page_config(
 
 st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics (Full Version)")
 st.markdown(
-    "วิเคราะห์แม่นยำครบทุกตลาด **(1X2 + สูง/ต่ำ)** ด้วย **xG ถ่วงน้ำหนัก + H2H + วันพัก/ความล้า (Fatigue Index) + Kelly Criterion**"
+    "วิเคราะห์แม่นยำครบทุกตลาด **(1X2 + สูง/ต่ำ)** ด้วย **xG ถ่วงน้ำหนัก + H2H"
+    " + วันพัก/ความล้า (Fatigue Index) + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
-# แผนผังรหัส CSV ลีกหลักและลีกรองทั่วโลก
-CSV_MAPPING = {
-    # อังกฤษ
-    "soccer_epl": "E0",
-    "soccer_efl_champ": "E1",
-    "soccer_england_league1": "E2",
-    "soccer_england_league2": "E3",
-    # สเปน
-    "soccer_spain_la_liga": "SP1",
-    "soccer_spain_segunda_division": "SP2",
-    # อิตาลี
-    "soccer_italy_serie_a": "I1",
-    "soccer_italy_serie_b": "I2",
-    # เยอรมนี
-    "soccer_germany_bundesliga": "D1",
-    "soccer_germany_bundesliga2": "D2",
-    # ฝรั่งเศส
-    "soccer_france_league1": "F1",
-    "soccer_france_league2": "F2",
+# ฐานข้อมูลลีกและรหัส CSV ทั้งหมด (ครอบคลุมทั้งลีกหลักและลีกรอง)
+KNOWN_LEAGUES = {
     # เนเธอร์แลนด์ (ฮอลแลนด์)
-    "soccer_netherlands_eredivisie": "N1",
-    "soccer_netherlands_eerste_divisie": None,  # เออร์สเตอ ดีวีซี (ลีกรองฮอลแลนด์)
+    "soccer_netherlands_eredivisie": {
+        "name": "Eredivisie - Netherlands",
+        "csv": "N1",
+    },
+    "soccer_netherlands_eerste_divisie": {
+        "name": "Eerste Divisie - Netherlands (ลีกรองฮอลแลนด์)",
+        "csv": None,
+    },
+    # อังกฤษ
+    "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
+    "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
+    "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
+    "soccer_england_league2": {"name": "League 2 - England", "csv": "E3"},
+    # สเปน
+    "soccer_spain_la_liga": {"name": "La Liga - Spain", "csv": "SP1"},
+    "soccer_spain_segunda_division": {
+        "name": "Segunda Division - Spain",
+        "csv": "SP2",
+    },
+    # อิตาลี
+    "soccer_italy_serie_a": {"name": "Serie A - Italy", "csv": "I1"},
+    "soccer_italy_serie_b": {"name": "Serie B - Italy", "csv": "I2"},
+    # เยอรมนี
+    "soccer_germany_bundesliga": {
+        "name": "Bundesliga - Germany",
+        "csv": "D1",
+    },
+    "soccer_germany_bundesliga2": {
+        "name": "2. Bundesliga - Germany",
+        "csv": "D2",
+    },
+    # ฝรั่งเศส
+    "soccer_france_league1": {"name": "Ligue 1 - France", "csv": "F1"},
+    "soccer_france_league2": {"name": "Ligue 2 - France", "csv": "F2"},
     # โปรตุเกส
-    "soccer_portugal_primeira_liga": "P1",
-    "soccer_portugal_liga_pro": None,  # ลีก้า โปรตุเกส 2
+    "soccer_portugal_primeira_liga": {
+        "name": "Primeira Liga - Portugal",
+        "csv": "P1",
+    },
+    "soccer_portugal_liga_pro": {
+        "name": "Liga Portugal 2 (ลีกรองโปรตุเกส)",
+        "csv": None,
+    },
     # เบลเยียม / ตุรกี / กรีซ / สกอตแลนด์
-    "soccer_belgium_first_div": "B1",
-    "soccer_turkey_super_league": "T1",
-    "soccer_greece_super_league": "G1",
-    "soccer_spl": "SC0",
+    "soccer_belgium_first_div": {
+        "name": "First Division A - Belgium",
+        "csv": "B1",
+    },
+    "soccer_turkey_super_league": {
+        "name": "Super Lig - Turkey",
+        "csv": "T1",
+    },
+    "soccer_greece_super_league": {
+        "name": "Super League - Greece",
+        "csv": "G1",
+    },
+    "soccer_spl": {"name": "Premiership - Scotland", "csv": "SC0"},
     # ไอร์แลนด์
-    "soccer_ireland_premier_division": None,
-    "soccer_ireland_first_division": None,  # ลีกออฟไอร์แลนด์ เฟิร์สดีวิชั่น
+    "soccer_ireland_premier_division": {
+        "name": "Premier Division - Ireland",
+        "csv": None,
+    },
+    "soccer_ireland_first_division": {
+        "name": "First Division - Ireland (ลีกรองไอร์แลนด์)",
+        "csv": None,
+    },
     # อเมริกาเหนือ / ใต้
-    "soccer_brazil_campeonato": "BRA",
-    "soccer_brazil_serie_b": "BRA2",
-    "soccer_argentina_primera_division": "ARG",
-    "soccer_colombia_categoria_primera_a": "COL",
-    "soccer_peru_liga_1": "PER",
-    "soccer_mexico_ligamx": "MEX",
-    "soccer_usa_mls": "USA",
+    "soccer_brazil_campeonato": {
+        "name": "Serie A - Brazil",
+        "csv": "BRA",
+    },
+    "soccer_brazil_serie_b": {"name": "Serie B - Brazil", "csv": "BRA2"},
+    "soccer_argentina_primera_division": {
+        "name": "Primera Division - Argentina",
+        "csv": "ARG",
+    },
+    "soccer_colombia_categoria_primera_a": {
+        "name": "Primera A - Colombia",
+        "csv": "COL",
+    },
+    "soccer_peru_liga_1": {"name": "Liga 1 - Peru", "csv": "PER"},
+    "soccer_mexico_ligamx": {"name": "Liga MX - Mexico", "csv": "MEX"},
+    "soccer_usa_mls": {"name": "MLS - USA", "csv": "USA"},
 }
 
 
 @st.cache_data(ttl=1800)
 def get_active_soccer_leagues():
+  # เริ่มต้นจากรายการลีกในฐานข้อมูลที่ตั้งไว้
+  soccer_leagues = {}
+  for k, v in KNOWN_LEAGUES.items():
+    soccer_leagues[k] = {"name": v["name"], "key": k, "csv": v["csv"]}
+
+  # ดึงรายการเพิ่มเติมจาก API สด
   url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
   try:
     res = requests.get(url)
     if res.status_code == 200:
       data = res.json()
-      soccer_leagues = {}
       for item in data:
-        if item.get("group") == "Soccer" and item.get("active"):
+        if item.get("group") == "Soccer":
           key = item["key"]
           title = item["title"]
-          csv_code = CSV_MAPPING.get(key, None)
-          soccer_leagues[key] = {
-              "name": title,
-              "key": key,
-              "csv": csv_code,
-          }
-      return soccer_leagues
+          if key not in soccer_leagues:
+            soccer_leagues[key] = {"name": title, "key": key, "csv": None}
   except Exception:
     pass
-  return {}
+
+  return soccer_leagues
 
 
 @st.cache_data(ttl=3600)
@@ -129,7 +176,7 @@ def get_rest_days(df, team, current_match_date):
 
 def calculate_advanced_xg(df, api_home, api_away, match_date):
   if df is None or len(df) == 0:
-    return None, None, "สถิติไม่พอ", "สถิติไม่พอ"
+    return None, None, "ไม่มีไฟล์สถิติ", "ไม่มีไฟล์สถิติ"
 
   csv_teams = list(
       set(df["HomeTeam"].unique()).union(set(df["AwayTeam"].unique()))
@@ -289,7 +336,7 @@ def scan_league(league_info):
     if not bookmakers:
       continue
 
-    # วนลูปหาตลาด h2h และ totals จากทุกค่ายเจ้ามือที่มีอยู่ใน API
+    # ค้นหาตลาด h2h และ totals
     h2h_market = None
     for bm in bookmakers:
       mk = next((k for k in bm.get("markets", []) if k["key"] == "h2h"), None)
@@ -308,9 +355,7 @@ def scan_league(league_info):
         stats_df, home, away, match_dt_naive
     )
 
-    # ----------------------------------------------------
-    # 1. วิเคราะห์ฝั่งแพ้/ชนะ/ต่อรอง (1X2)
-    # ----------------------------------------------------
+    # 1. วิเคราะห์ฝั่ง 1X2
     best_1x2_str = "N/A"
     ev_1x2_best = -999.0
     kelly_1x2_str = "-"
@@ -351,9 +396,7 @@ def scan_league(league_info):
         best_1x2_str = f"{side_name} @ {odds_best_1x2} (EV: {'+' if ev_1x2_best > 0 else ''}{ev_1x2_best}%)"
         kelly_1x2_str = f"{k_pct}%" if ev_1x2_best > 2.0 and k_pct > 0 else "0%"
 
-    # ----------------------------------------------------
-    # 2. วิเคราะห์ สกอร์ สูง/ต่ำ (Totals)
-    # ----------------------------------------------------
+    # 2. วิเคราะห์ สูง/ต่ำ
     best_totals_str = "N/A"
     ev_totals_best = -999.0
     kelly_totals_str = "-"
@@ -395,9 +438,7 @@ def scan_league(league_info):
             f"{k_pct_tot}%" if ev_totals_best > 2.0 and k_pct_tot > 0 else "0%"
         )
 
-    # ----------------------------------------------------
     # 3. สรุปสถานะความน่าลงทุน
-    # ----------------------------------------------------
     is_1x2_value = ev_1x2_best > 2.0
     is_totals_value = ev_totals_best > 2.0
 
@@ -445,7 +486,7 @@ for k, v in active_leagues.items():
 selected_leagues = st.sidebar.multiselect(
     "เลือกรายการแข่งขัน/บอลถ้วย (เลือกได้มากกว่า 1 ลีก)",
     options=list(options_dict.keys()),
-    default=["all"],
+    default=["soccer_netherlands_eerste_divisie"],  # ตั้งค่าเริ่มต้นเป็นลีกรองฮอลแลนด์
     format_func=lambda x: options_dict[x],
 )
 
