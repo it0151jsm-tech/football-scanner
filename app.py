@@ -15,12 +15,13 @@ st.set_page_config(
 st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (ต่อ-รอง & สูง-ต่ำ)")
 st.caption(
     "วิเคราะห์เจาะลึกราคาต่อรอง **Asian Handicap** และ **Over/Under** ด้วยโมเดล"
-    " **Market Blended xG + Fatigue + Kelly Criterion**"
+    " **Goal Difference Normal Model + Market Blending + Kelly**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
 KNOWN_LEAGUES = {
+    # อเมริกาเหนือ / ใต้
     "soccer_brazil_campeonato": {
         "name": "Serie A - Brazil (บราซิล)",
         "csv": "BRA",
@@ -43,6 +44,7 @@ KNOWN_LEAGUES = {
         "csv": "MEX",
     },
     "soccer_usa_mls": {"name": "MLS - USA (สหรัฐอเมริกา)", "csv": "USA"},
+    # ยุโรปหลัก & ลีกรอง
     "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
     "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
     "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
@@ -132,6 +134,11 @@ def fetch_csv_stats(csv_code):
 # ==============================================================================
 # 3. STATISTICAL & MATHEMATICAL MODELS
 # ==============================================================================
+def norm_cdf(x):
+  """Cumulative distribution function for standard normal distribution"""
+  return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+
+
 def poisson_prob(lmbda, k):
   return (math.pow(lmbda, k) * math.exp(-lmbda)) / math.factorial(k)
 
@@ -212,30 +219,20 @@ def devig_odds(odds_1, odds_2):
   return fair_p1, fair_p2
 
 
-def calculate_asian_handicap_prob(home_xg, away_xg, h_line):
-  p_home_win_cover = 0.0
-  p_away_win_cover = 0.0
+def calculate_asian_handicap_prob_norm(home_xg, away_xg, h_line):
+  """คำนวณความน่าจะเป็นของ Asian Handicap ด้วย Goal Difference Normal Model
 
-  for i in range(8):
-    for j in range(8):
-      p = poisson_prob(home_xg, i) * poisson_prob(away_xg, j)
-      diff = (i - j) + h_line
+  แก้ปัญหาเอียงเข้าข้างทีมรองแบบสมบูรณ์
+  """
+  goal_diff = home_xg - away_xg
+  sigma = 1.35  # ค่าความแปรปรวนมาตรฐานส่วนต่างประตูในฟุตบอล
 
-      if diff > 0.1:
-        p_home_win_cover += p
-      elif abs(diff - 0.25) < 0.1:
-        p_home_win_cover += p * 0.75
-        p_away_win_cover += p * 0.25
-      elif abs(diff) < 0.1:
-        p_home_win_cover += p * 0.5
-        p_away_win_cover += p * 0.5
-      elif abs(diff + 0.25) < 0.1:
-        p_home_win_cover += p * 0.25
-        p_away_win_cover += p * 0.75
-      else:
-        p_away_win_cover += p
+  # คำนวณ Z-score สำหรับเจ้าบ้านชนะราคาต่อรอง
+  z_home = (goal_diff + h_line) / sigma
+  p_home_cover = norm_cdf(z_home)
+  p_away_cover = 1.0 - p_home_cover
 
-  return p_home_win_cover, p_away_win_cover
+  return p_home_cover, p_away_cover
 
 
 def calculate_kelly(ev_pct, odds):
@@ -249,7 +246,6 @@ def calculate_kelly(ev_pct, odds):
 
 
 def format_hdc_label(point, team_name):
-  """แก้ไขป้ายกำกับ ต่อ / รอง / เสมอ ให้ถูกต้องตามราคาจริง"""
   if point < 0:
     return f"ต่อ {team_name} ({point})"
   elif point > 0:
@@ -339,11 +335,12 @@ def scan_league(league_info):
         mkt_p_h, mkt_p_a = devig_odds(h_odds, a_odds)
 
         if h_xg is not None and a_xg is not None:
-          poisson_p_h, poisson_p_a = calculate_asian_handicap_prob(
+          model_p_h, model_p_a = calculate_asian_handicap_prob_norm(
               h_xg, a_xg, h_line
           )
-          final_p_h = (poisson_p_h * 0.5) + (mkt_p_h * 0.5)
-          final_p_a = (poisson_p_a * 0.5) + (mkt_p_a * 0.5)
+          # Blending: ใช้ความน่าจะเป็นจากตลาด 70% + โมเดล 30% เพื่อคัดเฉพาะ Value จริง
+          final_p_h = (mkt_p_h * 0.70) + (model_p_h * 0.30)
+          final_p_a = (mkt_p_a * 0.70) + (model_p_a * 0.30)
         else:
           final_p_h, final_p_a = mkt_p_h, mkt_p_a
 
@@ -381,8 +378,8 @@ def scan_league(league_info):
               if (i + j) > line
           )
           p_u_poisson = 1.0 - p_o_poisson
-          final_p_o = (p_o_poisson * 0.5) + (mkt_p_o * 0.5)
-          final_p_u = (p_u_poisson * 0.5) + (mkt_p_u * 0.5)
+          final_p_o = (mkt_p_o * 0.70) + (p_o_poisson * 0.30)
+          final_p_u = (mkt_p_u * 0.70) + (p_u_poisson * 0.30)
         else:
           final_p_o, final_p_u = mkt_p_o, mkt_p_u
 
