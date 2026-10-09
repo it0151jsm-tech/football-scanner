@@ -1,16 +1,17 @@
-import math
 from datetime import datetime, timedelta, timezone
+from difflib import get_close_matches
+import math
 import pandas as pd
 import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="Value Bet Scanner All-in-One", page_icon="⚽", layout="wide"
+    page_title="Value Bet Scanner Pro Analytics", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบสแกนบอล Value Bet (รวมฝั่ง + สูง/ต่ำ)")
+st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics")
 st.markdown(
-    "วิเคราะห์ทั้ง **ราคาแพ้ชนะ/ต่อรอง (1X2)** และ **สกอร์ สูง/ต่ำ** ในการสแกนครั้งเดียวด้วยโมเดล **xG + Poisson + Kelly Criterion**"
+    "วิเคราะห์แม่นยำด้วย **xG ถ่วงน้ำหนัก + สถิติ H2H + วันพัก/ความล้า (Fatigue Index) + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -78,53 +79,114 @@ def fetch_historical_stats(csv_code):
     try:
       df = pd.read_csv(url)
       if "HomeTeam" in df.columns:
-        df = df[["HomeTeam", "AwayTeam", "FTHG", "FTAG"]].dropna()
+        df["Date_dt"] = pd.to_datetime(
+            df["Date"], format="%d/%m/%Y", errors="coerce"
+        )
+        df = df[["Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]].dropna()
         if len(df) > 0:
           return df
     except Exception:
       pass
-
-  extra_url = f"https://www.football-data.co.uk/new_league_data/{csv_code}.csv"
-  try:
-    df = pd.read_csv(extra_url)
-    if "Home" in df.columns:
-      df = df.rename(
-          columns={
-              "Home": "HomeTeam",
-              "Away": "AwayTeam",
-              "HG": "FTHG",
-              "AG": "FTAG",
-          }
-      )
-    df = df[["HomeTeam", "AwayTeam", "FTHG", "FTAG"]].dropna()
-    if len(df) > 0:
-      return df
-  except Exception:
-    pass
   return None
 
 
-def calculate_xg(df, home_team, away_team, last_n=10):
+def match_team_name(api_name, csv_teams):
+  """จับคู่ชื่อทีมจาก API และ CSV อัตโนมัติด้วย Fuzzy Matching"""
+  if not csv_teams:
+    return api_name
+  matches = get_close_matches(api_name, csv_teams, n=1, cutoff=0.4)
+  return matches[0] if matches else api_name
+
+
+def get_rest_days(df, team, current_match_date):
+  """คำนวณจำนวนวันพักนับจากแมตช์ล่าสุด"""
+  team_df = df[(df["HomeTeam"] == team) | (df["AwayTeam"] == team)]
+  if team_df.empty:
+    return 7
+  team_df = team_df.sort_values("Date_dt")
+  past_matches = team_df[team_df["Date_dt"] < current_match_date]
+  if past_matches.empty:
+    return 7
+  last_date = past_matches.iloc[-1]["Date_dt"]
+  delta_days = (current_match_date - last_date).days
+  return max(delta_days, 1)
+
+
+def calculate_advanced_xg(df, api_home, api_away, match_date):
   if df is None or len(df) == 0:
-    return None, None
+    return None, None, "สถิติไม่พอ", "สถิติไม่พอ"
+
+  csv_teams = list(set(df["HomeTeam"].unique()).union(set(df["AwayTeam"].unique())))
+  home_team = match_team_name(api_home, csv_teams)
+  away_team = match_team_name(api_away, csv_teams)
+
+  # 1. คำนวณวันพัก (Rest Days)
+  home_rest = get_rest_days(df, home_team, match_date)
+  away_rest = get_rest_days(df, away_team, match_date)
+
+  # 2. คำนวณ xG แบบถ่วงน้ำหนัก (60% นัด 1-3, 40% นัด 4-10)
+  h_df = df[df["HomeTeam"] == home_team].tail(10)
+  a_df = df[df["AwayTeam"] == away_team].tail(10)
+
+  if len(h_df) < 3 or len(a_df) < 3:
+    return None, None, f"พัก {home_rest} วัน", f"พัก {away_rest} วัน"
+
   league_avg = (df["FTHG"].mean() + df["FTAG"].mean()) / 2
-  if league_avg == 0:
-    return None, None
 
-  h_df = df[df["HomeTeam"] == home_team].tail(last_n)
-  a_df = df[df["AwayTeam"] == away_team].tail(last_n)
+  def weighted_avg(series):
+    if len(series) >= 5:
+      recent = series.tail(3).mean()
+      older = series.iloc[:-3].mean()
+      return (recent * 0.6) + (older * 0.4)
+    return series.mean()
 
-  if len(h_df) == 0 or len(a_df) == 0:
-    return None, None
+  h_att = weighted_avg(h_df["FTHG"])
+  h_def = weighted_avg(h_df["FTAG"])
+  a_att = weighted_avg(a_df["FTAG"])
+  a_def = weighted_avg(a_df["FTHG"])
 
-  h_att = h_df["FTHG"].mean()
-  h_def = h_df["FTAG"].mean()
-  a_att = a_df["FTAG"].mean()
-  a_def = a_df["FTHG"].mean()
+  base_h_xg = (h_att / league_avg) * (a_def / league_avg) * league_avg
+  base_a_xg = (a_att / league_avg) * (h_def / league_avg) * league_avg
 
-  h_xg = round((h_att / league_avg) * (a_def / league_avg) * league_avg, 2)
-  a_xg = round((a_att / league_avg) * (h_def / league_avg) * league_avg, 2)
-  return h_xg, a_xg
+  # 3. คำนวณสถิติ H2H (พบกันย้อนหลัง)
+  h2h_df = df[
+      ((df["HomeTeam"] == home_team) & (df["AwayTeam"] == away_team))
+      | ((df["HomeTeam"] == away_team) & (df["AwayTeam"] == home_team))
+  ].tail(5)
+
+  h2h_h_adj, h2h_a_adj = 1.0, 1.0
+  if len(h2h_df) >= 2:
+    h2h_h_goals, h2h_a_goals = 0, 0
+    for _, row in h2h_df.iterrows():
+      if row["HomeTeam"] == home_team:
+        h2h_h_goals += row["FTHG"]
+        h2h_a_goals += row["FTAG"]
+      else:
+        h2h_h_goals += row["FTAG"]
+        h2h_a_goals += row["FTHG"]
+
+    avg_h2h_h = h2h_h_goals / len(h2h_df)
+    avg_h2h_a = h2h_a_goals / len(h2h_df)
+    if avg_h2h_h > avg_h2h_a:
+      h2h_h_adj = 1.08
+    elif avg_h2h_a > avg_h2h_h:
+      h2h_a_adj = 1.08
+
+  # 4. ตัวคูณความล้า (Fatigue Factor)
+  fatigue_h = 0.88 if home_rest <= 3 else (1.05 if home_rest >= 6 else 1.0)
+  fatigue_a = 0.88 if away_rest <= 3 else (1.05 if away_rest >= 6 else 1.0)
+
+  final_h_xg = round(base_h_xg * fatigue_h * h2h_h_adj, 2)
+  final_a_xg = round(base_a_xg * fatigue_a * h2h_a_adj, 2)
+
+  h_info = (
+      f"พัก {home_rest} วัน {'⚠️เตะถี่' if home_rest <= 3 else '✅ฟิตเต็มร้อย'}"
+  )
+  a_info = (
+      f"พัก {away_rest} วัน {'⚠️เตะถี่' if away_rest <= 3 else '✅ฟิตเต็มร้อย'}"
+  )
+
+  return final_h_xg, final_a_xg, h_info, a_info
 
 
 def poisson_prob(lmbda, k):
@@ -201,6 +263,8 @@ def scan_league(league_info):
       continue
 
     match_time_th = commence_time.astimezone(tz_th).strftime("%d/%m %H:%M น.")
+    match_dt_naive = commence_time.astimezone(tz_th).replace(tzinfo=None)
+
     home = m["home_team"]
     away = m["away_team"]
 
@@ -222,7 +286,9 @@ def scan_league(league_info):
         totals_market = mk
         break
 
-    h_xg, a_xg = calculate_xg(stats_df, home, away)
+    h_xg, a_xg, h_info, a_info = calculate_advanced_xg(
+        stats_df, home, away, match_dt_naive
+    )
 
     # 1. วิเคราะห์ฝั่ง 1X2
     best_1x2_str = "N/A"
@@ -307,7 +373,7 @@ def scan_league(league_info):
             f"{k_pct_tot}%" if ev_totals_best > 2.0 and k_pct_tot > 0 else "0%"
         )
 
-    # 3. สถานะความน่าลงทุน
+    # 3. สรุปสถานะความน่าลงทุน
     is_1x2_value = ev_1x2_best > 2.0
     is_totals_value = ev_totals_best > 2.0
 
@@ -320,10 +386,16 @@ def scan_league(league_info):
     else:
       status = "➖ ไม่คุ้ม/สูสี"
 
+    xg_display = (
+      f"H: {h_xg} | A: {a_xg}" if h_xg is not None else "ไม่มีข้อมูล xG"
+    )
+
     results.append({
         "เวลาเตะ (ไทย)": match_time_th,
         "รายการ/ลีก": league_name,
         "คู่แข่งขัน": f"{home} vs {away}",
+        "สภาพความฟิต (วันพัก)": f"เจ้าบ้าน: {h_info} | เยือน: {a_info}",
+        "xG ประเมิน": xg_display,
         "แนะนำฝั่ง (1X2)": best_1x2_str,
         "แนะนำ สูง/ต่ำ": best_totals_str,
         "ทุนแนะนำ (Kelly)": (
@@ -346,7 +418,6 @@ options_dict = {
 for k, v in active_leagues.items():
   options_dict[k] = v["name"]
 
-# เปลี่ยนเป็น Multiselect เลือกพร้อมกันได้หลายลีก
 selected_leagues = st.sidebar.multiselect(
     "เลือกรายการแข่งขัน/บอลถ้วย (เลือกได้มากกว่า 1 ลีก)",
     options=list(options_dict.keys()),
@@ -357,13 +428,13 @@ selected_leagues = st.sidebar.multiselect(
 only_value_bets = st.sidebar.checkbox(
     "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV > 2%)", value=False
 )
-scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล", type="primary")
+scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro", type="primary")
 
 if scan_btn:
   if not selected_leagues:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 รายการแข่งขัน")
   else:
-    with st.spinner("กำลังดึงข้อมูลและคำนวณราคาสำหรับทุกตลาด..."):
+    with st.spinner("กำลังวิเคราะห์สถิติความล้า xG H2H และราคาบอล..."):
       all_results = []
       if "all" in selected_leagues:
         for k, league in active_leagues.items():
