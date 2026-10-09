@@ -9,15 +9,16 @@ st.set_page_config(
     page_title="Value Bet Scanner Pro Analytics", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics (24 ชั่วโมงวันต่อวัน)")
+st.title("⚽ ระบบสแกนบอล Value Bet Pro Analytics (36 ชั่วโมง)")
 st.markdown(
-    "วิเคราะห์แม่นยำเน้นบอลเตะภายใน **24 ชั่วโมง (1X2 + สูง/ต่ำ)** ด้วย **xG"
+    "วิเคราะห์แม่นยำเน้นบอลเตะภายใน **36 ชั่วโมง (1X2 + สูง/ต่ำ)** ด้วย **xG"
     " ถ่วงน้ำหนัก + H2H + วันพัก/ความล้า + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
 KNOWN_LEAGUES = {
+    # เนเธอร์แลนด์ (ฮอลแลนด์)
     "soccer_netherlands_eredivisie": {
         "name": "Eredivisie - Netherlands",
         "csv": "N1",
@@ -26,17 +27,21 @@ KNOWN_LEAGUES = {
         "name": "Eerste Divisie - Netherlands (ลีกรองฮอลแลนด์)",
         "csv": None,
     },
+    # อังกฤษ
     "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
     "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
     "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
     "soccer_england_league2": {"name": "League 2 - England", "csv": "E3"},
+    # สเปน
     "soccer_spain_la_liga": {"name": "La Liga - Spain", "csv": "SP1"},
     "soccer_spain_segunda_division": {
         "name": "Segunda Division - Spain",
         "csv": "SP2",
     },
+    # อิตาลี
     "soccer_italy_serie_a": {"name": "Serie A - Italy", "csv": "I1"},
     "soccer_italy_serie_b": {"name": "Serie B - Italy", "csv": "I2"},
+    # เยอรมนี
     "soccer_germany_bundesliga": {
         "name": "Bundesliga - Germany",
         "csv": "D1",
@@ -45,8 +50,10 @@ KNOWN_LEAGUES = {
         "name": "2. Bundesliga - Germany",
         "csv": "D2",
     },
+    # ฝรั่งเศส
     "soccer_france_league1": {"name": "Ligue 1 - France", "csv": "F1"},
     "soccer_france_league2": {"name": "Ligue 2 - France", "csv": "F2"},
+    # โปรตุเกส
     "soccer_portugal_primeira_liga": {
         "name": "Primeira Liga - Portugal",
         "csv": "P1",
@@ -55,6 +62,7 @@ KNOWN_LEAGUES = {
         "name": "Liga Portugal 2 (ลีกรองโปรตุเกส)",
         "csv": None,
     },
+    # เบลเยียม / ตุรกี / กรีซ / สกอตแลนด์
     "soccer_belgium_first_div": {
         "name": "First Division A - Belgium",
         "csv": "B1",
@@ -68,6 +76,7 @@ KNOWN_LEAGUES = {
         "csv": "G1",
     },
     "soccer_spl": {"name": "Premiership - Scotland", "csv": "SC0"},
+    # ไอร์แลนด์
     "soccer_ireland_premier_division": {
         "name": "Premier Division - Ireland",
         "csv": None,
@@ -76,6 +85,7 @@ KNOWN_LEAGUES = {
         "name": "First Division - Ireland (ลีกรองไอร์แลนด์)",
         "csv": None,
     },
+    # อเมริกาเหนือ / ใต้
     "soccer_brazil_campeonato": {
         "name": "Serie A - Brazil",
         "csv": "BRA",
@@ -299,7 +309,8 @@ def scan_league(league_info):
     return []
 
   now_utc = datetime.now(timezone.utc)
-  next_24h_utc = now_utc + timedelta(hours=24)
+  # กำหนดช่วงเวลาดึงเฉพาะบอลเตะภายใน 36 ชั่วโมงข้างหน้า
+  next_36h_utc = now_utc + timedelta(hours=36)
   tz_th = timezone(timedelta(hours=7))
 
   results = []
@@ -307,7 +318,7 @@ def scan_league(league_info):
     commence_time = datetime.fromisoformat(
         m["commence_time"].replace("Z", "+00:00")
     )
-    if not (now_utc - timedelta(hours=2) <= commence_time <= next_24h_utc):
+    if not (now_utc - timedelta(hours=2) <= commence_time <= next_36h_utc):
       continue
 
     match_time_th = commence_time.astimezone(tz_th).strftime("%d/%m %H:%M น.")
@@ -473,14 +484,14 @@ selected_leagues = st.sidebar.multiselect(
 only_value_bets = st.sidebar.checkbox(
     "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV > 2%)", value=False
 )
-scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro (24 ชม.)", type="primary")
+scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro (36 ชม.)", type="primary")
 
 if scan_btn:
   if not selected_leagues:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 รายการแข่งขัน")
   else:
     with st.spinner(
-        "กำลังวิเคราะห์สถิติวันพัก xG H2H และค่าน้ำบอลเตะภายใน 24 ชม...."
+        "กำลังวิเคราะห์สถิติวันพัก xG H2H และค่าน้ำบอลเตะภายใน 36 ชม...."
     ):
       all_results = []
       if "all" in selected_leagues:
@@ -499,8 +510,8 @@ if scan_btn:
         df_display = df.drop(columns=["is_value"])
 
         st.success(
-            f"พบรายการแข่งขันเตะภายใน 24 ชม. ทั้งหมด {len(df_display)} รายการ"
+            f"พบรายการแข่งขันเตะภายใน 36 ชม. ทั้งหมด {len(df_display)} รายการ"
         )
         st.dataframe(df_display, use_container_width=True, hide_index=True)
       else:
-        st.warning("ไม่พบคู่แข่งขันที่เตะภายใน 24 ชั่วโมงในลีกที่เลือก")
+        st.warning("ไม่พบคู่แข่งขันที่เตะภายใน 36 ชั่วโมงในลีกที่เลือก")
