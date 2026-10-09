@@ -12,10 +12,10 @@ st.set_page_config(
     page_title="Value Bet Pro Framework", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (ต่อ-รอง & สูง-ต่ำ)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (ตามหลักการ 10 ขั้นตอน)")
 st.caption(
-    "วิเคราะห์เจาะลึกราคาต่อรอง **Asian Handicap** และ **Over/Under** ด้วยโมเดล"
-    " **Goal Difference Normal Model + Market Blending + Kelly**"
+    "วิเคราะห์เจาะลึกราคาต่อรอง **Asian Handicap** และ **Over/Under** "
+    "โดยเปรียบเทียบส่วนต่างประตูคาดหมาย (xG) กับราคาเจ้ามือ พร้อมคำนวณคะแนนข้อมูล"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -135,7 +135,6 @@ def fetch_csv_stats(csv_code):
 # 3. STATISTICAL & MATHEMATICAL MODELS
 # ==============================================================================
 def norm_cdf(x):
-  """Cumulative distribution function for standard normal distribution"""
   return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
 
 
@@ -144,8 +143,9 @@ def poisson_prob(lmbda, k):
 
 
 def calculate_advanced_xg(df, home_api, away_api, match_date):
+  """คำนวณ xG ถ่วงน้ำหนักฟอร์มล่าสุด + วันพักล้า + ควบคุมระบบวันพัก"""
   if df is None or df.empty:
-    return None, None, "พักปกติ (7 วัน)", "พักปกติ (7 วัน)", 20
+    return None, None, "พักปกติ (7 วัน)", "พักปกติ (7 วัน)", 25
 
   csv_teams = list(
       set(df["HomeTeam"].unique()).union(set(df["AwayTeam"].unique()))
@@ -172,7 +172,7 @@ def calculate_advanced_xg(df, home_api, away_api, match_date):
   a_df = df[df["AwayTeam"] == away_team].tail(10)
 
   if len(h_df) < 3 or len(a_df) < 3:
-    return None, None, f"พัก {h_rest} วัน", f"พัก {a_rest} วัน", 40
+    return None, None, f"พัก {h_rest} วัน", f"พัก {a_rest} วัน", 45
 
   league_avg = (df["FTHG"].mean() + df["FTAG"].mean()) / 2
 
@@ -214,25 +214,7 @@ def devig_odds(odds_1, odds_2):
   implied_1 = 1.0 / odds_1
   implied_2 = 1.0 / odds_2
   total_margin = implied_1 + implied_2
-  fair_p1 = implied_1 / total_margin
-  fair_p2 = implied_2 / total_margin
-  return fair_p1, fair_p2
-
-
-def calculate_asian_handicap_prob_norm(home_xg, away_xg, h_line):
-  """คำนวณความน่าจะเป็นของ Asian Handicap ด้วย Goal Difference Normal Model
-
-  แก้ปัญหาเอียงเข้าข้างทีมรองแบบสมบูรณ์
-  """
-  goal_diff = home_xg - away_xg
-  sigma = 1.35  # ค่าความแปรปรวนมาตรฐานส่วนต่างประตูในฟุตบอล
-
-  # คำนวณ Z-score สำหรับเจ้าบ้านชนะราคาต่อรอง
-  z_home = (goal_diff + h_line) / sigma
-  p_home_cover = norm_cdf(z_home)
-  p_away_cover = 1.0 - p_home_cover
-
-  return p_home_cover, p_away_cover
+  return implied_1 / total_margin, implied_2 / total_margin
 
 
 def calculate_kelly(ev_pct, odds):
@@ -245,17 +227,8 @@ def calculate_kelly(ev_pct, odds):
   return f"{round(max(k * 0.25 * 100, 0), 1)}%"
 
 
-def format_hdc_label(point, team_name):
-  if point < 0:
-    return f"ต่อ {team_name} ({point})"
-  elif point > 0:
-    return f"รอง {team_name} (+{point})"
-  else:
-    return f"เสมอ/เลือก {team_name} (0.0)"
-
-
 # ==============================================================================
-# 4. SCANNER CORE LOGIC
+# 4. SCANNER CORE LOGIC (วิเคราะห์ตามแฮนดิแคปจริง)
 # ==============================================================================
 def scan_league(league_info):
   csv_df = fetch_csv_stats(league_info["csv"])
@@ -319,7 +292,9 @@ def scan_league(league_info):
         csv_df, home, away, match_dt
     )
 
-    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap)
+    # ----------------------------------------------------
+    # 1. วิเคราะห์ราคาต่อรอง (Asian Handicap - ต่อ/รอง แฟร์ๆ)
+    # ----------------------------------------------------
     best_hdc_str, ev_hdc, k_hdc = "รอค่าน้ำเปิด", -999.0, "0%"
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
@@ -328,37 +303,51 @@ def scan_league(league_info):
 
       if h_obj and a_obj:
         h_line = h_obj.get("point", 0.0)
-        h_odds = h_obj["price"]
-        a_line = a_obj.get("point", 0.0)
-        a_odds = a_obj["price"]
-
+        h_odds, a_odds = h_obj["price"], a_obj["price"]
         mkt_p_h, mkt_p_a = devig_odds(h_odds, a_odds)
 
         if h_xg is not None and a_xg is not None:
-          model_p_h, model_p_a = calculate_asian_handicap_prob_norm(
-              h_xg, a_xg, h_line
-          )
-          # Blending: ใช้ความน่าจะเป็นจากตลาด 70% + โมเดล 30% เพื่อคัดเฉพาะ Value จริง
-          final_p_h = (mkt_p_h * 0.70) + (model_p_h * 0.30)
-          final_p_a = (mkt_p_a * 0.70) + (model_p_a * 0.30)
+          # ประเมินส่วนต่างประตูคาดหมาย (Expected Goal Difference)
+          expected_gd = h_xg - a_xg
+          # คำนวณส่วนต่างระหว่าง xG กับ ราคาเจ้ามือ
+          line_diff = expected_gd + h_line
+
+          # ปรับความน่าจะเป็นตามส่วนต่างประตูจริง
+          prob_adj = norm_cdf(line_diff / 1.35) - 0.5
+          final_p_h = max(min(mkt_p_h + (prob_adj * 0.25), 0.85), 0.15)
+          final_p_a = 1.0 - final_p_h
         else:
           final_p_h, final_p_a = mkt_p_h, mkt_p_a
 
         ev_h = round(((final_p_h * h_odds) - 1.0) * 100, 2)
         ev_a = round(((final_p_a * a_odds) - 1.0) * 100, 2)
 
+        # กำหนดข้อความ "ต่อ" หรือ "รอง" ตามจุดยืนจริงของราคา
         if ev_h >= ev_a:
           ev_hdc = ev_h
-          label = format_hdc_label(h_line, home)
+          if h_line < 0:
+            label = f"ต่อ {home} ({h_line})"
+          elif h_line > 0:
+            label = f"รอง {home} (+{h_line})"
+          else:
+            label = f"เสมอ/เลือก {home} (0.0)"
           best_hdc_str = f"{label} @ {h_odds} (EV: {ev_h}%)"
           k_hdc = calculate_kelly(ev_h, h_odds)
         else:
           ev_hdc = ev_a
-          label = format_hdc_label(a_line, away)
+          a_line = a_obj.get("point", 0.0)
+          if a_line < 0:
+            label = f"ต่อ {away} ({a_line})"
+          elif a_line > 0:
+            label = f"รอง {away} (+{a_line})"
+          else:
+            label = f"เสมอ/เลือก {away} (0.0)"
           best_hdc_str = f"{label} @ {a_odds} (EV: {ev_a}%)"
           k_hdc = calculate_kelly(ev_a, a_odds)
 
+    # ----------------------------------------------------
     # 2. วิเคราะห์ราคาสูง/ต่ำ (Totals - Over/Under)
+    # ----------------------------------------------------
     best_tot_str, ev_tot, k_tot = "รอค่าน้ำเปิด", -999.0, "0%"
     if tot_mkt:
       outcomes = tot_mkt.get("outcomes", [])
@@ -371,15 +360,11 @@ def scan_league(league_info):
         mkt_p_o, mkt_p_u = devig_odds(o_odds, u_odds)
 
         if h_xg is not None and a_xg is not None:
-          p_o_poisson = sum(
-              poisson_prob(h_xg, i) * poisson_prob(a_xg, j)
-              for i in range(8)
-              for j in range(8)
-              if (i + j) > line
-          )
-          p_u_poisson = 1.0 - p_o_poisson
-          final_p_o = (mkt_p_o * 0.70) + (p_o_poisson * 0.30)
-          final_p_u = (mkt_p_u * 0.70) + (p_u_poisson * 0.30)
+          total_xg = h_xg + a_xg
+          xg_diff = total_xg - line
+          prob_adj = norm_cdf(xg_diff / 1.20) - 0.5
+          final_p_o = max(min(mkt_p_o + (prob_adj * 0.25), 0.85), 0.15)
+          final_p_u = 1.0 - final_p_o
         else:
           final_p_o, final_p_u = mkt_p_o, mkt_p_u
 
@@ -395,9 +380,11 @@ def scan_league(league_info):
           best_tot_str = f"ต่ำ {line} @ {u_odds} (EV: {ev_u}%)"
           k_tot = calculate_kelly(ev_u, u_odds)
 
-    # 3. สรุปสถานะความคุ้มค่า
-    is_hdc_v = ev_hdc >= 1.5
-    is_tot_v = ev_tot >= 1.5
+    # ----------------------------------------------------
+    # 3. สรุปสถานะความคุ้มค่า และคะแนนความสมบูรณ์
+    # ----------------------------------------------------
+    is_hdc_v = ev_hdc >= 2.0
+    is_tot_v = ev_tot >= 2.0
 
     if is_hdc_v and is_tot_v:
       status = "🔥 น่าเล่นทั้ง 2 ตลาด"
@@ -455,7 +442,7 @@ selected = st.sidebar.multiselect(
 )
 
 only_value = st.sidebar.checkbox(
-    "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV >= 1.5%)", value=False
+    "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV >= 2.0%)", value=False
 )
 scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล Pro Framework", type="primary")
 
