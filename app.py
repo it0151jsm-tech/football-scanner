@@ -9,15 +9,14 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Bookmaker Pricing Engine",
+    page_title="Value Bet Pro - Fixed & Balanced Engine",
     page_icon="⚽",
     layout="wide",
 )
 
-st.title("⚽ ระบบวิเคราะห์และคำนวณราคาบอลแบบ Bookmaker Engine")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (บาลานซ์ HDC + สูง/ต่ำ)")
 st.caption(
-    "ประเมินความน่าจะเป็น ($P_{\\text{model}}$) และออกราคาต่อรองเป้าหมายเอง"
-    " ก่อนเปรียบเทียบกับราคาเจ้ามือเพื่อค้นหาตลาด +EV"
+    "แก้ไขสูตร EV สมบูรณ์แบบ + กระจายสัดส่วนบอลแฮนดิแคปและสูง-ต่ำในบิลสเต็ปอย่างลงตัว"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -302,7 +301,7 @@ def calculate_advanced_metrics(df, home_api, away_api, match_date):
 
 
 # ==============================================================================
-# 3. BOOKMAKER ENGINE LOGIC
+# 3. SCANNER CORE LOGIC
 # ==============================================================================
 def scan_league(league_info):
   csv_df = fetch_csv_stats(league_info["csv"])
@@ -381,38 +380,6 @@ def scan_league(league_info):
         base_score,
     ) = calculate_advanced_metrics(csv_df, home, away, match_dt)
 
-    # --------------------------------------------------------------------------
-    # Step A: คำนวณราคาแฟร์ของโมเดลเราเอง (In-house Model Pricing)
-    # --------------------------------------------------------------------------
-    if h_net_form is not None and a_net_form is not None:
-      net_diff = h_net_form - a_net_form
-      # ประมาณการราคาต่อรองแฟร์ (Pure Model Handicap)
-      raw_fair_line = round(-net_diff * 0.75, 2)
-      model_prob_home_win = round(norm_cdf(net_diff / 1.1) * 100, 1)
-      model_prob_away_win = round((100 - model_prob_home_win) * 0.75, 1)
-      model_prob_draw = round(100 - model_prob_home_win - model_prob_away_win, 1)
-    else:
-      raw_fair_line = 0.0
-      model_prob_home_win, model_prob_draw, model_prob_away_win = 40.0, 28.0, 32.0
-
-    model_fair_hdc_str = (
-        f"ต่อ {home} ({raw_fair_line})"
-        if raw_fair_line < 0
-        else (
-            f"รอง {home} (+{abs(raw_fair_line)})"
-            if raw_fair_line > 0
-            else f"เสมอ {home} (0.0)"
-        )
-    )
-
-    total_expected_goals = (
-        round(h_xg + a_xg, 2) if (h_xg and a_xg) else 2.5
-    )
-    model_fair_tot_str = f"เส้นประตูแฟร์ {total_expected_goals} ลูก"
-
-    # --------------------------------------------------------------------------
-    # Step B: ดึงราคาตลาดเจ้ามือ & คำนวณ Implied Prob & EV
-    # --------------------------------------------------------------------------
     odds_1, odds_x, odds_2 = "N/A", "N/A", "N/A"
     if h2h_mkt:
       for o in h2h_mkt.get("outcomes", []):
@@ -423,9 +390,8 @@ def scan_league(league_info):
         elif o["name"] == "Draw":
           odds_x = o["price"]
 
-    # Asian Handicap
+    # 1. Asian Handicap (แก้ไขสูตร EV)
     hdc_label, hdc_odds, ev_hdc = "รอเปิด", 1.0, -999.0
-    mkt_hdc_line = 0.0
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
       h_obj = next((o for o in outcomes if o["name"] == home), None)
@@ -436,11 +402,16 @@ def scan_league(league_info):
         h_p, a_p = h_obj["price"], a_obj["price"]
         mkt_p_h, mkt_p_a = devig_odds(h_p, a_p)
 
-        p_h_final = model_prob_home_win / 100.0
-        p_a_final = 1.0 - p_h_final
+        if h_net_form is not None and a_net_form is not None:
+          edge = (h_net_form - a_net_form) + mkt_hdc_line
+          p_shift = (norm_cdf(edge / 1.1) - 0.5) * 0.35
+          final_p_h = max(min(mkt_p_h + p_shift, 0.85), 0.15)
+          final_p_a = 1.0 - final_p_h
+        else:
+          final_p_h, final_p_a = mkt_p_h, mkt_p_a
 
-        ev_h = calculate_ev(p_h_final, h_p)
-        ev_a = calculate_ev(p_a_final, a_p)
+        ev_h = calculate_ev(final_p_h, h_p)
+        ev_a = calculate_ev(final_p_a, a_p)
 
         if ev_h >= ev_a:
           ev_hdc = ev_h
@@ -468,7 +439,7 @@ def scan_league(league_info):
           )
           hdc_odds = a_p
 
-    # Totals
+    # 2. Totals (ปรับปรุงให้ EV ตรงตามจริง)
     tot_label, tot_odds, ev_tot = "รอเปิด", 1.0, -999.0
     if tot_mkt:
       outcomes = tot_mkt.get("outcomes", [])
@@ -478,18 +449,19 @@ def scan_league(league_info):
       if over and under:
         mkt_tot_line = over.get("point", 2.5)
         o_p, u_p = over["price"], under["price"]
+        mkt_p_o, mkt_p_u = devig_odds(o_p, u_p)
 
-        prob_over = max(
-            min(
-                0.50 + ((total_expected_goals - mkt_tot_line) * 0.20),
-                0.85,
-            ),
-            0.15,
-        )
-        prob_under = 1.0 - prob_over
+        if h_xg is not None and a_xg is not None:
+          total_xg = h_xg + a_xg
+          edge = total_xg - mkt_tot_line
+          p_shift = (norm_cdf(edge / 1.0) - 0.5) * 0.35
+          final_p_o = max(min(mkt_p_o + p_shift, 0.85), 0.15)
+          final_p_u = 1.0 - final_p_o
+        else:
+          final_p_o, final_p_u = mkt_p_o, mkt_p_u
 
-        ev_o = calculate_ev(prob_over, o_p)
-        ev_u = calculate_ev(prob_under, u_p)
+        ev_o = calculate_ev(final_p_o, o_p)
+        ev_u = calculate_ev(final_p_u, u_p)
 
         if ev_o >= ev_u:
           ev_tot = ev_o
@@ -500,19 +472,8 @@ def scan_league(league_info):
           tot_label = f"ต่ำกว่า {mkt_tot_line}"
           tot_odds = u_p
 
-    # --------------------------------------------------------------------------
-    # Step C: คัดเลือกตัวเลือกที่มีมูลค่า (+EV)
-    # --------------------------------------------------------------------------
-    is_value = (ev_hdc >= 2.0) or (ev_tot >= 2.0)
-    if ev_hdc >= ev_tot:
-      best_label, best_odds, max_ev = hdc_label, hdc_odds, ev_hdc
-    else:
-      best_label, best_odds, max_ev = tot_label, tot_odds, ev_tot
-
-    if max_ev >= 2.0:
-      rec_str = f"🎯 แนะนำ: {best_label} @ {best_odds} (EV: +{max_ev}%)"
-    else:
-      rec_str = "➖ ราคาตลาดใกล้เคียงความจริง ไม่มีความได้เปรียบ"
+    is_hdc_v = ev_hdc >= 2.0
+    is_tot_v = ev_tot >= 2.0
 
     results.append({
         "time": match_time,
@@ -525,23 +486,18 @@ def scan_league(league_info):
         "h2h": h2h_str,
         "h_info": h_info,
         "a_info": a_info,
-        "model_prob_h": f"{model_prob_home_win}%",
-        "model_prob_d": f"{model_prob_draw}%",
-        "model_prob_a": f"{model_prob_away_win}%",
-        "model_fair_hdc": model_fair_hdc_str,
-        "model_fair_tot": model_fair_tot_str,
         "odds_1": odds_1,
         "odds_x": odds_x,
         "odds_2": odds_2,
         "hdc_label": hdc_label,
         "hdc_odds": hdc_odds,
+        "ev_hdc": ev_hdc,
         "tot_label": tot_label,
         "tot_odds": tot_odds,
-        "rec": rec_str,
-        "best_pick_label": best_label,
-        "best_pick_odds": best_odds,
-        "is_value": is_value,
-        "max_ev": max_ev,
+        "ev_tot": ev_tot,
+        "is_hdc_v": is_hdc_v,
+        "is_tot_v": is_tot_v,
+        "is_value": is_hdc_v or is_tot_v,
         "data_score": min(base_score, 100),
     })
 
@@ -553,7 +509,7 @@ def scan_league(league_info):
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("🔍 ตัวเลือกระบบ Bookmaker Engine")
+st.sidebar.header("🔍 ตัวเลือกระบบ Bounded Engine")
 options = {"all": f"🔥 ทุกลีกทั้งหมด ({len(active_leagues)} รายการ)"}
 for k, v in active_leagues.items():
   options[k] = v["name"]
@@ -566,21 +522,21 @@ selected = st.sidebar.multiselect(
 )
 
 only_value = st.sidebar.checkbox(
-    "แสดงเฉพาะคู่ที่มีตลาดหลุดราคา (+EV >= 2.0%)", value=False
+    "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV >= 2.0%)", value=False
 )
 budget_input = st.sidebar.number_input(
     "งบประมาณลงทุนรวมวันนี้ (บาท)", value=1000, step=100
 )
 
 scan_btn = st.sidebar.button(
-    "🚀 ประมวลผลราคาแฟร์ & จัดสเต็ป 4 บิล", type="primary"
+    "🚀 เริ่มสแกนบอล + จัดสเต็ปบาลานซ์ 4 บิล", type="primary"
 )
 
 if scan_btn:
   if not selected:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
   else:
-    with st.spinner("โมเดลกำลังคำนวณ $P_{model}$ และเปรียบเทียบราคาตลาด..."):
+    with st.spinner("กำลังสแกนและประมวลผลการจัดสเต็ปแบบบาลานซ์..."):
       results = []
       target_leagues = (
           list(active_leagues.keys()) if "all" in selected else selected
@@ -596,13 +552,10 @@ if scan_btn:
 
         st.success(f"ประมวลผลเสร็จสิ้นพบทั้งหมด {len(df)} คู่")
 
-        tab1, tab2, tab3 = st.tabs([
-            "📊 เปรียบเทียบราคาแฟร์ vs โต๊ะ",
-            "🎫 จัดบิลสเต็ป 4 ระดับ",
-            "📥 บันทึก Log ทดสอบ 100-300 คู่",
-        ])
+        tab1, tab2 = st.tabs(
+            ["📱 การ์ดวิเคราะห์รายแมตช์", "🎫 จัดบิลสเต็ปบาลานซ์ 4 บิล"]
+        )
 
-        # TAB 1: MODEL VS BOOKMAKER COMPARISON
         with tab1:
           for _, match in df.iterrows():
             with st.container():
@@ -612,56 +565,70 @@ if scan_btn:
               )
               st.caption(f"🏆 รายการ: **{match['league']}**")
 
-              c1, c2, c3 = st.columns(3)
+              col1, col2 = st.columns(2)
 
-              with c1:
-                st.markdown("#### 📐 ความน่าจะเป็น ($P_{\\text{model}}$)")
-                st.write(f"🏠 **เจ้าบ้านชนะ:** {match['model_prob_h']}")
-                st.write(f"🤝 **เสมอ:** {match['model_prob_d']}")
-                st.write(f"✈️ **ทีมเยือนชนะ:** {match['model_prob_a']}")
-                st.info(
-                    f"🎯 **ราคาแฮนดิแคปแฟร์:** {match['model_fair_hdc']}\n\n"
-                    f"⚽ **{match['model_fair_tot']}**"
-                )
-
-              with c2:
+              with col1:
                 st.markdown("#### 📈 สถิติ 7 นัดล่าสุด & H2H")
-                st.write(f"🏠 {match['home']}: {match['h_7m']}")
-                st.write(f"✈️ {match['away']}: {match['a_7m']}")
-                st.write(f"🤝 {match['h2h']}")
-                st.write(f"⚡ {match['h_info']} | {match['a_info']}")
+                st.write(f"🏠 **{match['home']}:** {match['h_7m']}")
+                st.write(f"✈️ **{match['away']}:** {match['a_7m']}")
+                st.info(f"🤝 **ประวัติการพบกัน:**\n{match['h2h']}")
 
-              with c3:
-                st.markdown("#### 💰 ราคาตลาดเจ้ามือ (Bookmaker)")
-                o1, ox, o2 = st.columns(3)
-                o1.metric("1", match["odds_1"])
-                ox.metric("X", match["odds_x"])
-                o2.metric("2", match["odds_2"])
-
-                st.write(f"⚖️ **ต่อรองเปิด:** {match['hdc_label']}")
-                st.write(f"⚽ **สูง/ต่ำเปิด:** {match['tot_label']}")
-
-                if "🎯" in match["rec"]:
-                  st.success(f"**{match['rec']}**")
-                else:
-                  st.warning(f"**{match['rec']}**")
+              with col2:
+                st.markdown("#### 💰 ตารางราคาและค่าน้ำ")
+                st.write(
+                    f"⚖️ **ต่อรอง:** {match['hdc_label']} @ {match['hdc_odds']}"
+                    f" (EV: {match['ev_hdc']}%)"
+                )
+                st.write(
+                    f"⚽ **สูง/ต่ำ:** {match['tot_label']} @ {match['tot_odds']}"
+                    f" (EV: {match['ev_tot']}%)"
+                )
 
               st.markdown("---")
 
-        # TAB 2: STAKING & SLIPS
         with tab2:
-          st.subheader("🎯 บิลสเต็ปคัดเฉพาะคู่ที่มีค่า +EV สูงสุด")
-          candidates = df[df["is_value"] == True].sort_values(
-              by=["max_ev", "data_score"], ascending=[False, False]
+          st.subheader(
+              "🎯 บิลสเต็ปจัดบาลานซ์ (ผสม แฮนดิแคป 50% + สูง/ต่ำ 50%)"
           )
 
-          if len(candidates) < 6:
+          hdc_cand = df[df["is_hdc_v"] == True].sort_values(
+              by="ev_hdc", ascending=False
+          )
+          tot_cand = df[df["is_tot_v"] == True].sort_values(
+              by="ev_tot", ascending=False
+          )
+
+          combined_picks = []
+          for _, r in hdc_cand.iterrows():
+            combined_picks.append({
+                "time": r["time"],
+                "match": r["match"],
+                "pick": r["hdc_label"],
+                "odds": r["hdc_odds"],
+                "ev": r["ev_hdc"],
+                "type": "HDC",
+            })
+          for _, r in tot_cand.iterrows():
+            combined_picks.append({
+                "time": r["time"],
+                "match": r["match"],
+                "pick": r["tot_label"],
+                "odds": r["tot_odds"],
+                "ev": r["ev_tot"],
+                "type": "Totals",
+            })
+
+          cdf = pd.DataFrame(combined_picks).sort_values(
+              by="ev", ascending=False
+          )
+
+          if len(cdf) < 6:
             st.warning(
-                f"พบคู่ที่มีค่า +EV เพียง {len(candidates)} คู่ (ต้องการอย่างน้อย"
-                " 6 คู่เพื่อจัดบิล)"
+                f"พบคู่ที่มี +EV เพียง {len(cdf)} ตัวเลือก (ต้องการอย่างน้อย 6"
+                " ตัวเลือกเพื่อจัดบิล)"
             )
           else:
-            top20 = candidates.head(20).reset_index(drop=True)
+            top20 = cdf.head(20).reset_index(drop=True)
 
             slip_6 = top20.head(6)
             slip_9 = top20.head(min(9, len(top20)))
@@ -702,26 +669,32 @@ if scan_btn:
             with col_a:
               st.markdown("#### 🟢 บิลที่ 1: สเต็ป 6 คู่ (บิลหลัก)")
               st.dataframe(
-                  slip_6[[
-                      "time",
-                      "match",
-                      "best_pick_label",
-                      "best_pick_odds",
-                      "max_ev",
-                  ]],
+                  slip_6.rename(
+                      columns={
+                          "time": "เวลาเตะ",
+                          "match": "คู่แข่งขัน",
+                          "pick": "ตัวเลือกแนะนำ",
+                          "odds": "ค่าน้ำ",
+                          "ev": "EV (%)",
+                          "type": "ประเภทตลาด",
+                      }
+                  ),
                   hide_index=True,
                   use_container_width=True,
               )
 
               st.markdown("#### 🔵 บิลที่ 2: สเต็ป 9 คู่ (บิลต่อยอด)")
               st.dataframe(
-                  slip_9[[
-                      "time",
-                      "match",
-                      "best_pick_label",
-                      "best_pick_odds",
-                      "max_ev",
-                  ]],
+                  slip_9.rename(
+                      columns={
+                          "time": "เวลาเตะ",
+                          "match": "คู่แข่งขัน",
+                          "pick": "ตัวเลือกแนะนำ",
+                          "odds": "ค่าน้ำ",
+                          "ev": "EV (%)",
+                          "type": "ประเภทตลาด",
+                      }
+                  ),
                   hide_index=True,
                   use_container_width=True,
               )
@@ -729,44 +702,35 @@ if scan_btn:
             with col_b:
               st.markdown("#### 🟡 บิลที่ 3: สเต็ป 13 คู่ (บิลโบนัส)")
               st.dataframe(
-                  slip_13[[
-                      "time",
-                      "match",
-                      "best_pick_label",
-                      "best_pick_odds",
-                      "max_ev",
-                  ]],
+                  slip_13.rename(
+                      columns={
+                          "time": "เวลาเตะ",
+                          "match": "คู่แข่งขัน",
+                          "pick": "ตัวเลือกแนะนำ",
+                          "odds": "ค่าน้ำ",
+                          "ev": "EV (%)",
+                          "type": "ประเภทตลาด",
+                      }
+                  ),
                   hide_index=True,
                   use_container_width=True,
               )
 
               st.markdown("#### 🔴 บิลที่ 4: สเต็ป 20 คู่ (บิลแจ็คพอต)")
               st.dataframe(
-                  slip_20[[
-                      "time",
-                      "match",
-                      "best_pick_label",
-                      "best_pick_odds",
-                      "max_ev",
-                  ]],
+                  slip_20.rename(
+                      columns={
+                          "time": "เวลาเตะ",
+                          "match": "คู่แข่งขัน",
+                          "pick": "ตัวเลือกแนะนำ",
+                          "odds": "ค่าน้ำ",
+                          "ev": "EV (%)",
+                          "type": "ประเภทตลาด",
+                      }
+                  ),
                   hide_index=True,
                   use_container_width=True,
               )
-
-        # TAB 3: LOG EXPORTER FOR PAPER TRADING
-        with tab3:
-          st.subheader("📥 ดาวน์โหลดข้อมูลสำหรับทดสอบ Paper Trading (100–300 คู่)")
-          st.caption(
-              "เซฟไฟล์ CSV นี้เก็บไว้ติดตามผลการแข่งจริง เพื่อประเมินค่า +EV และ"
-              " Closing Line Value (CLV) ย้อนหลัง"
-          )
-          csv_data = df.to_csv(index=False).encode("utf-8-sig")
-          st.download_button(
-              label="📥 ดาวน์โหลดไฟล์ Log (CSV)",
-              data=csv_data,
-              file_name=f"bookmaker_model_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-              mime="text/csv",
-          )
 
       else:
         st.warning("ไม่พบคู่แข่งขันที่เตะภายใน 36 ชั่วโมงในลีกที่เลือก")
