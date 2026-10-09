@@ -5,112 +5,75 @@ import requests
 import streamlit as st
 
 st.set_page_config(
-    page_title="Value Bet Scanner Pro", page_icon="⚽", layout="wide"
+    page_title="Value Bet Scanner Ultimate", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบสแกนบอล Value Bet Pro")
+st.title("⚽ ระบบสแกนบอล Value Bet Ultimate (ทุกลีก + บอลถ้วย)")
 st.markdown(
-    "วิเคราะห์อัตราต่อรองด้วยโมเดล **xG + Poisson** พร้อมคำนวณ **Kelly Criterion** บริหารเงินทุน"
+    "ดึงรายการแข่งขันฟุตบอลและบอลถ้วยทุกลีกทั่วโลกจาก API แบบ Real-time พร้อมวิเคราะห์ **xG / Fair Odds + Kelly Criterion**"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
-ODDS_LEAGUES = {
-    "0": {"name": "🔥 ทุกลีกทั่วโลก (Scan All)", "key": "all", "csv": "all"},
-    "1": {"name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 พรีเมียร์ลีก อังกฤษ", "key": "soccer_epl", "csv": "E0"},
-    "2": {
-        "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 แชมเปี้ยนชิพ อังกฤษ",
-        "key": "soccer_efl_champ",
-        "csv": "E1",
-    },
-    "3": {
-        "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 ลีกวัน อังกฤษ",
-        "key": "soccer_england_league1",
-        "csv": "E2",
-    },
-    "4": {
-        "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 ลีกทู อังกฤษ",
-        "key": "soccer_england_league2",
-        "csv": "E3",
-    },
-    "5": {"name": "🇪🇸 ลาลีกา สเปน", "key": "soccer_spain_la_liga", "csv": "SP1"},
-    "6": {
-        "name": "🇪🇸 เซกุนด้า สเปน",
-        "key": "soccer_spain_segunda_division",
-        "csv": "SP2",
-    },
-    "7": {
-        "name": "🇮🇹 กัลโช่ เซเรีย อา อิตาลี",
-        "key": "soccer_italy_serie_a",
-        "csv": "I1",
-    },
-    "8": {
-        "name": "🇮🇹 กัลโช่ เซเรีย บี อิตาลี",
-        "key": "soccer_italy_serie_b",
-        "csv": "I2",
-    },
-    "9": {
-        "name": "🇩🇪 บุนเดสลีกา 1 เยอรมัน",
-        "key": "soccer_germany_bundesliga",
-        "csv": "D1",
-    },
-    "10": {
-        "name": "🇩🇪 บุนเดสลีกา 2 เยอรมัน",
-        "key": "soccer_germany_bundesliga2",
-        "csv": "D2",
-    },
-    "11": {"name": "🇫🇷 ลีกเอิง ฝรั่งเศส 1", "key": "soccer_france_league1", "csv": "F1"},
-    "12": {
-        "name": "🇫🇷 ลีกเดอ ฝรั่งเศส 2",
-        "key": "soccer_france_league2",
-        "csv": "F2",
-    },
-    "13": {
-        "name": "🇳🇱 เอเรดิวิซี เนเธอร์แลนด์",
-        "key": "soccer_netherlands_eredivisie",
-        "csv": "N1",
-    },
-    "14": {
-        "name": "🇧🇪 โปรลีก เบลเยียม",
-        "key": "soccer_belgium_first_div",
-        "csv": "B1",
-    },
-    "15": {
-        "name": "🇵🇹 ปรีเมรา ลีกา โปรตุเกส",
-        "key": "soccer_portugal_primeira_liga",
-        "csv": "P1",
-    },
-    "16": {
-        "name": "🇹🇷 ซูเปอร์ลีก ตุรกี",
-        "key": "soccer_turkey_super_league",
-        "csv": "T1",
-    },
-    "17": {
-        "name": "🇬🇷 ซูเปอร์ลีก กรีซ",
-        "key": "soccer_greece_super_league",
-        "csv": "G1",
-    },
-    "18": {"name": "🏴󠁧󠁢󠁳󠁣󠁴󠁿 สกอตติช พรีเมียร์ชิพ", "key": "soccer_spl", "csv": "SC0"},
-    "19": {"name": "🇧🇷 บราซิล เซเรีย อา", "key": "soccer_brazil_campeonato", "csv": "BRA"},
-    "20": {"name": "🇧🇷 บราซิล เซเรีย บี", "key": "soccer_brazil_serie_b", "csv": "BRA2"},
-    "21": {
-        "name": "🇦🇷 อาร์เจนตินา พรีเมรา",
-        "key": "soccer_argentina_primera_division",
-        "csv": "ARG",
-    },
-    "22": {
-        "name": "🇨🇴 โคลอมเบีย พรีเมร่า เอ",
-        "key": "soccer_colombia_categoria_primera_a",
-        "csv": "COL",
-    },
-    "23": {"name": "🇵🇪 เปรู ลีกา 1", "key": "soccer_peru_liga_1", "csv": "PER"},
-    "24": {"name": "🇲🇽 เม็กซิโก ลีกา เอ็มเอ็กซ์", "key": "soccer_mexico_ligamx", "csv": "MEX"},
-    "25": {"name": "🇺🇸 สหรัฐอเมริกา MLS", "key": "soccer_usa_mls", "csv": "USA"},
+# แผนผังรหัส CSV สถิติย้อนหลังสำหรับลีกหลัก (รายการถ้วย/ลีกอื่นจะใช้ Fair Odds Fallback)
+CSV_MAPPING = {
+    "soccer_epl": "E0",
+    "soccer_efl_champ": "E1",
+    "soccer_england_league1": "E2",
+    "soccer_england_league2": "E3",
+    "soccer_spain_la_liga": "SP1",
+    "soccer_spain_segunda_division": "SP2",
+    "soccer_italy_serie_a": "I1",
+    "soccer_italy_serie_b": "I2",
+    "soccer_germany_bundesliga": "D1",
+    "soccer_germany_bundesliga2": "D2",
+    "soccer_france_league1": "F1",
+    "soccer_france_league2": "F2",
+    "soccer_netherlands_eredivisie": "N1",
+    "soccer_belgium_first_div": "B1",
+    "soccer_portugal_primeira_liga": "P1",
+    "soccer_turkey_super_league": "T1",
+    "soccer_greece_super_league": "G1",
+    "soccer_spl": "SC0",
+    "soccer_brazil_campeonato": "BRA",
+    "soccer_brazil_serie_b": "BRA2",
+    "soccer_argentina_primera_division": "ARG",
+    "soccer_colombia_categoria_primera_a": "COL",
+    "soccer_peru_liga_1": "PER",
+    "soccer_mexico_ligamx": "MEX",
+    "soccer_usa_mls": "USA",
 }
+
+
+@st.cache_data(ttl=1800)
+def get_active_soccer_leagues():
+    """ดึงรายชื่อลีกและบอลถ้วยฟุตบอลทั้งหมดที่กำลังมีการแข่งขันจาก API"""
+    url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
+    try:
+        res = requests.get(url)
+        if res.status_code == 200:
+            data = res.json()
+            soccer_leagues = {}
+            for item in data:
+                if item.get("group") == "Soccer" and item.get("active"):
+                    key = item["key"]
+                    title = item["title"]
+                    csv_code = CSV_MAPPING.get(key, None)
+                    soccer_leagues[key] = {
+                        "name": title,
+                        "key": key,
+                        "csv": csv_code,
+                    }
+            return soccer_leagues
+    except Exception:
+        pass
+    return {}
 
 
 @st.cache_data(ttl=3600)
 def fetch_historical_stats(csv_code):
+    if not csv_code:
+        return None
     seasons = ["2526", "2425"]
     for s in seasons:
         url = f"https://www.football-data.co.uk/mmz4281/{s}/{csv_code}.csv"
@@ -187,7 +150,6 @@ def get_win_probabilities(home_xg, away_xg):
 
 
 def calculate_kelly(prob, decimal_odds, fraction=0.25):
-    """คำนวณ % เงินทุนด้วย Fractional Kelly (1/4 Kelly)"""
     b = decimal_odds - 1.0
     p = prob
     q = 1.0 - p
@@ -254,11 +216,9 @@ def scan_league(league_info):
 
         h_xg, a_xg = calculate_xg(stats_df, home, away)
 
-        # ถ้ามีสถิติย้อนหลัง ให้คำนวณด้วย xG + Poisson
         if h_xg is not None and a_xg is not None:
             p_home, p_draw, p_away = get_win_probabilities(h_xg, a_xg)
         else:
-            # ถ้าไม่มีสถิติ ให้ถอด Fair Odds จากตลาดเพื่อป้องกันค่า EV หลอก
             if d_odds:
                 total_prob = (1 / h_odds) + (1 / d_odds) + (1 / a_odds)
                 p_home = (1 / h_odds) / total_prob
@@ -298,7 +258,7 @@ def scan_league(league_info):
         results.append(
             {
                 "เวลาเตะ (ไทย)": match_time_th,
-                "ลีก": league_name,
+                "รายการ/ลีก": league_name,
                 "คู่แข่งขัน": f"{home} vs {away}",
                 "ฝั่งที่น่าเล่น": best_side,
                 "ค่าน้ำ": best_odds,
@@ -311,11 +271,19 @@ def scan_league(league_info):
     return results
 
 
+# โหลดรายการลีกและบอลถ้วยทั้งหมดที่เปิดอยู่ในขณะนั้น
+active_leagues = get_active_soccer_leagues()
+
 st.sidebar.header("🔍 ตัวเลือกการสแกน")
+
+options_dict = {"all": f"🔥 ทุกลีก/บอลถ้วยทั้งหมด ({len(active_leagues)} รายการ)"}
+for k, v in active_leagues.items():
+    options_dict[k] = v["name"]
+
 selected_league_id = st.sidebar.selectbox(
-    "เลือกลีกที่ต้องการสแกน",
-    options=list(ODDS_LEAGUES.keys()),
-    format_func=lambda x: ODDS_LEAGUES[x]["name"],
+    "เลือกรายการแข่งขัน/บอลถ้วย",
+    options=list(options_dict.keys()),
+    format_func=lambda x: options_dict[x],
 )
 
 only_value_bets = st.sidebar.checkbox(
@@ -324,15 +292,14 @@ only_value_bets = st.sidebar.checkbox(
 scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล", type="primary")
 
 if scan_btn:
-    with st.spinner("กำลังสแกนราคาบอลและคำนวณสถิติ..."):
+    with st.spinner("กำลังดึงข้อมูลการแข่งขันและคำนวณอัตราต่อรอง..."):
         all_results = []
-        if selected_league_id == "0":
-            for k, league in ODDS_LEAGUES.items():
-                if k == "0":
-                    continue
+        if selected_league_id == "all":
+            for k, league in active_leagues.items():
                 all_results.extend(scan_league(league))
         else:
-            all_results = scan_league(ODDS_LEAGUES[selected_league_id])
+            if selected_league_id in active_leagues:
+                all_results = scan_league(active_leagues[selected_league_id])
 
         if all_results:
             df = pd.DataFrame(all_results)
@@ -342,4 +309,6 @@ if scan_btn:
             st.success(f"พบรายการแข่งขันทั้งหมด {len(df)} รายการ")
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.warning("ไม่พบคู่แข่งขันในช่วงเวลานี้")
+            st.warning(
+                "ไม่พบคู่แข่งขันในช่วง 36 ชั่วโมงข้างหน้า ในรายการที่เลือก"
+            )
