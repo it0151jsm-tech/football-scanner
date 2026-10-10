@@ -6,25 +6,25 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. SETUP & CONFIGURATION
+# 1. SETUP & CONFIGURATION (MOBILE OPTIMIZED)
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Clean Ultimate Edition",
-    page_icon="⚽",
-    layout="wide",
+    page_title="Value Bet Pro - Mobile Master", page_icon="⚽", layout="centered"
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (Clean & Ultimate)")
+st.markdown(
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Mobile Edition)</h3>",
+    unsafe_allow_html=True,
+)
 st.caption(
-    "โค้ดสะอาดกระชับ ผสมผสานโมเดลราคาแฟร์ + บาลานซ์สูง/ต่ำ & แฮนดิแคป +"
-    " เช็กโควตาเรียลไทม์"
+    "💡 คำแนะนำ: เลือกเฉพาะลีกที่ต้องการแทงครั้งละ 1-2 ลีกเพื่อประหยัดโควตา API"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
 
 
 # ==============================================================================
-# 2. DYNAMIC LEAGUES & STATS FETCHING
+# 2. DYNAMIC LEAGUES & STATS FETCHING (UPDATED FOR 2026/27)
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
@@ -67,7 +67,8 @@ def get_active_leagues():
 def fetch_csv_stats(csv_code):
   if not csv_code:
     return None
-  for season in ["2526", "2425"]:
+  # อัปเดตปีปัจจุบัน 2026 รองรับฤดูกาล 2627 และ 2526
+  for season in ["2627", "2526"]:
     try:
       df = pd.read_csv(
           f"https://www.football-data.co.uk/mmz4281/{season}/{csv_code}.csv"
@@ -103,7 +104,7 @@ def calculate_ev(prob, odds):
 
 def get_team_stats(df_team, team):
   if df_team is None or df_team.empty:
-    return "ไม่มีข้อมูล", 0, 0, 0, 0, 0
+    return "ไม่มีข้อมูลสถิติ", 0, 0, 0, 0, 0
   w, d, l, gf, ga = 0, 0, 0, 0, 0
   for _, r in df_team.iterrows():
     hg, ag = (
@@ -118,18 +119,18 @@ def get_team_stats(df_team, team):
       d += 1
     else:
       l += 1
-  return f"ชนะ {w} เสมอ {d} แพ้ {l} | ยิง {gf} เสีย {ga}", w, d, l, gf, ga
+  return f"ชนะ {w} เสมอ {d} แพ้ {l} (ยิง {gf} / เสีย {ga})", w, d, l, gf, ga
 
 
 def get_h2h(df, home, away):
   if df is None or df.empty:
-    return "ไม่มีข้อมูล H2H"
+    return "ไม่มีข้อมูล H2H ย้อนหลัง"
   sub = df[
       ((df["HomeTeam"] == home) & (df["AwayTeam"] == away))
       | ((df["HomeTeam"] == away) & (df["AwayTeam"] == home))
-  ].tail(7)
+  ].tail(5)
   if sub.empty:
-    return "ไม่เคยพบกันล่าสุด"
+    return "ไม่พบประวัติพบกันล่าสุด"
   hw, dr, aw = 0, 0, 0
   for _, r in sub.iterrows():
     if r["FTHG"] == r["FTAG"]:
@@ -140,12 +141,26 @@ def get_h2h(df, home, away):
       hw += 1
     else:
       aw += 1
-  return f"H2H {len(sub)} นัด: {home} ชนะ {hw} | เสมอ {dr} | {away} ชนะ {aw}"
+  return (
+      f"H2H ({len(sub)} นัดล่าสุด): {home} ชนะ {hw} | เสมอ {dr} | {away}"
+      f" ชนะ {aw}"
+  )
 
 
 def analyze_match(df, h_api, a_api, m_date):
   if df is None or df.empty:
-    return None, None, None, None, "พัก 7 วัน", "พัก 7 วัน", "", "", "", 30
+    return (
+        None,
+        None,
+        None,
+        None,
+        "พัก 7 วัน",
+        "พัก 7 วัน",
+        "ไม่มีข้อมูล",
+        "ไม่มีข้อมูล",
+        "ไม่มีข้อมูล",
+        30,
+    )
   teams = list(set(df["HomeTeam"]).union(set(df["AwayTeam"])))
   h_t = get_close_matches(h_api, teams, n=1, cutoff=0.35)
   a_t = get_close_matches(a_api, teams, n=1, cutoff=0.35)
@@ -392,49 +407,49 @@ def scan_league(leg_info, hours_limit):
 
 
 # ==============================================================================
-# 5. STREAMLIT UI
+# 5. STREAMLIT UI (MOBILE RESPONSIVE DESIGN)
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("🔍 ตัวเลือกระบบสแกน")
+st.sidebar.header("🔍 ตั้งค่าการสแกน")
 if "quota_remaining" in st.session_state:
   st.sidebar.metric(
       label="🎫 โควตา API คงเหลือ",
       value=f"{st.session_state['quota_remaining']} ครั้ง",
   )
 else:
-  st.sidebar.info("🎫 โควตา API: กดสแกนเพื่อเช็กสถานะ")
+  st.sidebar.info("🎫 โควตา API: กดสแกนเพื่ออัปเดต")
 
-options = {"all": f"🔥 ทุกลีกทั้งหมด ({len(active_leagues)} รายการ)"}
+options = {}
 for k, v in active_leagues.items():
   options[k] = v["name"]
 
-safe_default = ["all"] if "all" in options else list(options.keys())[:1]
 selected = st.sidebar.multiselect(
-    "เลือกรายการแข่งขัน",
+    "เลือกรายการลีก (แนะนำเลือกทีละ 1-2 ลีก)",
     options=list(options.keys()),
-    default=safe_default,
+    default=["soccer_epl"] if "soccer_epl" in options else list(options.keys())[:1],
     format_func=lambda x: options[x],
 )
 hours_limit = st.sidebar.selectbox(
-    "กรอบเวลาการแข่งขัน", options=[36, 48, 72, 120], index=0
+    "กรอบเวลาการแข่งขัน", options=[24, 36, 48, 72], index=1
 )
 only_value = st.sidebar.checkbox(
-    "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV >= 2.0%)", value=False
+    "แสดงเฉพาะคู่ที่มี +EV >= 2.0% เท่านั้น", value=True
 )
-budget = st.sidebar.number_input("งบประมาณลงทุนรวม (บาท)", value=1000, step=100)
+budget = st.sidebar.number_input(
+    "งบลงทุนรวมวันนี้ (บาท)", value=1000, step=100
+)
 
-scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล + จัดสเต็ปบาลานซ์", type="primary")
+scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล", type="primary")
 
 if scan_btn:
   if not selected:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
   else:
-    with st.spinner("กำลังสแกนคำนวณโมเดล..."):
+    with st.spinner("กำลังวิเคราะห์ข้อมูลสถิติและค่าน้ำ..."):
       res_all = []
-      target = list(active_leagues.keys()) if "all" in selected else selected
       quota_err = False
-      for l_key in target:
+      for l_key in selected:
         if l_key in active_leagues:
           r = scan_league(active_leagues[l_key], hours_limit)
           if r == "QUOTA_EXCEEDED":
@@ -451,36 +466,31 @@ if scan_btn:
           df = df[df["is_value"] == True]
 
         st.success(
-            f"สแกนสำเร็จพบทั้งหมด {len(df)} คู่ (ภายใน {hours_limit} ชม.)"
+            f"🎯 วิเคราะห์สำเร็จ พบ {len(df)} คู่ (ภายใน {hours_limit} ชม.)"
         )
 
-        tab1, tab2 = st.tabs(
-            ["📱 การ์ดวิเคราะห์รายคู่", "🎫 จัดบิลสเต็ปบาลานซ์ 4 บิล"]
-        )
+        tab1, tab2 = st.tabs(["📱 วิเคราะห์รายคู่", "🎫 บิลสเต็ป (มือถือ)"])
 
         with tab1:
           for _, m in df.iterrows():
             with st.container():
-              st.markdown(f"### ⚽ {m['match']} ({m['time']})")
-              st.caption(f"🏆 {m['league']}")
-              c1, c2 = st.columns(2)
-              with c1:
-                st.write(f"🏠 {m['h_7m']} | {m['h_info']}")
-                st.write(f"✈️ {m['a_7m']} | {m['a_info']}")
-                st.info(m["h2h"])
-              with c2:
-                st.write(
-                    f"⚖️ แฮนดิแคป: {m['hdc_label']} @ {m['hdc_odds']} (EV:"
-                    f" {m['ev_hdc']}%)"
-                )
-                st.write(
-                    f"⚽ สูง/ต่ำ: {m['tot_label']} @ {m['tot_odds']} (EV:"
-                    f" {m['ev_tot']}%)"
-                )
+              st.markdown(f"**⚽ {m['match']}**")
+              st.caption(f"🕒 {m['time']} | 🏆 {m['league']}")
+              st.markdown(f"🏠 **เจ้าบ้าน:** {m['h_7m']} ({m['h_info']})")
+              st.markdown(f"✈️ **ทีมเยือน:** {m['a_7m']} ({m['a_info']})")
+              st.info(f"🤝 {m['h2h']}")
+              st.markdown(
+                  f"⚖️ **แฮนดิแคป:** {m['hdc_label']} (ค่าน้ำ: {m['hdc_odds']}"
+                  f" | EV: **{m['ev_hdc']}%**)"
+              )
+              st.markdown(
+                  f"⚽ **สูง/ต่ำ:** {m['tot_label']} (ค่าน้ำ: {m['tot_odds']} |"
+                  f" EV: **{m['ev_tot']}%**)"
+              )
               st.markdown("---")
 
         with tab2:
-          st.subheader("🎯 บิลสเต็ปจัดบาลานซ์ (HDC 50% + สูง/ต่ำ 50%)")
+          st.subheader("🎯 จัดบิลสเต็ป (1 คู่เลือก 1 ตลาดที่ดีที่สุด)")
           h_c = df[df["is_hdc_v"]].sort_values(by="ev_hdc", ascending=False)
           t_c = df[df["is_tot_v"]].sort_values(by="ev_tot", ascending=False)
 
@@ -492,7 +502,6 @@ if scan_btn:
                 "pick": r["hdc_label"],
                 "odds": r["hdc_odds"],
                 "ev": r["ev_hdc"],
-                "type": "HDC",
             })
           for _, r in t_c.iterrows():
             picks.append({
@@ -501,59 +510,38 @@ if scan_btn:
                 "pick": r["tot_label"],
                 "odds": r["tot_odds"],
                 "ev": r["ev_tot"],
-                "type": "Totals",
             })
 
           cdf = pd.DataFrame(picks).sort_values(by="ev", ascending=False)
-          if len(cdf) < 6:
+          cdf = cdf.drop_duplicates(subset=["match"]).reset_index(drop=True)
+
+          if len(cdf) < 3:
             st.warning(
-                f"พบคู่ +EV เพียง {len(cdf)} ตัวเลือก (ต้องการอย่างน้อย 6 คู่)"
+                f"พบคู่ +EV เพียง {len(cdf)} คู่ (แนะนำเลือกเพิ่มลีกอื่นเพื่อจัดสเต็ป)"
             )
           else:
-            top20 = cdf.head(20).reset_index(drop=True)
-            s6, s9, s13, s20 = (
-                top20.head(6),
-                top20.head(min(9, len(top20))),
-                top20.head(min(13, len(top20))),
-                top20.head(min(20, len(top20))),
-            )
+            st.markdown("### 💰 Staking Plan (แผนการลงทุน)")
+            st.write(f"• **สเต็ป 6 คู่ (50%):** {round(budget * 0.5)} บาท")
+            st.write(f"• **สเต็ป 9 คู่ (25%):** {round(budget * 0.25)} บาท")
+            st.write(f"• **สเต็ป 13 คู่ (15%):** {round(budget * 0.15)} บาท")
+            st.write(f"• **สเต็ป 20 คู่ (10%):** {round(budget * 0.1)} บาท")
+            st.markdown("---")
 
-            st.markdown("### 💰 Staking Plan")
-            st.table(
-                pd.DataFrame([
-                    {
-                        "บิล": "บิล 1 (สเต็ป 6 - หลัก)",
-                        "สัดส่วน": "50%",
-                        "เงินลงทุน": round(budget * 0.5),
-                    },
-                    {
-                        "บิล": "บิล 2 (สเต็ป 9 - ต่อยอด)",
-                        "สัดส่วน": "25%",
-                        "เงินลงทุน": round(budget * 0.25),
-                    },
-                    {
-                        "บิล": "บิล 3 (สเต็ป 13 - โบนัส)",
-                        "สัดส่วน": "15%",
-                        "เงินลงทุน": round(budget * 0.15),
-                    },
-                    {
-                        "บิล": "บิล 4 (สเต็ป 20 - แจ็คพอต)",
-                        "สัดส่วน": "10%",
-                        "เงินลงทุน": round(budget * 0.1),
-                    },
-                ])
-            )
+            def render_slip(title, data_sub):
+              st.markdown(f"#### {title}")
+              if len(data_sub) == 0:
+                st.write("- ไม่มีคู่แข่งขันเพียงพอสำหรับบิลนี้ -")
+              for _, row in data_sub.iterrows():
+                st.markdown(
+                    f"✅ **{row['match']}**<br>👉 เลือก: `{row['pick']}` |"
+                    f" ค่าน้ำ: `{row['odds']}` | EV: `{row['ev']}%`",
+                    unsafe_allow_html=True,
+                )
+              st.markdown("---")
 
-            cols = st.columns(2)
-            with cols[0]:
-              st.markdown("#### 🟢 สเต็ป 6 คู่")
-              st.dataframe(s6, hide_index=True, use_container_width=True)
-              st.markdown("#### 🔵 สเต็ป 9 คู่")
-              st.dataframe(s9, hide_index=True, use_container_width=True)
-            with cols[1]:
-              st.markdown("#### 🟡 สเต็ป 13 คู่")
-              st.dataframe(s13, hide_index=True, use_container_width=True)
-              st.markdown("#### 🔴 สเต็ป 20 คู่")
-              st.dataframe(s20, hide_index=True, use_container_width=True)
+            render_slip("🟢 บิลหลัก (สเต็ป 6)", cdf.head(6))
+            render_slip("🔵 บิลต่อยอด (สเต็ป 9)", cdf.head(9))
+            render_slip("🟡 บิลโบนัส (สเต็ป 13)", cdf.head(13))
+            render_slip("🔴 บิลแจ็คพอต (สเต็ป 20)", cdf.head(20))
       else:
-        st.warning("ไม่พบคู่แข่งขันในช่วงเวลาที่เลือก")
+        st.warning("ไม่พบคู่แข่งขันในกรอบเวลาหรือเงื่อนไขที่เลือก")
