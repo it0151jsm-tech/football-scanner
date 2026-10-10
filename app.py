@@ -18,13 +18,16 @@ st.markdown(
     "<h3 style='text-align: center;'>⚽ Value Bet Pro (Pro Quant Edition)</h3>",
     unsafe_allow_html=True,
 )
-st.caption("โมเดลขั้นสูง: แยกสถิติเหย้า-เยือน + Poisson Distribution + กรอบ 24 ชม.")
+st.caption(
+    "โมเดลขั้นสูง: รวมสถิติ 2 ฤดูกาลย้อนหลัง + Poisson Distribution + กรอบ 24"
+    " ชม."
+)
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
 
 
 # ==============================================================================
-# 2. DYNAMIC LEAGUES & SORTING
+# 2. DYNAMIC LEAGUES & MULTI-SEASON STATS FETCHING
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
@@ -89,6 +92,8 @@ def get_active_leagues():
 def fetch_csv_stats(csv_code):
   if not csv_code:
     return None
+  dfs = []
+  # รวมข้อมูล 2 ฤดูกาลล่าสุด (2627 และ 2526) เพื่อให้มีข้อมูล H2H และฟอร์มที่ครอบคลุม
   for season in ["2627", "2526"]:
     try:
       df = pd.read_csv(
@@ -98,9 +103,13 @@ def fetch_csv_stats(csv_code):
         df["Date_dt"] = pd.to_datetime(
             df["Date"], format="%d/%m/%Y", errors="coerce"
         )
-        return df[["Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]].dropna()
+        dfs.append(
+            df[["Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]].dropna()
+        )
     except Exception:
       pass
+  if dfs:
+    return pd.concat(dfs, ignore_index=True)
   return None
 
 
@@ -133,9 +142,7 @@ def calculate_over_probability(lambda_h, lambda_a, line=2.5):
     for a in range(7):
       if (h + a) < line:
         prob_under += poisson_pmf(lambda_h, h) * poisson_pmf(lambda_a, a)
-  return max(
-      min(1.0 - prob_under, 0.95), 0.05
-  )  # ป้องกันความน่าจะเป็นหลุดขอบ
+  return max(min(1.0 - prob_under, 0.95), 0.05)
 
 
 def get_h2h(df, home, away):
@@ -183,20 +190,18 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
 
   hr, ar = rest_days(home_t), rest_days(away_t)
 
-  # --- HOME/AWAY SPLITS (สถิติแยกเฉพาะกิจ) ---
+  # --- HOME/AWAY SPLITS ---
   home_home_df = df[df["HomeTeam"] == home_t].tail(5)
   away_away_df = df[df["AwayTeam"] == away_t].tail(5)
 
   if len(home_home_df) < 2 or len(away_away_df) < 2:
     return None, None, None, None, f"พัก {hr} วัน", f"พัก {ar} วัน", "ข้อมูลไม่พอ", 40
 
-  # คำนวณอัตราการยิงและเสียเฉพาะในบ้าน/นอกบ้าน
   h_scored = home_home_df["FTHG"].mean()
   h_conceded = home_home_df["FTAG"].mean()
   a_scored = away_away_df["FTAG"].mean()
   a_conceded = away_away_df["FTHG"].mean()
 
-  # ปรับแก้ด้วย Fatigue (ความล้า)
   fat_h = 0.9 if hr <= 3 else (1.04 if hr >= 6 else 1.0)
   fat_a = 0.9 if ar <= 3 else (1.04 if ar >= 6 else 1.0)
 
@@ -210,16 +215,7 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   a_info = f"พัก {ar} วัน {'เตะถี่' if ar <= 3 else 'ฟิต'} (เยือน: ยิง {round(a_scored,1)} เสีย {round(a_conceded,1)})"
   h2h_str = get_h2h(df, home_t, away_t)
 
-  return (
-      h_net,
-      a_net,
-      lambda_h,
-      lambda_a,
-      h_info,
-      a_info,
-      h2h_str,
-      80,
-  )
+  return h_net, a_net, lambda_h, lambda_a, h_info, a_info, h2h_str, 80
 
 
 # ==============================================================================
@@ -323,7 +319,7 @@ def scan_league(leg_info, hours_limit):
               )
           )
 
-    # Totals EV (Poisson Model)
+    # Totals EV
     tot_label, tot_odds, ev_tot = "รอเปิด", 1.0, -999.0
     if tot_mkt and lambda_h is not None:
       outcomes = tot_mkt.get("outcomes", [])
@@ -333,14 +329,11 @@ def scan_league(leg_info, hours_limit):
         t_line = over.get("point", 2.5)
         op, up = over["price"], under["price"]
         mp_o, mp_u = devig_odds(op, up)
-
-        # ใช้ Poisson คำนวณความน่าจะเป็น Over
         poisson_p_over = calculate_over_probability(
             lambda_h, lambda_a, line=t_line
         )
         ev_o = calculate_ev(poisson_p_over, op)
         ev_u = calculate_ev(1.0 - poisson_p_over, up)
-
         if ev_o >= ev_u:
           ev_tot, tot_odds, tot_label = ev_o, op, f"สูงกว่า {t_line}"
         else:
@@ -351,7 +344,7 @@ def scan_league(leg_info, hours_limit):
         "league": leg_info["name"],
         "match": f"{home} vs {away}",
         "h_info": h_inf,
-        "a_info": a_inf,
+        "a_info": a_info,
         "h2h": h2hs,
         "hdc_label": hdc_label,
         "hdc_odds": hdc_odds,
@@ -396,7 +389,6 @@ selected = st.sidebar.multiselect(
     format_func=lambda x: options[x],
 )
 
-# ตั้งค่าเริ่มต้นเป็น 24 ชั่วโมงตามที่นายท่านต้องการ
 hours_limit = st.sidebar.selectbox(
     "กรอบเวลาการแข่งขัน", options=[24, 36, 48, 72], index=0
 )
@@ -407,13 +399,15 @@ budget = st.sidebar.number_input(
     "งบลงทุนรวมวันนี้ (บาท)", value=1000, step=100
 )
 
-scan_btn = st.sidebar.button("เริ่มสแกนบอล (Quant Model)", type="primary")
+scan_btn = st.sidebar.button(
+    "เริ่มสแกนบอล (Multi-Season Quant)", type="primary"
+)
 
 if scan_btn:
   if not selected:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
   else:
-    with st.spinner("กำลังประมวลผลด้วยโมเดลสถิติขั้นสูง (Poisson & Splits)..."):
+    with st.spinner("กำลังดึงสถิติ 2 ฤดูกาลและประมวลผลด้วย Poisson..."):
       res_all = []
       quota_err = False
       for l_key in selected:
