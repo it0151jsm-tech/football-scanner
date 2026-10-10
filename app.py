@@ -9,14 +9,14 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Fixed & Balanced Engine",
+    page_title="Value Bet Pro - Flexible Time Engine",
     page_icon="⚽",
     layout="wide",
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (บาลานซ์ HDC + สูง/ต่ำ)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (เลือกช่วงเวลาสแกนได้)")
 st.caption(
-    "แก้ไขสูตร EV สมบูรณ์แบบ + กระจายสัดส่วนบอลแฮนดิแคปและสูง-ต่ำในบิลสเต็ปอย่างลงตัว"
+    "ระบบประเมินราคาแฟร์ + บาลานซ์สัดส่วนบอลแฮนดิแคปและสูง-ต่ำ พร้อมตัวเลือกกรอบเวลา"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -303,7 +303,7 @@ def calculate_advanced_metrics(df, home_api, away_api, match_date):
 # ==============================================================================
 # 3. SCANNER CORE LOGIC
 # ==============================================================================
-def scan_league(league_info):
+def scan_league(league_info, hours_limit):
   csv_df = fetch_csv_stats(league_info["csv"])
   url = f"https://api.the-odds-api.com/v4/sports/{league_info['key']}/odds/"
   params = {
@@ -322,13 +322,13 @@ def scan_league(league_info):
     return []
 
   now = datetime.now(timezone.utc)
-  next_36h = now + timedelta(hours=36)
+  target_time = now + timedelta(hours=hours_limit)
   tz_th = timezone(timedelta(hours=7))
 
   results = []
   for m in matches:
     commence = datetime.fromisoformat(m["commence_time"].replace("Z", "+00:00"))
-    if not (now - timedelta(hours=2) <= commence <= next_36h):
+    if not (now - timedelta(hours=3) <= commence <= target_time):
       continue
 
     match_time = commence.astimezone(tz_th).strftime("%d/%m %H:%M น.")
@@ -390,7 +390,7 @@ def scan_league(league_info):
         elif o["name"] == "Draw":
           odds_x = o["price"]
 
-    # 1. Asian Handicap (แก้ไขสูตร EV)
+    # 1. Asian Handicap
     hdc_label, hdc_odds, ev_hdc = "รอเปิด", 1.0, -999.0
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
@@ -439,7 +439,7 @@ def scan_league(league_info):
           )
           hdc_odds = a_p
 
-    # 2. Totals (ปรับปรุงให้ EV ตรงตามจริง)
+    # 2. Totals
     tot_label, tot_odds, ev_tot = "รอเปิด", 1.0, -999.0
     if tot_mkt:
       outcomes = tot_mkt.get("outcomes", [])
@@ -509,7 +509,7 @@ def scan_league(league_info):
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("🔍 ตัวเลือกระบบ Bounded Engine")
+st.sidebar.header("🔍 ตัวเลือกระบบสแกน")
 options = {"all": f"🔥 ทุกลีกทั้งหมด ({len(active_leagues)} รายการ)"}
 for k, v in active_leagues.items():
   options[k] = v["name"]
@@ -521,6 +521,16 @@ selected = st.sidebar.multiselect(
     format_func=lambda x: options[x],
 )
 
+# เพิ่มตัวเลือกกรอบเวลาสแกนตรง Sidebar
+hours_limit = st.sidebar.selectbox(
+    "กรอบเวลาการแข่งขัน",
+    options=[36, 48, 72, 120],
+    index=0,
+    format_func=lambda x: (
+        f"ภายใน {x} ชั่วโมง (แนะนำ)" if x == 36 else f"ภายใน {x} ชั่วโมง"
+    ),
+)
+
 only_value = st.sidebar.checkbox(
     "แสดงเฉพาะคู่ที่มีตลาดน่าลงทุน (+EV >= 2.0%)", value=False
 )
@@ -529,28 +539,33 @@ budget_input = st.sidebar.number_input(
 )
 
 scan_btn = st.sidebar.button(
-    "🚀 เริ่มสแกนบอล + จัดสเต็ปบาลานซ์ 4 บิล", type="primary"
+    "🚀 เริ่มสแกนบอล + จัดสเต็ปบาลานซ์", type="primary"
 )
 
 if scan_btn:
   if not selected:
     st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
   else:
-    with st.spinner("กำลังสแกนและประมวลผลการจัดสเต็ปแบบบาลานซ์..."):
+    with st.spinner(
+        f"กำลังสแกนรายการแข่งขันเตะภายใน {hours_limit} ชั่วโมง..."
+    ):
       results = []
       target_leagues = (
           list(active_leagues.keys()) if "all" in selected else selected
       )
       for leg_key in target_leagues:
         if leg_key in active_leagues:
-          results.extend(scan_league(active_leagues[leg_key]))
+          results.extend(scan_league(active_leagues[leg_key], hours_limit))
 
       if results:
         df = pd.DataFrame(results)
         if only_value:
           df = df[df["is_value"] == True]
 
-        st.success(f"ประมวลผลเสร็จสิ้นพบทั้งหมด {len(df)} คู่")
+        st.success(
+            f"ประมวลผลเสร็จสิ้นพบทั้งหมด {len(df)} คู่ที่เตะภายใน {hours_limit}"
+            " ชม."
+        )
 
         tab1, tab2 = st.tabs(
             ["📱 การ์ดวิเคราะห์รายแมตช์", "🎫 จัดบิลสเต็ปบาลานซ์ 4 บิล"]
@@ -733,4 +748,6 @@ if scan_btn:
               )
 
       else:
-        st.warning("ไม่พบคู่แข่งขันที่เตะภายใน 36 ชั่วโมงในลีกที่เลือก")
+        st.warning(
+            f"ไม่พบคู่แข่งขันที่เตะภายใน {hours_limit} ชั่วโมงในลีกที่เลือก"
+        )
