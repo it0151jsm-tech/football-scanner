@@ -9,12 +9,14 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Quota Guard", page_icon="⚽", layout="wide"
+    page_title="Value Bet Pro - Live Quota Tracker",
+    page_icon="⚽",
+    layout="wide",
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (ระบบป้องกันโควตาหมด)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (เช็กโควตาเรียลไทม์)")
 st.caption(
-    "ระบบประเมินราคาแฟร์ + ตัวดักจับแจ้งเตือนเมื่อโควตา API เต็ม + เลือกช่วงเวลาสแกนได้"
+    "แสดงผลโควตา API คงเหลือที่ Sidebar + ระบบประเมินราคาแฟร์และจัดบิลสเต็ป"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -299,7 +301,7 @@ def calculate_advanced_metrics(df, home_api, away_api, match_date):
 
 
 # ==============================================================================
-# 3. SCANNER CORE LOGIC (WITH 429 QUOTA GUARD)
+# 3. SCANNER CORE LOGIC
 # ==============================================================================
 def scan_league(league_info, hours_limit):
   csv_df = fetch_csv_stats(league_info["csv"])
@@ -313,11 +315,14 @@ def scan_league(league_info, hours_limit):
 
   try:
     res = requests.get(url, params=params)
-    if res.status_code == 429:
-      st.error(
-          "⚠️ โควตา The Odds API รายเดือนของคุณหมดแล้ว (429 Too Many"
-          " Requests) กรุณารอรีเซ็ตโควตาหรือเปลี่ยน API Key"
+
+    # ดึงโควตาคงเหลือจาก Header ของ API มาเก็บไว้ใน Session State
+    if "x-requests-remaining" in res.headers:
+      st.session_state["quota_remaining"] = res.headers.get(
+          "x-requests-remaining"
       )
+
+    if res.status_code == 429:
       return "QUOTA_EXCEEDED"
     if res.status_code != 200:
       return []
@@ -514,6 +519,16 @@ def scan_league(league_info, hours_limit):
 active_leagues = get_active_leagues()
 
 st.sidebar.header("🔍 ตัวเลือกระบบสแกน")
+
+# แสดงโควตาคงเหลือที่ Sidebar (ถ้ามีการดึงข้อมูลแล้ว)
+if "quota_remaining" in st.session_state:
+  st.sidebar.metric(
+      label="🎫 โควตา API คงเหลือ",
+      value=f"{st.session_state['quota_remaining']} ครั้ง",
+  )
+else:
+  st.sidebar.info("🎫 โควตา API: กดปุ่มสแกนเพื่อเช็กสถานะ")
+
 options = {"all": f"🔥 ทุกลีกทั้งหมด ({len(active_leagues)} รายการ)"}
 for k, v in active_leagues.items():
   options[k] = v["name"]
@@ -567,7 +582,12 @@ if scan_btn:
           elif isinstance(res, list):
             results.extend(res)
 
-      if not quota_hit:
+      if quota_hit:
+        st.error(
+            "⚠️ โควตา API ของคุณหมดแล้ว (429 Too Many Requests)"
+            " กรุณารอรีเซ็ตโควตาในเดือนถัดไป"
+        )
+      else:
         if results:
           df = pd.DataFrame(results)
           if only_value:
