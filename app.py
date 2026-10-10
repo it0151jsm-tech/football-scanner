@@ -93,7 +93,6 @@ def fetch_csv_stats(csv_code):
   if not csv_code:
     return None
   dfs = []
-  # รวมข้อมูล 2 ฤดูกาลล่าสุด (2627 และ 2526) เพื่อให้มีข้อมูล H2H และฟอร์มที่ครอบคลุม
   for season in ["2627", "2526"]:
     try:
       df = pd.read_csv(
@@ -114,7 +113,7 @@ def fetch_csv_stats(csv_code):
 
 
 # ==============================================================================
-# 3. ADVANCED QUANT MATH & POISSON ENGINE
+# 3. ADVANCED QUANT MATH & POISSON ENGINE (ROBUST DICT RETURN)
 # ==============================================================================
 def norm_cdf(x):
   return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
@@ -171,8 +170,17 @@ def get_h2h(df, home, away):
 
 
 def analyze_match_advanced(df, h_api, a_api, m_date):
+  res = {
+      "h_net": None,
+      "a_net": None,
+      "lambda_h": None,
+      "lambda_a": None,
+      "h_info": "พัก 7 วัน",
+      "a_info": "พัก 7 วัน",
+      "h2h": "ไม่พบประวัติพบกันล่าสุด",
+  }
   if df is None or df.empty:
-    return None, None, None, None, "พัก 7 วัน", "พัก 7 วัน", "ไม่มีข้อมูล", 30
+    return res
 
   teams = list(set(df["HomeTeam"]).union(set(df["AwayTeam"])))
   h_t = get_close_matches(h_api, teams, n=1, cutoff=0.35)
@@ -190,12 +198,23 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
 
   hr, ar = rest_days(home_t), rest_days(away_t)
 
-  # --- HOME/AWAY SPLITS ---
   home_home_df = df[df["HomeTeam"] == home_t].tail(5)
   away_away_df = df[df["AwayTeam"] == away_t].tail(5)
 
+  h_info_str = (
+      f"พัก {hr} วัน {'เตะถี่' if hr <= 3 else 'ฟิต'} (ข้อมูลเหย้าไม่พอ)"
+  )
+  a_info_str = (
+      f"พัก {ar} วัน {'เตะถี่' if ar <= 3 else 'ฟิต'} (ข้อมูลเยือนไม่พอ)"
+  )
+  h2h_str = get_h2h(df, home_t, away_t)
+
+  res["h_info"] = h_info_str
+  res["a_info"] = a_info_str
+  res["h2h"] = h2h_str
+
   if len(home_home_df) < 2 or len(away_away_df) < 2:
-    return None, None, None, None, f"พัก {hr} วัน", f"พัก {ar} วัน", "ข้อมูลไม่พอ", 40
+    return res
 
   h_scored = home_home_df["FTHG"].mean()
   h_conceded = home_home_df["FTAG"].mean()
@@ -211,11 +230,20 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   h_net = round((h_scored - h_conceded) * fat_h, 2)
   a_net = round((a_scored - a_conceded) * fat_a, 2)
 
-  h_info = f"พัก {hr} วัน {'เตะถี่' if hr <= 3 else 'ฟิต'} (เหย้า: ยิง {round(h_scored,1)} เสีย {round(h_conceded,1)})"
-  a_info = f"พัก {ar} วัน {'เตะถี่' if ar <= 3 else 'ฟิต'} (เยือน: ยิง {round(a_scored,1)} เสีย {round(a_conceded,1)})"
-  h2h_str = get_h2h(df, home_t, away_t)
+  res["h_net"] = h_net
+  res["a_net"] = a_net
+  res["lambda_h"] = lambda_h
+  res["lambda_a"] = lambda_a
+  res["h_info"] = (
+      f"พัก {hr} วัน {'เตะถี่' if hr <= 3 else 'ฟิต'} (เหย้า: ยิง"
+      f" {round(h_scored,1)} เสีย {round(h_conceded,1)})"
+  )
+  res["a_info"] = (
+      f"พัก {ar} วัน {'เตะถี่' if ar <= 3 else 'ฟิต'} (เยือน: ยิง"
+      f" {round(a_scored,1)} เสีย {round(a_conceded,1)})"
+  )
 
-  return h_net, a_net, lambda_h, lambda_a, h_info, a_info, h2h_str, 80
+  return res
 
 
 # ==============================================================================
@@ -281,9 +309,15 @@ def scan_league(leg_info, hours_limit):
         None,
     )
 
-    h_net, a_net, lambda_h, lambda_a, h_inf, a_inf, h2hs, b_score = (
-        analyze_match_advanced(csv_df, home, away, m_dt)
-    )
+    m_data = analyze_match_advanced(csv_df, home, away, m_dt)
+
+    h_net = m_data["h_net"]
+    a_net = m_data["a_net"]
+    lambda_h = m_data["lambda_h"]
+    lambda_a = m_data["lambda_a"]
+    h_info = m_data["h_info"]
+    a_info = m_data["a_info"]
+    h2hs = m_data["h2h"]
 
     # Handicap EV
     hdc_label, hdc_odds, ev_hdc = "รอเปิด", 1.0, -999.0
@@ -343,7 +377,7 @@ def scan_league(leg_info, hours_limit):
         "time": m_time,
         "league": leg_info["name"],
         "match": f"{home} vs {away}",
-        "h_info": h_inf,
+        "h_info": h_info,
         "a_info": a_info,
         "h2h": h2hs,
         "hdc_label": hdc_label,
