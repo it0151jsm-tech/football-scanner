@@ -9,24 +9,20 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION (MOBILE OPTIMIZED)
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Sorted English Leagues",
-    page_icon="⚽",
-    layout="centered",
+    page_title="Value Bet Pro - Clean Engine", page_icon="⚽", layout="centered"
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Sorted Leagues)</h3>",
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Clean Edition)</h3>",
     unsafe_allow_html=True,
 )
-st.caption(
-    "💡 ลีกอังกฤษ 4 ดิวิชันถูกจัดเรียงไว้บนสุด เลือกใช้งานง่าย ไม่สับสน"
-)
+st.caption("💡 ลีกอังกฤษ 4 ดิวิชันอยู่บนสุด | โค้ดสะอาดปลอดภัยไม่มีอักขระซ่อน")
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
 
 
 # ==============================================================================
-# 2. DYNAMIC LEAGUES & SORTING (ENGLISH LEAGUES FIRST)
+# 2. DYNAMIC LEAGUES & SORTING
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
@@ -43,25 +39,24 @@ def get_active_leagues():
       "soccer_portugal_primeira_liga": "P1",
   }
 
-  # บังคับเรียงลีกอังกฤษ 4 ระดับไว้ด้านบนสุดเสมอ
   sorted_leagues = {
       "soccer_epl": {
-          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (พรีเมียร์ลีก อังกฤษ)",
+          "name": "Premier League (พรีเมียร์ลีก อังกฤษ)",
           "key": "soccer_epl",
           "csv": "E0",
       },
       "soccer_england_championship": {
-          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship (เดอะแชมเปียนชิพ อังกฤษ)",
+          "name": "Championship (เดอะแชมเปียนชิพ อังกฤษ)",
           "key": "soccer_england_championship",
           "csv": "E1",
       },
       "soccer_england_league_one": {
-          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 League One (ลีกวัน อังกฤษ)",
+          "name": "League One (ลีกวัน อังกฤษ)",
           "key": "soccer_england_league_one",
           "csv": "E2",
       },
       "soccer_england_league_two": {
-          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 League Two (ลีกทู อังกฤษ)",
+          "name": "League Two (ลีกทู อังกฤษ)",
           "key": "soccer_england_league_two",
           "csv": "E3",
       },
@@ -85,9 +80,7 @@ def get_active_leagues():
   except Exception:
     pass
 
-  # รวมกันโดยให้ลีกอังกฤษขึ้นก่อนเสมอ
-  combined = {**sorted_leagues, **other_leagues}
-  return combined
+  return {**sorted_leagues, **other_leagues}
 
 
 @st.cache_data(ttl=3600)
@@ -253,8 +246,8 @@ def analyze_match(df, h_api, a_api, m_date):
       a_net,
       h_xg,
       a_xg,
-      f"พัก {hr} วัน {'⚠️เตะถี่' if hr <= 3 else '✅ฟิต'}",
-      f"พัก {ar} วัน {'⚠️เตะถี่' if ar <= 3 else '✅ฟิต'}",
+      f"พัก {hr} วัน {'เตะถี่' if hr <= 3 else 'ฟิต'}",
+      f"พัก {ar} วัน {'เตะถี่' if ar <= 3 else 'ฟิต'}",
       h_str,
       a_str,
       h2h_str,
@@ -437,21 +430,21 @@ def scan_league(leg_info, hours_limit):
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("🔍 ตั้งค่าการสแกน")
+st.sidebar.header("ตั้งค่าการสแกน")
 if "quota_remaining" in st.session_state:
   st.sidebar.metric(
-      label="🎫 โควตา API คงเหลือ",
+      label="โควตา API คงเหลือ",
       value=f"{st.session_state['quota_remaining']} ครั้ง",
   )
 else:
-  st.sidebar.info("🎫 โควตา API: กดสแกนเพื่ออัปเดต")
+  st.sidebar.info("โควตา API: กดสแกนเพื่ออัปเดต")
 
 options = {}
 for k, v in active_leagues.items():
   options[k] = v["name"]
 
 selected = st.sidebar.multiselect(
-    "เลือกรายการลีก (ลีกอังกฤษอยู่บนสุด)",
+    "เลือกรายการลีก (อังกฤษอยู่บนสุด)",
     options=list(options.keys()),
     default=[
         "soccer_epl",
@@ -471,7 +464,7 @@ budget = st.sidebar.number_input(
     "งบลงทุนรวมวันนี้ (บาท)", value=1000, step=100
 )
 
-scan_btn = st.sidebar.button("🚀 เริ่มสแกนบอล", type="primary")
+scan_btn = st.sidebar.button("เริ่มสแกนบอล", type="primary")
 
 if scan_btn:
   if not selected:
@@ -497,31 +490,31 @@ if scan_btn:
           df = df[df["is_value"] == True]
 
         st.success(
-            f"🎯 วิเคราะห์สำเร็จ พบ {len(df)} คู่ (ภายใน {hours_limit} ชม.)"
+            f"วิเคราะห์สำเร็จ พบ {len(df)} คู่ (ภายใน {hours_limit} ชม.)"
         )
 
-        tab1, tab2 = st.tabs(["📱 วิเคราะห์รายคู่", "🎫 บิลสเต็ป (มือถือ)"])
+        tab1, tab2 = st.tabs(["วิเคราะห์รายคู่", "บิลสเต็ป (มือถือ)"])
 
         with tab1:
           for _, m in df.iterrows():
             with st.container():
-              st.markdown(f"**⚽ {m['match']}**")
-              st.caption(f"🕒 {m['time']} | 🏆 {m['league']}")
-              st.markdown(f"🏠 **เจ้าบ้าน:** {m['h_7m']} ({m['h_info']})")
-              st.markdown(f"✈️ **ทีมเยือน:** {m['a_7m']} ({m['a_info']})")
-              st.info(f"🤝 {m['h2h']}")
+              st.markdown(f"**{m['match']}**")
+              st.caption(f"{m['time']} | {m['league']}")
+              st.markdown(f"เจ้าบ้าน: {m['h_7m']} ({m['h_info']})")
+              st.markdown(f"ทีมเยือน: {m['a_7m']} ({m['a_info']})")
+              st.info(f"{m['h2h']}")
               st.markdown(
-                  f"⚖️ **แฮนดิแคป:** {m['hdc_label']} (ค่าน้ำ: {m['hdc_odds']}"
-                  f" | EV: **{m['ev_hdc']}%**)"
+                  f"แฮนดิแคป: {m['hdc_label']} (ค่าน้ำ: {m['hdc_odds']} | EV:"
+                  f" **{m['ev_hdc']}%**)"
               )
               st.markdown(
-                  f"⚽ **สูง/ต่ำ:** {m['tot_label']} (ค่าน้ำ: {m['tot_odds']} |"
-                  f" EV: **{m['ev_tot']}%**)"
+                  f"สูง/ต่ำ: {m['tot_label']} (ค่าน้ำ: {m['tot_odds']} | EV:"
+                  f" **{m['ev_tot']}%**)"
               )
               st.markdown("---")
 
         with tab2:
-          st.subheader("🎯 จัดบิลสเต็ป (1 คู่เลือก 1 ตลาดที่ดีที่สุด)")
+          st.subheader("จัดบิลสเต็ป (1 คู่เลือก 1 ตลาดที่ดีที่สุด)")
           h_c = df[df["is_hdc_v"]].sort_values(by="ev_hdc", ascending=False)
           t_c = df[df["is_tot_v"]].sort_values(by="ev_tot", ascending=False)
 
@@ -551,11 +544,11 @@ if scan_btn:
                 f"พบคู่ +EV เพียง {len(cdf)} คู่ (แนะนำเลือกเพิ่มลีกอื่นเพื่อจัดสเต็ป)"
             )
           else:
-            st.markdown("### 💰 Staking Plan (แผนการลงทุน)")
-            st.write(f"• **สเต็ป 6 คู่ (50%):** {round(budget * 0.5)} บาท")
-            st.write(f"• **สเต็ป 9 คู่ (25%):** {round(budget * 0.25)} บาท")
-            st.write(f"• **สเต็ป 13 คู่ (15%):** {round(budget * 0.15)} บาท")
-            st.write(f"• **สเต็ป 20 คู่ (10%):** {round(budget * 0.1)} บาท")
+            st.markdown("### Staking Plan (แผนการลงทุน)")
+            st.write(f"• สเต็ป 6 คู่ (50%): {round(budget * 0.5)} บาท")
+            st.write(f"• สเต็ป 9 คู่ (25%): {round(budget * 0.25)} บาท")
+            st.write(f"• สเต็ป 13 คู่ (15%): {round(budget * 0.15)} บาท")
+            st.write(f"• สเต็ป 20 คู่ (10%): {round(budget * 0.1)} บาท")
             st.markdown("---")
 
             def render_slip(title, data_sub):
@@ -570,9 +563,9 @@ if scan_btn:
                 )
               st.markdown("---")
 
-            render_slip("🟢 บิลหลัก (สเต็ป 6)", cdf.head(6))
-            render_slip("🔵 บิลต่อยอด (สเต็ป 9)", cdf.head(9))
-            render_slip("🟡 บิลโบนัส (สเต็ป 13)", cdf.head(13))
-            render_slip("🔴 บิลแจ็คพอต (สเต็ป 20)", cdf.head(20))
+            render_slip("บิลหลัก (สเต็ป 6)", cdf.head(6))
+            render_slip("บิลต่อยอด (สเต็ป 9)", cdf.head(9))
+            render_slip("บิลโบนัส (สเต็ป 13)", cdf.head(13))
+            render_slip("บิลแจ็คพอต (สเต็ป 20)", cdf.head(20))
       else:
         st.warning("ไม่พบคู่แข่งขันในกรอบเวลาหรือเงื่อนไขที่เลือก")
