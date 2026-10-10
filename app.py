@@ -9,22 +9,24 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION (MOBILE OPTIMIZED)
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Mobile Master", page_icon="⚽", layout="centered"
+    page_title="Value Bet Pro - Sorted English Leagues",
+    page_icon="⚽",
+    layout="centered",
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Mobile Edition)</h3>",
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Sorted Leagues)</h3>",
     unsafe_allow_html=True,
 )
 st.caption(
-    "💡 คำแนะนำ: เลือกเฉพาะลีกที่ต้องการแทงครั้งละ 1-2 ลีกเพื่อประหยัดโควตา API"
+    "💡 ลีกอังกฤษ 4 ดิวิชันถูกจัดเรียงไว้บนสุด เลือกใช้งานง่าย ไม่สับสน"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
 
 
 # ==============================================================================
-# 2. DYNAMIC LEAGUES & STATS FETCHING (UPDATED FOR 2026/27)
+# 2. DYNAMIC LEAGUES & SORTING (ENGLISH LEAGUES FIRST)
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
@@ -40,7 +42,32 @@ def get_active_leagues():
       "soccer_netherlands_eredivisie": "N1",
       "soccer_portugal_primeira_liga": "P1",
   }
-  leagues = {}
+
+  # บังคับเรียงลีกอังกฤษ 4 ระดับไว้ด้านบนสุดเสมอ
+  sorted_leagues = {
+      "soccer_epl": {
+          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League (พรีเมียร์ลีก อังกฤษ)",
+          "key": "soccer_epl",
+          "csv": "E0",
+      },
+      "soccer_england_championship": {
+          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Championship (เดอะแชมเปียนชิพ อังกฤษ)",
+          "key": "soccer_england_championship",
+          "csv": "E1",
+      },
+      "soccer_england_league_one": {
+          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 League One (ลีกวัน อังกฤษ)",
+          "key": "soccer_england_league_one",
+          "csv": "E2",
+      },
+      "soccer_england_league_two": {
+          "name": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 League Two (ลีกทู อังกฤษ)",
+          "key": "soccer_england_league_two",
+          "csv": "E3",
+      },
+  }
+
+  other_leagues = {}
   try:
     res = requests.get(
         f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
@@ -48,26 +75,25 @@ def get_active_leagues():
     if res.status_code == 200:
       for item in res.json():
         if item.get("group") == "Soccer" and item.get("active"):
-          k, title = item["key"], item["title"]
-          leagues[k] = {"name": title, "key": k, "csv": csv_map.get(k)}
+          k = item["key"]
+          if k not in sorted_leagues:
+            other_leagues[k] = {
+                "name": item["title"],
+                "key": k,
+                "csv": csv_map.get(k),
+            }
   except Exception:
     pass
-  if not leagues:
-    leagues = {
-        "soccer_epl": {
-            "name": "Premier League - England",
-            "key": "soccer_epl",
-            "csv": "E0",
-        }
-    }
-  return leagues
+
+  # รวมกันโดยให้ลีกอังกฤษขึ้นก่อนเสมอ
+  combined = {**sorted_leagues, **other_leagues}
+  return combined
 
 
 @st.cache_data(ttl=3600)
 def fetch_csv_stats(csv_code):
   if not csv_code:
     return None
-  # อัปเดตปีปัจจุบัน 2026 รองรับฤดูกาล 2627 และ 2526
   for season in ["2627", "2526"]:
     try:
       df = pd.read_csv(
@@ -425,9 +451,14 @@ for k, v in active_leagues.items():
   options[k] = v["name"]
 
 selected = st.sidebar.multiselect(
-    "เลือกรายการลีก (แนะนำเลือกทีละ 1-2 ลีก)",
+    "เลือกรายการลีก (ลีกอังกฤษอยู่บนสุด)",
     options=list(options.keys()),
-    default=["soccer_epl"] if "soccer_epl" in options else list(options.keys())[:1],
+    default=[
+        "soccer_epl",
+        "soccer_england_championship",
+        "soccer_england_league_one",
+        "soccer_england_league_two",
+    ],
     format_func=lambda x: options[x],
 )
 hours_limit = st.sidebar.selectbox(
