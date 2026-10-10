@@ -9,14 +9,12 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Dynamic API Engine",
-    page_icon="⚽",
-    layout="wide",
+    page_title="Value Bet Pro - Bug Fixed Engine", page_icon="⚽", layout="wide"
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (เชื่อมต่อ API อัตโนมัติ)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (แก้บั๊กค่าเริ่มต้น)")
 st.caption(
-    "ดึงรายชื่อลีกจริงจาก The Odds API + ประเมินราคาแฟร์และจัดสเต็ปบาลานซ์ 4 บิล"
+    "ระบบดึงลีกอัตโนมัติ + ป้องกัน Error ค่าเริ่มต้น + ประเมินราคาแฟร์และจัดสเต็ปบาลานซ์"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
@@ -27,7 +25,6 @@ API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
-  # แมป CSV สำหรับดึงสถิติย้อนหลังลีกหลัก
   csv_mapping = {
       "soccer_epl": "E0",
       "soccer_england_championship": "E1",
@@ -55,7 +52,6 @@ def get_active_leagues():
   except Exception:
     pass
 
-  # Fallback ถ้าดึงไม่ออก
   if not leagues:
     leagues = {
         "soccer_epl": {
@@ -491,10 +487,13 @@ options = {"all": f"🔥 ทุกลีกทั้งหมด ({len(active_le
 for k, v in active_leagues.items():
   options[k] = v["name"]
 
+# ป้องกัน Error โดยการเช็คค่าเริ่มต้นให้ปลอดภัยเสมอ
+safe_default = ["all"] if "all" in options else list(options.keys())[:1]
+
 selected = st.sidebar.multiselect(
     "เลือกรายการแข่งขัน",
     options=list(options.keys()),
-    default=["soccer_england_championship"],
+    default=safe_default,
     format_func=lambda x: options[x],
 )
 
@@ -514,7 +513,6 @@ budget_input = st.sidebar.number_input(
     "งบประมาณลงทุนรวมวันนี้ (บาท)", value=1000, step=100
 )
 
-# ปุ่มกดสแกนหลัก (ปุ่มสีแดง)
 scan_btn = st.sidebar.button(
     "🚀 เริ่มสแกนบอล + จัดสเต็ปบาลานซ์", type="primary"
 )
