@@ -9,15 +9,18 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Bug Fixed Engine", page_icon="⚽", layout="wide"
+    page_title="Value Bet Pro - Ultimate Bookmaker Engine",
+    page_icon="⚽",
+    layout="wide",
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (แก้บั๊กค่าเริ่มต้น)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (Ultimate Edition)")
 st.caption(
-    "ระบบดึงลีกอัตโนมัติ + ป้องกัน Error ค่าเริ่มต้น + ประเมินราคาแฟร์และจัดสเต็ปบาลานซ์"
+    "โมเดลออกราคาแฟร์ + ระบบบาลานซ์สัดส่วน + เช็กโควตา API และป้องกันบั๊กสมบูรณ์แบบ"
 )
 
-API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
+# อัปเดต API Key ใหม่ล่าสุดของคุณที่นี่
+API_KEY = "9b01dce091987a5fc57447a84e05badc"
 
 
 # ==============================================================================
@@ -487,7 +490,6 @@ options = {"all": f"🔥 ทุกลีกทั้งหมด ({len(active_le
 for k, v in active_leagues.items():
   options[k] = v["name"]
 
-# ป้องกัน Error โดยการเช็คค่าเริ่มต้นให้ปลอดภัยเสมอ
 safe_default = ["all"] if "all" in options else list(options.keys())[:1]
 
 selected = st.sidebar.multiselect(
