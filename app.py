@@ -9,89 +9,69 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Live Quota Tracker",
+    page_title="Value Bet Pro - Dynamic API Engine",
     page_icon="⚽",
     layout="wide",
 )
 
-st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (เช็กโควตาเรียลไทม์)")
+st.title("⚽ ระบบวิเคราะห์บอล Value Bet Pro (เชื่อมต่อ API อัตโนมัติ)")
 st.caption(
-    "แสดงผลโควตา API คงเหลือที่ Sidebar + ระบบประเมินราคาแฟร์และจัดบิลสเต็ป"
+    "ดึงรายชื่อลีกจริงจาก The Odds API + ประเมินราคาแฟร์และจัดสเต็ปบาลานซ์ 4 บิล"
 )
 
 API_KEY = "95a50f0403619f536aa4c3fb35dccc41"
 
-KNOWN_LEAGUES = {
-    "soccer_epl": {"name": "Premier League - England", "csv": "E0"},
-    "soccer_efl_champ": {"name": "Championship - England", "csv": "E1"},
-    "soccer_england_league1": {"name": "League 1 - England", "csv": "E2"},
-    "soccer_england_league2": {"name": "League 2 - England", "csv": "E3"},
-    "soccer_spain_la_liga": {"name": "La Liga - Spain", "csv": "SP1"},
-    "soccer_spain_segunda_division": {
-        "name": "Segunda Division - Spain",
-        "csv": "SP2",
-    },
-    "soccer_italy_serie_a": {"name": "Serie A - Italy", "csv": "I1"},
-    "soccer_italy_serie_b": {"name": "Serie B - Italy", "csv": "I2"},
-    "soccer_germany_bundesliga": {
-        "name": "Bundesliga - Germany",
-        "csv": "D1",
-    },
-    "soccer_germany_bundesliga2": {
-        "name": "2. Bundesliga - Germany",
-        "csv": "D2",
-    },
-    "soccer_france_league1": {"name": "Ligue 1 - France", "csv": "F1"},
-    "soccer_france_league2": {"name": "Ligue 2 - France", "csv": "F2"},
-    "soccer_netherlands_eredivisie": {
-        "name": "Eredivisie - Netherlands",
-        "csv": "N1",
-    },
-    "soccer_portugal_primeira_liga": {
-        "name": "Primeira Liga - Portugal",
-        "csv": "P1",
-    },
-    "soccer_belgium_first_div": {
-        "name": "First Division A - Belgium",
-        "csv": "B1",
-    },
-    "soccer_turkey_super_league": {
-        "name": "Super Lig - Turkey",
-        "csv": "T1",
-    },
-    "soccer_greece_super_league": {
-        "name": "Super League - Greece",
-        "csv": "G1",
-    },
-    "soccer_spl": {"name": "Premiership - Scotland", "csv": "SC0"},
-    "soccer_brazil_campeonato": {
-        "name": "Serie A - Brazil (บราซิล)",
-        "csv": "BRA",
-    },
-    "soccer_brazil_serie_b": {
-        "name": "Serie B - Brazil (บราซิล ลีกรอง)",
-        "csv": "BRA2",
-    },
-    "soccer_argentina_primera_division": {
-        "name": "Primera Division - Argentina (อาร์เจนตินา)",
-        "csv": "ARG",
-    },
-    "soccer_colombia_categoria_primera_a": {
-        "name": "Primera A - Colombia (โคลอมเบีย)",
-        "csv": "COL",
-    },
-    "soccer_peru_liga_1": {"name": "Liga 1 - Peru (เปรู)", "csv": "PER"},
-    "soccer_mexico_ligamx": {
-        "name": "Liga MX - Mexico (เม็กซิโก)",
-        "csv": "MEX",
-    },
-    "soccer_usa_mls": {"name": "MLS - USA (สหรัฐอเมริกา)", "csv": "USA"},
-}
-
 
 # ==============================================================================
-# 2. HELPER MATH & STATS FUNCTIONS
+# 2. DYNAMIC LEAGUES & MATH FUNCTIONS
 # ==============================================================================
+@st.cache_data(ttl=1800)
+def get_active_leagues():
+  # แมป CSV สำหรับดึงสถิติย้อนหลังลีกหลัก
+  csv_mapping = {
+      "soccer_epl": "E0",
+      "soccer_england_championship": "E1",
+      "soccer_england_league_one": "E2",
+      "soccer_england_league_two": "E3",
+      "soccer_spain_la_liga": "SP1",
+      "soccer_italy_serie_a": "I1",
+      "soccer_germany_bundesliga": "D1",
+      "soccer_france_league1": "F1",
+      "soccer_netherlands_eredivisie": "N1",
+      "soccer_portugal_primeira_liga": "P1",
+  }
+
+  leagues = {}
+  url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
+  try:
+    res = requests.get(url)
+    if res.status_code == 200:
+      for item in res.json():
+        if item.get("group") == "Soccer" and item.get("active"):
+          key = item["key"]
+          title = item["title"]
+          csv_code = csv_mapping.get(key, None)
+          leagues[key] = {"name": title, "key": key, "csv": csv_code}
+  except Exception:
+    pass
+
+  # Fallback ถ้าดึงไม่ออก
+  if not leagues:
+    leagues = {
+        "soccer_epl": {
+            "name": "Premier League - England",
+            "key": "soccer_epl",
+            "csv": "E0",
+        },
+        "soccer_england_championship": {
+            "name": "Championship - England",
+            "key": "soccer_england_championship",
+            "csv": "E1",
+        },
+    }
+  return leagues
+
+
 def norm_cdf(x):
   return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
 
@@ -106,26 +86,6 @@ def calculate_ev(prob, odds):
   if odds <= 1.0 or prob <= 0:
     return -100.0
   return round(((prob * odds) - 1.0) * 100, 2)
-
-
-@st.cache_data(ttl=1800)
-def get_active_leagues():
-  leagues = {}
-  for k, v in KNOWN_LEAGUES.items():
-    leagues[k] = {"name": v["name"], "key": k, "csv": v["csv"]}
-
-  url = f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
-  try:
-    res = requests.get(url)
-    if res.status_code == 200:
-      for item in res.json():
-        if item.get("group") == "Soccer":
-          key = item["key"]
-          if key not in leagues:
-            leagues[key] = {"name": item["title"], "key": key, "csv": None}
-  except Exception:
-    pass
-  return leagues
 
 
 @st.cache_data(ttl=3600)
@@ -316,7 +276,6 @@ def scan_league(league_info, hours_limit):
   try:
     res = requests.get(url, params=params)
 
-    # ดึงโควตาคงเหลือจาก Header ของ API มาเก็บไว้ใน Session State
     if "x-requests-remaining" in res.headers:
       st.session_state["quota_remaining"] = res.headers.get(
           "x-requests-remaining"
@@ -520,14 +479,13 @@ active_leagues = get_active_leagues()
 
 st.sidebar.header("🔍 ตัวเลือกระบบสแกน")
 
-# แสดงโควตาคงเหลือที่ Sidebar (ถ้ามีการดึงข้อมูลแล้ว)
 if "quota_remaining" in st.session_state:
   st.sidebar.metric(
       label="🎫 โควตา API คงเหลือ",
       value=f"{st.session_state['quota_remaining']} ครั้ง",
   )
 else:
-  st.sidebar.info("🎫 โควตา API: กดปุ่มสแกนเพื่อเช็กสถานะ")
+  st.sidebar.info("🎫 โควตา API: กดปุ่มสแกนด้านล่างเพื่อเช็กสถานะ")
 
 options = {"all": f"🔥 ทุกลีกทั้งหมด ({len(active_leagues)} รายการ)"}
 for k, v in active_leagues.items():
@@ -536,7 +494,7 @@ for k, v in active_leagues.items():
 selected = st.sidebar.multiselect(
     "เลือกรายการแข่งขัน",
     options=list(options.keys()),
-    default=["soccer_epl"],
+    default=["soccer_england_championship"],
     format_func=lambda x: options[x],
 )
 
@@ -556,6 +514,7 @@ budget_input = st.sidebar.number_input(
     "งบประมาณลงทุนรวมวันนี้ (บาท)", value=1000, step=100
 )
 
+# ปุ่มกดสแกนหลัก (ปุ่มสีแดง)
 scan_btn = st.sidebar.button(
     "🚀 เริ่มสแกนบอล + จัดสเต็ปบาลานซ์", type="primary"
 )
