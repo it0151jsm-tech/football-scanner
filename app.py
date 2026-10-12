@@ -19,7 +19,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "โมเดลอัจฉริยะ: คัดกรองด้วย Confidence Score (0-100) + ระบบตรวจผลบอลฟรี 100%"
+    "โมเดลอัจฉริยะ: คัดกรองด้วย Confidence Score (0-100) + ระบบตรวจผลบิลออโต้"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
@@ -112,7 +112,7 @@ def fetch_csv_stats(csv_code):
 
 
 # ==============================================================================
-# 3. ADVANCED QUANT MATH & CONFIDENCE SCORING ENGINE
+# 3. ADVANCED QUANT MATH & CONFIDENCE SCORING ENGINE (คงเดิม 100%)
 # ==============================================================================
 def norm_cdf(x):
   return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
@@ -274,10 +274,9 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
 
 
 # ==============================================================================
-# 4. FREE RESULT CHECKER ENGINE (0% API QUOTA)
+# 4. FREE RESULT CHECKER ENGINE
 # ==============================================================================
 def check_match_result_free(csv_df, home_mapped, away_mapped, pick):
-  """ฟังก์ชันตรวจผลบอลย้อนหลังผ่าน CSV ฟรี ไม่หักโควตา"""
   if csv_df is None or csv_df.empty:
     return "⏳ ยังไม่มีผลสกอร์"
 
@@ -293,7 +292,6 @@ def check_match_result_free(csv_df, home_mapped, away_mapped, pick):
   tot_goals = fthg + ftag
   score_str = f"({fthg}-{ftag})"
 
-  # 1. เช็กตลาดสูง-ต่ำ (Totals)
   if "สูงกว่า" in pick:
     try:
       line = float(pick.split()[1])
@@ -305,7 +303,6 @@ def check_match_result_free(csv_df, home_mapped, away_mapped, pick):
         return f"❌ ตาย {score_str}"
     except Exception:
       pass
-
   elif "ต่ำกว่า" in pick:
     try:
       line = float(pick.split()[1])
@@ -317,8 +314,6 @@ def check_match_result_free(csv_df, home_mapped, away_mapped, pick):
         return f"❌ ตาย {score_str}"
     except Exception:
       pass
-
-  # 2. เช็กตลาดต่อ/รอง/เสมอ (Handicap / DNB)
   elif "เสมอ" in pick:
     if fthg == ftag:
       return f"➖ เสมอคืนทุน {score_str}"
@@ -328,28 +323,16 @@ def check_match_result_free(csv_df, home_mapped, away_mapped, pick):
       return f"✅ เข้าเป้า {score_str}"
     else:
       return f"❌ ตาย {score_str}"
-
   elif "ต่อ" in pick:
-    if home_mapped in pick:
-      diff = fthg - ftag
-    else:
-      diff = ftag - fthg
-    if diff > 0:
-      return f"✅ เข้าเป้า {score_str}"
-    elif diff == 0:
-      return f"❌ ตาย {score_str}"
-    else:
-      return f"❌ ตาย {score_str}"
-
+    diff = (fthg - ftag) if (home_mapped in pick) else (ftag - fthg)
+    return (
+        f"✅ เข้าเป้า {score_str}" if diff > 0 else f"❌ ตาย {score_str}"
+    )
   elif "รอง" in pick:
-    if home_mapped in pick:
-      diff = fthg - ftag
-    else:
-      diff = ftag - fthg
-    if diff >= 0:
-      return f"✅ เข้าเป้า {score_str}"
-    else:
-      return f"❌ ตาย {score_str}"
+    diff = (fthg - ftag) if (home_mapped in pick) else (ftag - fthg)
+    return (
+        f"✅ เข้าเป้า {score_str}" if diff >= 0 else f"❌ ตาย {score_str}"
+    )
 
   return f"จบเกม {score_str}"
 
@@ -427,7 +410,6 @@ def scan_league(leg_info, hours_limit):
         m_data["h2h"],
     )
 
-    # Handicap EV & Selection
     hdc_label, hdc_odds, ev_hdc = "รอเปิด", 1.0, -999.0
     if sp_mkt and h_net is not None:
       outcomes = sp_mkt.get("outcomes", [])
@@ -460,7 +442,6 @@ def scan_league(leg_info, hours_limit):
               )
           )
 
-    # Totals EV & Selection
     tot_label, tot_odds, ev_tot = "รอเปิด", 1.0, -999.0
     if tot_mkt and lambda_h is not None:
       outcomes = tot_mkt.get("outcomes", [])
@@ -497,7 +478,6 @@ def scan_league(leg_info, hours_limit):
         best_pick,
     )
 
-    # เช็กผลการแข่งฟรี
     match_res = check_match_result_free(
         csv_df, m_data["home_mapped"], m_data["away_mapped"], best_pick
     )
@@ -597,7 +577,7 @@ if "scan_df" in st.session_state and not st.session_state["scan_df"].empty:
   df = st.session_state["scan_df"]
 
   tab1, tab2, tab3 = st.tabs(
-      ["วิเคราะห์รายคู่ (AI Rating)", "🎯 โพยบิลจัดเต็ม VIP", "🏆 ตรวจผลบิล (ระบบฟรี)"]
+      ["วิเคราะห์รายคู่ (AI Rating)", "🎯 โพยบิลจัดเต็ม VIP", "🏆 สรุปผลบิลออโต้"]
   )
 
   with tab1:
@@ -660,20 +640,48 @@ if "scan_df" in st.session_state and not st.session_state["scan_df"].empty:
     render_slip("💰 บิลแจ็คพอต (สเต็ป 20 คู่)", df, 20)
 
   with tab3:
-    st.subheader("🏆 สรุปผลการแข่งขันจริง (0% API Quota Used)")
-    st.caption("ระบบตรวจผลอัตโนมัติจากไฟล์สถิติ CSV ฟรี กดเช็กได้ไม่จำกัด")
+    st.subheader("🏆 สรุปผลบิลออโต้ (เข้ากี่คู่ / ตายกี่คู่)")
+    st.caption("ระบบรวบยอดผลลัพธ์ของแต่ละบิลให้ทันที ไม่ต้องไล่เช็กทีละคู่")
 
-    win_count = len(df[df["result"].str.contains("เข้าเป้า")])
-    total_finished = len(df[df["result"].str.contains("จบเกม|เข้าเป้า|ตาย")])
+    def get_summary_counts(df_sub, n):
+      sub = df_sub.head(n)
+      if sub.empty:
+        return 0, 0, 0
+      wins = len(sub[sub["result"].str.contains("เข้าเป้า")])
+      losses = len(sub[sub["result"].str.contains("ตาย")])
+      pending = len(
+          sub[
+              ~sub["result"].str.contains("เข้าเป้า")
+              & ~sub["result"].str.contains("ตาย")
+          ]
+      )
+      return wins, losses, pending
 
-    st.metric(
-        label="ความแม่นยำรวมวันนี้",
-        value=f"{win_count} / {total_finished} คู่",
-        delta=f"{(win_count/total_finished*100) if total_finished > 0 else 0:.1f}%",
+    w5, l5, p5 = get_summary_counts(df, 5)
+    w8, l8, p8 = get_summary_counts(df, 8)
+    w13, l13, p13 = get_summary_counts(df, 13)
+    w19, l19, p19 = get_summary_counts(df, 19)
+
+    st.markdown(
+        f"🔥 **บิลหลัก VIP (สเต็ป 5 คู่ทองคำ):** เข้า **{w5}** คู่ | ตาย"
+        f" **{l5}** คู่ {f'| รอผล {p5} คู่' if p5 > 0 else ''}"
+    )
+    st.markdown(
+        f"📈 **บิลต่อยอด (สเต็ป 8 คู่):** เข้า **{w8}** คู่ | ตาย **{l8}** คู่"
+        f" {f'| รอผล {p8} คู่' if p8 > 0 else ''}"
+    )
+    st.markdown(
+        f"🌟 **บิลโบนัส (สเต็ป 13 คู่):** เข้า **{w13}** คู่ | ตาย **{l13}**"
+        f" คู่ {f'| รอผล {p13} คู่' if p13 > 0 else ''}"
+    )
+    st.markdown(
+        f"💰 **บิลแจ็คพอต (สเต็ป 20 คู่):** เข้า **{w19}** คู่ | ตาย"
+        f" **{l19}** คู่ {f'| รอผล {p19} คู่' if p19 > 0 else ''}"
     )
 
+    st.markdown("---")
+    st.markdown("#### 📋 รายการคู่แข่งขันทั้งหมดในระบบ")
     for _, r in df.iterrows():
       st.write(
-          f"⚽ **{r['match']}** -> ให้: `{r['pick']}` | สรุปผล:"
-          f" **{r['result']}**"
+          f"⚽ {r['match']} ➔ เลือก: `{r['pick']}` | สรุป: **{r['result']}**"
       )
