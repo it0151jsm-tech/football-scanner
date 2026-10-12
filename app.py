@@ -19,8 +19,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "โมเดลอัจฉริยะ: คัดกรองด้วย Confidence Score (0-100) + Poisson Model +"
-    " Multi-Season Stats"
+    "โมเดลอัจฉริยะ: คัดกรองด้วย Confidence Score (0-100) + ระบบตรวจผลบอลฟรี 100%"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
@@ -88,7 +87,7 @@ def get_active_leagues():
   return {**sorted_leagues, **other_leagues}
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=1800)
 def fetch_csv_stats(csv_code):
   if not csv_code:
     return None
@@ -170,26 +169,17 @@ def get_h2h(df, home, away):
 
 
 def calculate_confidence_score(ev, hr, ar, h_scored, a_scored, pick_type):
-  """ระบบคำนวณคะแนนความมั่นใจ 0-100 สำหรับจัดอันดับบิล VIP"""
-  score = 50.0  # ฐานกลาง
-
-  # 1. EV Score (max 25 pts)
+  score = 50.0
   score += min(max(ev, 0), 25)
-
-  # 2. Rest Days Balance (max 15 pts)
   if 4 <= hr <= 6:
     score += 7.5
   if 4 <= ar <= 6:
     score += 7.5
-
-  # 3. Scoring Consistency (max 20 pts)
   if h_scored >= 1.2:
     score += 10
   if a_scored >= 1.0:
     score += 10
 
-  # 4. Market Safety Bonus (max 15 pts)
-  # ให้โบนัสพิเศษกับราคาเซฟๆ เช่น รอง, เสมอ (0), หรือสกอร์ต่ำ/สูงที่คำนวณแม่นยำ
   if "รอง" in pick_type or "เสมอ" in pick_type:
     score += 15
   elif "ต่อ" in pick_type and ("(-0.25)" in pick_type or "(-0.5)" in pick_type):
@@ -214,6 +204,8 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
       "a_info": "พัก 7 วัน",
       "h2h": "ไม่พบประวัติพบกันล่าสุด",
       "h2h_score": 0,
+      "home_mapped": h_api,
+      "away_mapped": a_api,
   }
   if df is None or df.empty:
     return res
@@ -223,6 +215,9 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   a_t = get_close_matches(a_api, teams, n=1, cutoff=0.35)
   home_t = h_t[0] if h_t else h_api
   away_t = a_t[0] if a_t else a_api
+
+  res["home_mapped"] = home_t
+  res["away_mapped"] = away_t
 
   def rest_days(t):
     past = df[(df["HomeTeam"] == t) | (df["AwayTeam"] == t)]
@@ -251,7 +246,7 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   h_scored = home_home_df["FTHG"].mean()
   h_conceded = home_home_df["FTAG"].mean()
   a_scored = away_away_df["FTAG"].mean()
-  a_conceded = away_home_conceded = away_away_df["FTHG"].mean()
+  a_conceded = away_away_df["FTHG"].mean()
 
   res["h_scored"] = h_scored
   res["a_scored"] = a_scored
@@ -279,7 +274,88 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
 
 
 # ==============================================================================
-# 4. SCANNER CORE
+# 4. FREE RESULT CHECKER ENGINE (0% API QUOTA)
+# ==============================================================================
+def check_match_result_free(csv_df, home_mapped, away_mapped, pick):
+  """ฟังก์ชันตรวจผลบอลย้อนหลังผ่าน CSV ฟรี ไม่หักโควตา"""
+  if csv_df is None or csv_df.empty:
+    return "⏳ ยังไม่มีผลสกอร์"
+
+  match_row = csv_df[
+      (csv_df["HomeTeam"] == home_mapped) & (csv_df["AwayTeam"] == away_mapped)
+  ]
+  if match_row.empty:
+    return "⏳ รอผลการแข่ง / ยังไม่เตะ"
+
+  latest = match_row.iloc[-1]
+  fthg = int(latest["FTHG"])
+  ftag = int(latest["FTAG"])
+  tot_goals = fthg + ftag
+  score_str = f"({fthg}-{ftag})"
+
+  # 1. เช็กตลาดสูง-ต่ำ (Totals)
+  if "สูงกว่า" in pick:
+    try:
+      line = float(pick.split()[1])
+      if tot_goals > line:
+        return f"✅ เข้าเป้า {score_str}"
+      elif tot_goals == line:
+        return f"➖ เสมอคืนทุน {score_str}"
+      else:
+        return f"❌ ตาย {score_str}"
+    except Exception:
+      pass
+
+  elif "ต่ำกว่า" in pick:
+    try:
+      line = float(pick.split()[1])
+      if tot_goals < line:
+        return f"✅ เข้าเป้า {score_str}"
+      elif tot_goals == line:
+        return f"➖ เสมอคืนทุน {score_str}"
+      else:
+        return f"❌ ตาย {score_str}"
+    except Exception:
+      pass
+
+  # 2. เช็กตลาดต่อ/รอง/เสมอ (Handicap / DNB)
+  elif "เสมอ" in pick:
+    if fthg == ftag:
+      return f"➖ เสมอคืนทุน {score_str}"
+    elif fthg > ftag and home_mapped in pick:
+      return f"✅ เข้าเป้า {score_str}"
+    elif ftag > fthg and away_mapped in pick:
+      return f"✅ เข้าเป้า {score_str}"
+    else:
+      return f"❌ ตาย {score_str}"
+
+  elif "ต่อ" in pick:
+    if home_mapped in pick:
+      diff = fthg - ftag
+    else:
+      diff = ftag - fthg
+    if diff > 0:
+      return f"✅ เข้าเป้า {score_str}"
+    elif diff == 0:
+      return f"❌ ตาย {score_str}"
+    else:
+      return f"❌ ตาย {score_str}"
+
+  elif "รอง" in pick:
+    if home_mapped in pick:
+      diff = fthg - ftag
+    else:
+      diff = ftag - fthg
+    if diff >= 0:
+      return f"✅ เข้าเป้า {score_str}"
+    else:
+      return f"❌ ตาย {score_str}"
+
+  return f"จบเกม {score_str}"
+
+
+# ==============================================================================
+# 5. SCANNER CORE
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -364,7 +440,6 @@ def scan_league(leg_info, hours_limit):
         edge = (h_net - a_net) + line
         p_shift = (norm_cdf(edge / 1.1) - 0.5) * 0.4
         fp_h = max(min(mp_h + p_shift, 0.85), 0.15)
-        fp_a = 1.0 - fp_h
 
         ev_h, ev_a = calculate_ev(fp_h, hp), calculate_ev(1.0 - fp_h, ap)
         if ev_h >= ev_a:
@@ -394,7 +469,6 @@ def scan_league(leg_info, hours_limit):
       if over and under:
         t_line = over.get("point", 2.5)
         op, up = over["price"], under["price"]
-        mp_o, mp_u = devig_odds(op, up)
         poisson_p_over = calculate_over_probability(
             lambda_h, lambda_a, line=t_line
         )
@@ -405,7 +479,6 @@ def scan_league(leg_info, hours_limit):
         else:
           ev_tot, tot_odds, tot_label = ev_u, up, f"ต่ำกว่า {t_line}"
 
-    # เลือกตลาดที่ดีที่สุดระหว่าง แฮนดิแคป กับ สูงต่ำ
     if ev_hdc >= ev_tot and ev_hdc != -999.0:
       best_pick, best_odds, best_ev = hdc_label, hdc_odds, ev_hdc
       is_v = ev_hdc >= 2.0
@@ -415,7 +488,6 @@ def scan_league(leg_info, hours_limit):
     else:
       continue
 
-    # คำนวณ Confidence Score สำหรับคู่นี้
     conf_score = calculate_confidence_score(
         best_ev,
         m_data["hr"],
@@ -423,6 +495,11 @@ def scan_league(leg_info, hours_limit):
         m_data["h_scored"],
         m_data["a_scored"],
         best_pick,
+    )
+
+    # เช็กผลการแข่งฟรี
+    match_res = check_match_result_free(
+        csv_df, m_data["home_mapped"], m_data["away_mapped"], best_pick
     )
 
     results.append({
@@ -436,13 +513,14 @@ def scan_league(leg_info, hours_limit):
         "odds": best_odds,
         "ev": best_ev,
         "confidence": conf_score,
+        "result": match_res,
         "is_value": is_v,
     })
   return results
 
 
 # ==============================================================================
-# 5. STREAMLIT UI (VIP QUANT DASHBOARD)
+# 6. STREAMLIT UI (VIP QUANT DASHBOARD)
 # ==============================================================================
 active_leagues = get_active_leagues()
 
@@ -455,12 +533,10 @@ if "quota_remaining" in st.session_state:
 else:
   st.sidebar.info("โควตา API: กดสแกนเพื่ออัปเดต")
 
-options = {}
-for k, v in active_leagues.items():
-  options[k] = v["name"]
+options = {k: v["name"] for k, v in active_leagues.items()}
 
 selected = st.sidebar.multiselect(
-    "เลือกรายการลีก (อังกฤษอยู่บนสุด)",
+    "เลือกรายการลีก",
     options=list(options.keys()),
     default=[
         "soccer_epl",
@@ -508,76 +584,96 @@ if scan_btn:
         if only_value:
           df = df[df["is_value"] == True]
 
-        # จัดเรียงตาม Confidence Score และ EV จากมากไปน้อยที่สุด
         df = (
             df.sort_values(by=["confidence", "ev"], ascending=[False, False])
             .drop_duplicates(subset=["match"])
             .reset_index(drop=True)
         )
 
-        st.success(
-            f"วิเคราะห์สำเร็จ! คัดกรองเจอทั้งหมด {len(df)} คู่ที่ผ่านเกณฑ์"
+        st.session_state["scan_df"] = df
+        st.success(f"วิเคราะห์สำเร็จ! คัดกรองเจอทั้งหมด {len(df)} คู่")
+
+if "scan_df" in st.session_state and not st.session_state["scan_df"].empty:
+  df = st.session_state["scan_df"]
+
+  tab1, tab2, tab3 = st.tabs(
+      ["วิเคราะห์รายคู่ (AI Rating)", "🎯 โพยบิลจัดเต็ม VIP", "🏆 ตรวจผลบิล (ระบบฟรี)"]
+  )
+
+  with tab1:
+    for _, m in df.iterrows():
+      with st.container():
+        st.markdown(
+            f"**{m['match']}** — 🏆 ความมั่นใจ: **{m['confidence']}%**"
         )
+        st.caption(f"{m['time']} | {m['league']}")
+        st.markdown(f"เจ้าบ้าน: {m['h_info']}")
+        st.markdown(f"ทีมเยือน: {m['a_info']}")
+        st.info(f"{m['h2h']}")
+        st.markdown(
+            f"👉 **ทีเด็ดแนะนำ:** `{m['pick']}` | ค่าน้ำ: `{m['odds']}` | EV:"
+            f" **{m['ev']}%**"
+        )
+        st.markdown(f"สถานะ/ผลการแข่ง: **{m['result']}**")
+        st.markdown("---")
 
-        tab1, tab2 = st.tabs(["วิเคราะห์รายคู่ (AI Rating)", "🎯 โพยบิลจัดเต็ม VIP"])
+  with tab2:
+    st.subheader("📊 แผนการจัดบิลสเต็ป (Staking & Tiered Slips)")
+    st.write(
+        f"• **บิลหลัก VIP (สเต็ป 5) - ฐานทำเงิน (60%):** {round(budget * 0.6)}"
+        " บาท"
+    )
+    st.write(
+        f"• **บิลต่อยอด (สเต็ป 8) - เติบโต (20%):** {round(budget * 0.2)} บาท"
+    )
+    st.write(
+        f"• **บิลโบนัส (สเต็ป 13) - ลุ้นรางวัล (10%):** {round(budget * 0.1)}"
+        " บาท"
+    )
+    st.write(
+        f"• **บิลแจ็คพอต (สเต็ป 20) - แจ็คพอต (10%):** {round(budget * 0.1)}"
+        " บาท"
+    )
+    st.markdown("---")
 
-        with tab1:
-          for _, m in df.iterrows():
-            with st.container():
-              st.markdown(
-                  f"**{m['match']}** — 🏆 ความมั่นใจ: **{m['confidence']}%**"
-              )
-              st.caption(f"{m['time']} | {m['league']}")
-              st.markdown(f"เจ้าบ้าน: {m['h_info']}")
-              st.markdown(f"ทีมเยือน: {m['a_info']}")
-              st.info(f"{m['h2h']}")
-              st.markdown(
-                  f"👉 **ทีเด็ดแนะนำ:** `{m['pick']}` | ค่าน้ำ: `{m['odds']}` | EV:"
-                  f" **{m['ev']}%**"
-              )
-              st.markdown("---")
+    def render_slip(title, data_sub, target_count):
+      st.markdown(f"#### {title}")
+      if len(data_sub) < target_count:
+        st.warning(
+            f"⚠️ พบคู่ความมั่นใจสูงเพียง {len(data_sub)} คู่"
+            f" (ระบบแสดงเท่าที่มีเพื่อความปลอดภัย)"
+        )
+      if len(data_sub) == 0:
+        st.write("- ไม่มีคู่แข่งขันเพียงพอ -")
+      for _, row in data_sub.head(target_count).iterrows():
+        st.markdown(
+            f"✅ **{row['match']}** (ความมั่นใจ: `{row['confidence']}%`)<br>👉"
+            f" เลือก: `{row['pick']}` | ค่าน้ำ: `{row['odds']}` | EV: `{row['ev']}%`"
+            f" | ผล: **{row['result']}**",
+            unsafe_allow_html=True,
+        )
+      st.markdown("---")
 
-        with tab2:
-          st.subheader("📊 แผนการจัดบิลสเต็ป (Staking & Tiered Slips)")
-          st.write(
-              f"• **บิลหลัก VIP (สเต็ป 5) - ฐานทำเงิน (60%):**"
-              f" {round(budget * 0.6)} บาท"
-          )
-          st.write(
-              f"• **บิลต่อยอด (สเต็ป 8) - เติบโต (20%):** {round(budget * 0.2)}"
-              " บาท"
-          )
-          st.write(
-              f"• **บิลโบนัส (สเต็ป 13) - ลุ้นรางวัล (10%):**"
-              f" {round(budget * 0.1)} บาท"
-          )
-          st.write(
-              f"• **บิลแจ็คพอต (สเต็ป 20) - แจ็คพอต (10%):**"
-              f" {round(budget * 0.1)} บาท"
-          )
-          st.markdown("---")
+    render_slip("🔥 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ)", df, 5)
+    render_slip("📈 บิลต่อยอด (สเต็ป 8 คู่)", df, 8)
+    render_slip("🌟 บิลโบนัส (สเต็ป 13 คู่)", df, 13)
+    render_slip("💰 บิลแจ็คพอต (สเต็ป 20 คู่)", df, 20)
 
-          def render_slip(title, data_sub, target_count):
-            st.markdown(f"#### {title}")
-            if len(data_sub) < target_count:
-              st.warning(
-                  f"⚠️ พบคู่ความมั่นใจสูงเพียง {len(data_sub)} คู่"
-                  f" (ระบบแสดงเท่าที่มีเพื่อความปลอดภัย)"
-              )
-            if len(data_sub) == 0:
-              st.write("- ไม่มีคู่แข่งขันเพียงพอ -")
-            for _, row in data_sub.head(target_count).iterrows():
-              st.markdown(
-                  f"✅ **{row['match']}** (ความมั่นใจ: `{row['confidence']}%`)<br>👉"
-                  f" เลือก: `{row['pick']}` | ค่าน้ำ: `{row['odds']}` | EV:"
-                  f" `{row['ev']}%`",
-                  unsafe_allow_html=True,
-              )
-            st.markdown("---")
+  with tab3:
+    st.subheader("🏆 สรุปผลการแข่งขันจริง (0% API Quota Used)")
+    st.caption("ระบบตรวจผลอัตโนมัติจากไฟล์สถิติ CSV ฟรี กดเช็กได้ไม่จำกัด")
 
-          render_slip("🔥 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ)", df, 5)
-          render_slip("📈 บิลต่อยอด (สเต็ป 8 คู่)", df, 8)
-          render_slip("🌟 บิลโบนัส (สเต็ป 13 คู่)", df, 13)
-          render_slip("💰 บิลแจ็คพอต (สเต็ป 20 คู่)", df, 20)
-      else:
-        st.warning("ไม่พบคู่แข่งขันที่ผ่านเกณฑ์ +EV ในกรอบเวลาที่เลือก")
+    win_count = len(df[df["result"].str.contains("เข้าเป้า")])
+    total_finished = len(df[df["result"].str.contains("จบเกม|เข้าเป้า|ตาย")])
+
+    st.metric(
+        label="ความแม่นยำรวมวันนี้",
+        value=f"{win_count} / {total_finished} คู่",
+        delta=f"{(win_count/total_finished*100) if total_finished > 0 else 0:.1f}%",
+    )
+
+    for _, r in df.iterrows():
+      st.write(
+          f"⚽ **{r['match']}** -> ให้: `{r['pick']}` | สรุปผล:"
+          f" **{r['result']}**"
+      )
