@@ -19,7 +19,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.caption(
-    "โมเดลอัจฉริยะ: แยกเมนูสแกนและตรวจผลอิสระ (ประหยัดโควตา API 100%)"
+    "โมเดลอัจฉริยะ: อัปเกรดระบบตรวจผลแม่นยำด้วยการกรองตามวันที่แข่งขันจริง"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
@@ -274,15 +274,27 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
 
 
 # ==============================================================================
-# 4. FREE RESULT CHECKER ENGINE
+# 4. FREE RESULT CHECKER ENGINE (WITH DATE MATCHING)
 # ==============================================================================
-def check_match_result_free(csv_df, home_mapped, away_mapped, pick):
+def check_match_result_free(
+    csv_df, home_mapped, away_mapped, pick, match_date=None
+):
   if csv_df is None or csv_df.empty:
     return "⏳ ยังไม่มีผลสกอร์"
 
-  match_row = csv_df[
-      (csv_df["HomeTeam"] == home_mapped) & (csv_df["AwayTeam"] == away_mapped)
-  ]
+  # กรองตามชื่อทีมและวันที่แข่งจริง (ป้องกันการดึงผลนัดเก่าในอดีตมาแสดง)
+  match_row = pd.DataFrame()
+  if match_date is not None:
+    try:
+      match_dt_pd = pd.to_datetime(match_date)
+      match_row = csv_df[
+          (csv_df["HomeTeam"] == home_mapped)
+          & (csv_df["AwayTeam"] == away_mapped)
+          & (abs((csv_df["Date_dt"] - match_dt_pd).dt.days) <= 1)
+      ]
+    except Exception:
+      pass
+
   if match_row.empty:
     return "⏳ รอผลการแข่ง / ยังไม่เตะ"
 
@@ -479,11 +491,12 @@ def scan_league(leg_info, hours_limit):
     )
 
     match_res = check_match_result_free(
-        csv_df, m_data["home_mapped"], m_data["away_mapped"], best_pick
+        csv_df, m_data["home_mapped"], m_data["away_mapped"], best_pick, m_dt
     )
 
     results.append({
         "time": m_time,
+        "match_date": m_dt,
         "league": leg_info["name"],
         "match": f"{home} vs {away}",
         "h_info": h_info,
@@ -659,7 +672,9 @@ if menu_choice == "🔍 สแกนหาคู่ลงทุน (+EV)":
 
 elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (ฟรี 100%)":
   st.subheader("🏆 ระบบสรุปผลบิลออโต้ (0% API Quota Used)")
-  st.caption("ดึงผลสกอร์จากฐานข้อมูล CSV ฟรี ตรวจเช็กได้ตลอด 24 ชม.")
+  st.caption(
+      "ดึงผลสกอร์จากฐานข้อมูล CSV ฟรีตามวันที่แข่งขันจริง (กรองแมตช์เก่าให้อัตโนมัติ)"
+  )
 
   if (
       "saved_scan_df" in st.session_state
@@ -667,8 +682,7 @@ elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (�
   ):
     df_saved = st.session_state["saved_scan_df"]
 
-    # Re-check results against latest CSV data without hitting API
-    with st.spinner("กำลังอัปเดตสกอร์ล่าสุดจากฐานข้อมูล CSV ฟรี..."):
+    with st.spinner("กำลังอัปเดตสกอร์ล่าสุดตามวันที่แข่งขันจริง..."):
       updated_rows = []
       for _, r in df_saved.iterrows():
         csv_code = None
@@ -691,8 +705,9 @@ elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (�
           home_mapped = h_t[0] if h_t else h_name
           away_mapped = a_t[0] if a_t else a_name
 
+          m_dt = r.get("match_date")
           new_res = check_match_result_free(
-              csv_df, home_mapped, away_mapped, r["pick"]
+              csv_df, home_mapped, away_mapped, r["pick"], m_dt
           )
           r["result"] = new_res
         updated_rows.append(r)
