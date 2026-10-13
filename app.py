@@ -119,7 +119,6 @@ def fetch_csv_stats(csv_code):
   return None
 
 
-# Helper คำนวณอันดับตารางคะแนนจาก CSV
 def get_league_standings(df):
   if df is None or df.empty:
     return {}
@@ -232,14 +231,12 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   res = {
       "h_net": 0.0,
       "a_net": 0.0,
-      "lambda_h": 1.3,
-      "lambda_a": 1.1,
+      "lambda_h": None,
+      "lambda_a": None,
       "h_scored": 1.2,
       "a_scored": 1.0,
       "hr": 7,
       "ar": 7,
-      "h_info": "พัก 7 วัน (บอลถ้วย/ไม่มี CSV)",
-      "a_info": "พัก 7 วัน (บอลถ้วย/ไม่มี CSV)",
       "h2h": "ไม่พบประวัติพบกันล่าสุด",
       "h2h_score": 0,
       "home_mapped": h_api,
@@ -259,7 +256,6 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   res["home_mapped"] = home_t
   res["away_mapped"] = away_t
 
-  # ดึงอันดับตารางคะแนน
   standings = get_league_standings(df)
   res["h_rank"] = standings.get(home_t)
   res["a_rank"] = standings.get(away_t)
@@ -304,15 +300,6 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   res["a_net"] = round((a_scored - a_conceded) * fat_a, 2)
   res["lambda_h"] = lambda_h
   res["lambda_a"] = lambda_a
-  res["h_info"] = (
-      f"พัก {hr} วัน {'เตะถี่' if hr <= 3 else 'ฟิต'} (เหย้า: ยิง"
-      f" {round(h_scored,1)} เสีย {round(h_conceded,1)})"
-  )
-  res["a_info"] = (
-      f"พัก {ar} วัน {'เตะถี่' if ar <= 3 else 'ฟิต'} (เยือน: ยิง"
-      f" {round(a_scored,1)} เสีย {round(a_conceded,1)})"
-  )
-
   return res
 
 
@@ -392,7 +379,7 @@ def check_match_result_free(
 
 
 # ==============================================================================
-# 5. SCANNER CORE WITH WARNING FLAGS
+# 5. SCANNER CORE WITH MARKET DEVIG (FIXED CUP MATCH BUG)
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -458,17 +445,9 @@ def scan_league(leg_info, hours_limit):
 
     h_net, a_net = m_data["h_net"], m_data["a_net"]
     lambda_h, lambda_a = m_data["lambda_h"], m_data["lambda_a"]
-    h_info, a_info, h2hs = (
-        m_data["h_info"],
-        m_data["a_info"],
-        m_data["h2h"],
-    )
     hrank, arank = m_data["h_rank"], m_data["a_rank"]
 
-    # ข้อความแสดงอันดับ
-    rank_str = ""
-    if hrank and arank:
-      rank_str = f" [อันดับ {hrank} vs {arank}]"
+    rank_str = f" [อันดับ {hrank} vs {arank}]" if (hrank and arank) else ""
 
     hdc_label, hdc_odds, ev_hdc = "รอเปิด", 1.0, -999.0
     line_val = 0.0
@@ -481,11 +460,15 @@ def scan_league(leg_info, hours_limit):
         line_val = abs(line)
         hp, ap = h_obj["price"], a_obj["price"]
         mp_h, mp_a = devig_odds(hp, ap)
-        edge = (h_net - a_net) + line
-        p_shift = (norm_cdf(edge / 1.1) - 0.5) * 0.4
-        fp_h = max(min(mp_h + p_shift, 0.85), 0.15)
 
-        ev_h, ev_a = calculate_ev(fp_h, hp), calculate_ev(1.0 - fp_h, ap)
+        if leg_info["csv"] is None or lambda_h is None:
+          ev_h, ev_a = calculate_ev(mp_h, hp), calculate_ev(mp_a, ap)
+        else:
+          edge = (h_net - a_net) + line
+          p_shift = (norm_cdf(edge / 1.1) - 0.5) * 0.4
+          fp_h = max(min(mp_h + p_shift, 0.85), 0.15)
+          ev_h, ev_a = calculate_ev(fp_h, hp), calculate_ev(1.0 - fp_h, ap)
+
         if ev_h >= ev_a:
           ev_hdc, hdc_odds = ev_h, hp
           hdc_label = (
@@ -512,11 +495,19 @@ def scan_league(leg_info, hours_limit):
       if over and under:
         t_line = over.get("point", 2.5)
         op, up = over["price"], under["price"]
-        poisson_p_over = calculate_over_probability(
-            lambda_h, lambda_a, line=t_line
-        )
-        ev_o = calculate_ev(poisson_p_over, op)
-        ev_u = calculate_ev(1.0 - poisson_p_over, up)
+
+        # ป้องกันบั๊กบอลถ้วย: ถ้าไม่มี CSV ให้ใช้ความน่าจะเป็นจากตลาดโดยตรง (Market Devig)
+        if leg_info["csv"] is None or lambda_h is None:
+          mp_over, mp_under = devig_odds(op, up)
+          ev_o = calculate_ev(mp_over, op)
+          ev_u = calculate_ev(mp_under, up)
+        else:
+          poisson_p_over = calculate_over_probability(
+              lambda_h, lambda_a, line=t_line
+          )
+          ev_o = calculate_ev(poisson_p_over, op)
+          ev_u = calculate_ev(1.0 - poisson_p_over, up)
+
         if ev_o >= ev_u:
           ev_tot, tot_odds, tot_label = ev_o, op, f"สูงกว่า {t_line}"
         else:
@@ -531,7 +522,6 @@ def scan_league(leg_info, hours_limit):
     else:
       continue
 
-    # ⚠️ ระบบแปะป้ายเตือนสังเกต (Warning Flags - สไตล์บ้านผลบอล)
     warning_flag = None
     if hrank and arank:
       rank_diff = abs(hrank - arank)
@@ -554,12 +544,7 @@ def scan_league(leg_info, hours_limit):
       )
 
     conf_score = calculate_confidence_score(
-        best_ev,
-        m_data["hr"],
-        m_data["ar"],
-        m_data["h_scored"],
-        m_data["a_scored"],
-        best_pick,
+        best_ev, m_data["hr"], m_data["ar"], 1.2, 1.0, best_pick
     )
 
     match_res = check_match_result_free(
@@ -571,9 +556,17 @@ def scan_league(leg_info, hours_limit):
         "match_date": m_dt,
         "league": leg_info["name"],
         "match": f"{home} vs {away}{rank_str}",
-        "h_info": h_info,
-        "a_info": a_info,
-        "h2h": h2hs,
+        "h_info": (
+            f"พัก {m_data['hr']} วัน"
+            if "hr" in m_data
+            else "พัก 7 วัน (บอลถ้วย)"
+        ),
+        "a_info": (
+            f"พัก {m_data['ar']} วัน"
+            if "ar" in m_data
+            else "พัก 7 วัน (บอลถ้วย)"
+        ),
+        "h2h": m_data["h2h"],
         "pick": best_pick,
         "odds": best_odds,
         "ev": best_ev,
