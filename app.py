@@ -15,11 +15,13 @@ st.set_page_config(
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (AI Quant VIP Edition)</h3>",
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (AI Quant VIP"
+    " Edition)</h3>",
     unsafe_allow_html=True,
 )
 st.caption(
-    "โมเดลอัจฉริยะ: อัปเกรดระบบตรวจผลแม่นยำด้วยการกรองตามวันที่แข่งขันจริง"
+    "โมเดลอัจฉริยะ: อัปเกรดระบบอันดับตารางคะแนน & ป้ายเตือนสังเกต"
+    " (สไตล์บ้านผลบอล)"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
@@ -109,6 +111,36 @@ def fetch_csv_stats(csv_code):
   if dfs:
     return pd.concat(dfs, ignore_index=True)
   return None
+
+
+# Helper คำนวณอันดับตารางคะแนนจาก CSV
+def get_league_standings(df):
+  if df is None or df.empty:
+    return {}
+  table = {}
+  for _, row in df.iterrows():
+    h, a = row["HomeTeam"], row["AwayTeam"]
+    hg, ag = int(row["FTHG"]), int(row["FTAG"])
+    if h not in table:
+      table[h] = {"pts": 0, "gd": 0}
+    if a not in table:
+      table[a] = {"pts": 0, "gd": 0}
+
+    table[h]["gd"] += hg - ag
+    table[a]["gd"] += ag - hg
+
+    if hg > ag:
+      table[h]["pts"] += 3
+    elif ag > hg:
+      table[a]["pts"] += 3
+    else:
+      table[h]["pts"] += 1
+      table[a]["pts"] += 1
+
+  sorted_teams = sorted(
+      table.items(), key=lambda x: (x[1]["pts"], x[1]["gd"]), reverse=True
+  )
+  return {team[0]: rank + 1 for rank, team in enumerate(sorted_teams)}
 
 
 # ==============================================================================
@@ -206,6 +238,8 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
       "h2h_score": 0,
       "home_mapped": h_api,
       "away_mapped": a_api,
+      "h_rank": None,
+      "a_rank": None,
   }
   if df is None or df.empty:
     return res
@@ -218,6 +252,11 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
 
   res["home_mapped"] = home_t
   res["away_mapped"] = away_t
+
+  # ดึงอันดับตารางคะแนน
+  standings = get_league_standings(df)
+  res["h_rank"] = standings.get(home_t)
+  res["a_rank"] = standings.get(away_t)
 
   def rest_days(t):
     past = df[(df["HomeTeam"] == t) | (df["AwayTeam"] == t)]
@@ -282,7 +321,6 @@ def check_match_result_free(
   if csv_df is None or csv_df.empty:
     return "⏳ ยังไม่มีผลสกอร์"
 
-  # กรองตามชื่อทีมและวันที่แข่งจริง (ป้องกันการดึงผลนัดเก่าในอดีตมาแสดง)
   match_row = pd.DataFrame()
   if match_date is not None:
     try:
@@ -350,7 +388,7 @@ def check_match_result_free(
 
 
 # ==============================================================================
-# 5. SCANNER CORE
+# 5. SCANNER CORE WITH WARNING FLAGS (สไตล์บ้านผลบอล)
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -421,14 +459,22 @@ def scan_league(leg_info, hours_limit):
         m_data["a_info"],
         m_data["h2h"],
     )
+    hrank, arank = m_data["h_rank"], m_data["a_rank"]
+
+    # ข้อความแสดงอันดับ
+    rank_str = ""
+    if hrank and arank:
+      rank_str = f" [อันดับ {hrank} vs {arank}]"
 
     hdc_label, hdc_odds, ev_hdc = "รอเปิด", 1.0, -999.0
+    line_val = 0.0
     if sp_mkt and h_net is not None:
       outcomes = sp_mkt.get("outcomes", [])
       h_obj = next((o for o in outcomes if o["name"] == home), None)
       a_obj = next((o for o in outcomes if o["name"] == away), None)
       if h_obj and a_obj:
         line = h_obj.get("point", 0.0)
+        line_val = abs(line)
         hp, ap = h_obj["price"], a_obj["price"]
         mp_h, mp_a = devig_odds(hp, ap)
         edge = (h_net - a_net) + line
@@ -481,6 +527,28 @@ def scan_league(leg_info, hours_limit):
     else:
       continue
 
+    # ⚠️ ระบบแปะป้ายเตือนสังเกต (Warning Flags - สไตล์บ้านผลบอล)
+    warning_flag = None
+    if hrank and arank:
+      rank_diff = abs(hrank - arank)
+      if rank_diff >= 5 and line_val <= 0.25:
+        warning_flag = (
+            "⚠️ ราคาแปลก/ต่อน้อย: อันดับห่างกันเกิน 5 อันดับ"
+            " แต่เปิดราคาต่อแค่ปป./เสมอ"
+        )
+
+    if (
+        not warning_flag
+        and "ต่ำกว่า" in best_pick
+        and hrank
+        and arank
+        and (hrank >= 15 or arank >= 15)
+    ):
+      warning_flag = (
+          "⚠️ ระวังยิงแลก: ทีมอันดับท้ายตารางเจอกัน"
+          " เสี่ยงต่อการเปิดหน้าแลกยิงช่วงท้ายเกม"
+      )
+
     conf_score = calculate_confidence_score(
         best_ev,
         m_data["hr"],
@@ -498,7 +566,7 @@ def scan_league(leg_info, hours_limit):
         "time": m_time,
         "match_date": m_dt,
         "league": leg_info["name"],
-        "match": f"{home} vs {away}",
+        "match": f"{home} vs {away}{rank_str}",
         "h_info": h_info,
         "a_info": a_info,
         "h2h": h2hs,
@@ -506,6 +574,7 @@ def scan_league(leg_info, hours_limit):
         "odds": best_odds,
         "ev": best_ev,
         "confidence": conf_score,
+        "warning": warning_flag,
         "result": match_res,
         "is_value": is_v,
     })
@@ -618,6 +687,8 @@ if menu_choice == "🔍 สแกนหาคู่ลงทุน (+EV)":
               f"👉 **ทีเด็ดแนะนำ:** `{m['pick']}` | ค่าน้ำ: `{m['odds']}` | EV:"
               f" **{m['ev']}%**"
           )
+          if m.get("warning"):
+            st.warning(f"{m['warning']}")
           st.markdown(f"สถานะ/ผลการแข่ง: **{m['result']}**")
           st.markdown("---")
 
@@ -651,10 +722,15 @@ if menu_choice == "🔍 สแกนหาคู่ลงทุน (+EV)":
         if len(data_sub) == 0:
           st.write("- ไม่มีคู่แข่งขันเพียงพอ -")
         for _, row in data_sub.head(target_count).iterrows():
+          warn_str = (
+              f" <br><small style='color:orange;'>{row['warning']}</small>"
+              if row.get("warning")
+              else ""
+          )
           st.markdown(
               f"✅ **{row['match']}** (ความมั่นใจ:"
               f" `{row['confidence']}%`)<br>👉 เลือก: `{row['pick']}` |"
-              f" ค่าน้ำ: `{row['odds']}` | EV: `{row['ev']}%` | ผล:"
+              f" ค่าน้ำ: `{row['odds']}` | EV: `{row['ev']}%`{warn_str} | ผล:"
               f" **{row['result']}**",
               unsafe_allow_html=True,
           )
@@ -692,7 +768,9 @@ elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (�
             break
         csv_df = fetch_csv_stats(csv_code) if csv_code else None
 
-        parts = r["match"].split(" vs ")
+        # ตัดข้อมูลอันดับออกเพื่อนำชื่อทีมไปแมตช์หาผลแข่ง
+        raw_match_name = r["match"].split(" [อันดับ")[0]
+        parts = raw_match_name.split(" vs ")
         if len(parts) == 2:
           h_name, a_name = parts[0], parts[1]
           teams = (
