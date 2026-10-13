@@ -6,25 +6,24 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. SETUP & CONFIGURATION (GOLDEN SLIP DUAL-ENGINE)
+# 1. SETUP & CONFIGURATION (DEEP FORM DUAL-ENGINE)
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Golden Slip VIP", page_icon="⚽", layout="centered"
+    page_title="Value Bet Pro - Deep Form VIP", page_icon="⚽", layout="centered"
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Golden Slip VIP)</h3>",
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Deep Form Dual-Engine)"
+    "</h3>",
     unsafe_allow_html=True,
 )
-st.caption(
-    "ระบบจัดโพย 2 มิติ: คัดเฉพาะ 'บิล 5 คู่ทองคำ' ที่มีความมั่นใจและเข้าเกณฑ์ที่สุด"
-)
+st.caption("ระบบวิเคราะห์ 2 สมอง: ผสานตารางคะแนน + ฟอร์ม 5 นัดหลัง + ฟอร์มเหย้า/เยือน")
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
 
 
 # ==============================================================================
-# 2. DATA FETCHING & TEMPORAL STANDINGS
+# 2. DATA FETCHING & ADVANCED STATS ENGINE
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
@@ -145,10 +144,72 @@ def get_temporal_standings(df, match_date):
   return {team[0]: rank + 1 for rank, team in enumerate(sorted_teams)}
 
 
+def get_team_recent_form(df, team, match_date, n=5):
+  """คำนวณฟอร์ม 5 นัดหลังสุด (แต้ม, ได้, เสีย)"""
+  if df is None or df.empty:
+    return {"pts": 0, "gf": 0, "ga": 0, "form_str": "-"}
+  past_df = df[
+      (df["Date_dt"] < match_date)
+      & ((df["HomeTeam"] == team) | (df["AwayTeam"] == team))
+  ].sort_values("Date_dt", ascending=False)
+  recent = past_df.head(n)
+  if recent.empty:
+    return {"pts": 0, "gf": 0, "ga": 0, "form_str": "-"}
+
+  pts, gf, ga = 0, 0, 0
+  form_chars = []
+  for _, row in recent.iterrows():
+    is_home = row["HomeTeam"] == team
+    hg, ag = int(row["FTHG"]), int(row["FTAG"])
+    t_g = hg if is_home else ag
+    o_g = ag if is_home else hg
+    gf += t_g
+    ga += o_g
+    if t_g > o_g:
+      pts += 3
+      form_chars.append("W")
+    elif t_g == o_g:
+      pts += 1
+      form_chars.append("D")
+    else:
+      form_chars.append("L")
+  return {
+      "pts": pts,
+      "gf": gf,
+      "ga": ga,
+      "form_str": "".join(form_chars),
+  }
+
+
+def get_team_home_away_form(df, team, is_home, match_date, n=3):
+  """คำนวณฟอร์มเฉพาะในบ้านหรือนอกบ้าน 3 นัดหลังสุด"""
+  if df is None or df.empty:
+    return {"pts": 0, "gf": 0, "ga": 0}
+  col = "HomeTeam" if is_home else "AwayTeam"
+  past_df = df[(df["Date_dt"] < match_date) & (df[col] == team)].sort_values(
+      "Date_dt", ascending=False
+  )
+  recent = past_df.head(n)
+  if recent.empty:
+    return {"pts": 0, "gf": 0, "ga": 0}
+  pts, gf, ga = 0, 0, 0
+  for _, row in recent.iterrows():
+    hg, ag = int(row["FTHG"]), int(row["FTAG"])
+    t_g = hg if is_home else ag
+    o_g = ag if is_home else hg
+    gf += t_g
+    ga += o_g
+    if t_g > o_g:
+      pts += 3
+    elif t_g == o_g:
+      pts += 1
+  return {"pts": pts, "gf": gf, "ga": ga}
+
+
 # ==============================================================================
 # 3. RESULT CHECKER ENGINE
 # ==============================================================================
-def check_match_result(csv_df, home_mapped, away_mapped, pick, match_date=None):
+def check_match_result(csv_df, home_mapped, away_mapped, match_date=None):
   if csv_df is None or csv_df.empty:
     return "⏳ ยังไม่มีผลสกอร์"
   match_row = pd.DataFrame()
@@ -170,7 +231,7 @@ def check_match_result(csv_df, home_mapped, away_mapped, pick, match_date=None):
 
 
 # ==============================================================================
-# 4. DUAL ANALYSIS & GOLDEN SCORING ENGINE
+# 4. DEEP FORM DUAL-ENGINE SCANNER
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -227,7 +288,13 @@ def scan_league(leg_info, hours_limit):
     hrank, arank = standings.get(home), standings.get(away)
     rank_str = f" [อันดับ {hrank} vs {arank}]" if (hrank and arank) else ""
 
-    quant_pick, quant_odds, quant_conf = "รอเปิด", 1.90, 75.0
+    # ดึงสถิติฟอร์ม 5 นัดหลัง และฟอร์มเหย้า/เยือน
+    h_form = get_team_recent_form(csv_df, home, m_dt, 5)
+    a_form = get_team_recent_form(csv_df, away, m_dt, 5)
+    h_home_form = get_team_home_away_form(csv_df, home, True, m_dt, 3)
+    a_away_form = get_team_home_away_form(csv_df, away, False, m_dt, 3)
+
+    quant_pick, quant_odds, quant_conf = "รอเปิด", 1.90, 70.0
     trap_pick, trap_odds, trap_score, trap_note = (
         "รอเปิด",
         1.90,
@@ -243,41 +310,56 @@ def scan_league(leg_info, hours_limit):
         line = h_obj.get("point", 0.0)
         hp, ap = h_obj["price"], a_obj["price"]
 
-        # --- 1. สายคณิตศาสตร์ (Quant) ---
+        # --- 1. สมองที่ 1: Pure Quant (ผสานอันดับ + ฟอร์ม 5 นัด + ฟอร์มเหย้าเยือน) ---
         if hrank and arank:
-          diff = abs(hrank - arank)
-          quant_conf = min(70.0 + (diff * 2.5), 95.0)
-          if hrank < arank:
+          rank_diff = arank - hrank  # บวกแปลว่าเจ้าบ้านอันดับดีกว่า
+          form_diff = (
+              h_form["pts"] - a_form["pts"]
+          )  # แต้มฟอร์ม 5 นัดหลังต่างกันเท่าไหร่
+          quant_conf = min(
+              max(70.0 + (rank_diff * 1.5) + (form_diff * 1.2), 55.0), 96.0
+          )
+
+          if hrank < arank and h_form["pts"] >= a_form["pts"]:
             quant_pick = (
                 f"ต่อ {home} ({line})"
                 if line < 0
                 else f"วาง {home} (เสมอ)"
             )
             quant_odds = hp
-          else:
+          elif hrank > arank:
             quant_pick = f"รอง {home} (+{line})" if line > 0 else f"รอง {home} (0)"
+            quant_odds = hp
+          else:
+            quant_pick = (
+                f"ต่อ {home} ({line})"
+                if line < 0
+                else f"วาง {home} (เสมอ)"
+            )
             quant_odds = hp
         else:
           quant_pick = f"ต่อ {home} ({line})" if line < 0 else f"วาง {home} (เสมอ)"
           quant_odds = hp
-          quant_conf = 72.0
+          quant_conf = 70.0
 
-        # --- 2. สายอ่านกับดักราคา (Trap Hunter) ---
+        # --- 2. สมองที่ 2: Trap Hunter (อ่านกับดักราคา + เช็กฟอร์มตบตา) ---
         if hrank and arank:
-          rank_diff = hrank - arank
-          if rank_diff >= 6 and line >= -0.5:
-            trap_pick = f"วาง {home} (เปิดราคาข่ม/ต่อน้อย)"
+          r_diff = hrank - arank  # ถ้าบวกเยอะ เจ้าบ้านอันดับแย่กว่ามาก
+          if r_diff >= 6 and line >= -0.5 and h_home_form["pts"] >= 5:
+            # อันดับห่างแต่ต่อน้อย และฟอร์มในบ้านช่วงนี้เหนียวแน่น -> กับดักเจ้าบ้านมีของ
+            trap_pick = f"วาง {home} (ต่อน้อยผิดปกติ แต่ฟอร์มในบ้านแกร่ง)"
             trap_odds = hp
-            trap_score = 92.0  # ให้คะแนนสูงเพราะเจอ Trap ชัดเจน
+            trap_score = 92.0
             trap_note = (
-                "🔥 Trap Detected: อันดับห่างแต่ต่อน้อย -> มั่นใจเจ้าบ้านมีของ"
+                "🔥 Trap Detected: อันดับแย่แต่ต่อน้อย + ฟอร์มในบ้านดี -> ลุยเจ้าบ้าน"
             )
-          elif line <= -1.75:
+          elif line <= -1.75 and a_away_form["pts"] >= 4:
+            # ต่อแพงเวอร์ แต่ทีมเยือนฟอร์มนอกบ้านช่วงหลังเริ่มเหนียว
             trap_pick = f"รองทีมเยือน (สวนเรตต่อแพงเวอร์ > 1.75)"
             trap_odds = ap
             trap_score = 88.0
             trap_note = (
-                "🔥 Trap Detected: ต่อแพงลิบลิ่ว -> สวนรองปลอดภัยกว่า"
+                "🔥 Trap Detected: ต่อแพงเกินไป + ทีมเยือนนอกบ้านสู้ได้ -> สวนรอง"
             )
           else:
             trap_pick = (
@@ -285,25 +367,32 @@ def scan_league(leg_info, hours_limit):
             )
             trap_odds = hp
             trap_score = 65.0
-            trap_note = "🛡️ Standard Play ตามเรตตลาดปกติ"
+            trap_note = (
+                f"🛡️ Standard Play (ฟอร์ม 5 นัด: {home}[{h_form['form_str']}] vs"
+                f" {away}[{a_form['form_str']}])"
+            )
         else:
           trap_pick = (
               f"ต่อ {home} ({line})" if line < 0 else f"วาง {home} (เสมอ)"
           )
           trap_odds = hp
           trap_score = 60.0
-          trap_note = "🛡️ บอลไม่มีตารางคะแนนอ้างอิง"
+          trap_note = "🛡️ บอลเปิดเรตปกติ ไม่มีข้อมูลตารางเปรียบเทียบ"
 
-    match_res = check_match_result(csv_df, home, away, quant_pick, m_dt)
+    match_res = check_match_result(csv_df, home, away, m_dt)
 
     results.append({
         "time": m_time,
         "match_date": m_dt,
         "league": leg_info["name"],
         "match": f"{home} vs {away}{rank_str}",
+        "form_info": (
+            f"ฟอร์ม 5 นัด: {home} [{h_form['form_str']} - {h_form['pts']}แต้ม]"
+            f" vs {away} [{a_form['form_str']} - {a_form['pts']}แต้ม]"
+        ),
         "quant_pick": quant_pick,
         "quant_odds": quant_odds,
-        "quant_conf": quant_conf,
+        "quant_conf": round(quant_conf, 1),
         "trap_pick": trap_pick,
         "trap_odds": trap_odds,
         "trap_score": trap_score,
@@ -314,19 +403,19 @@ def scan_league(leg_info, hours_limit):
 
 
 # ==============================================================================
-# 5. STREAMLIT UI (GOLDEN SLIP TABS)
+# 5. STREAMLIT UI (DEEP FORM GOLDEN SLIPS)
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("📌 เมนูจัดโพยสเต็ปทองคำ")
+st.sidebar.header("📌 เมนูจัดโพยสเต็ป 2 สมอง")
 menu_choice = st.sidebar.radio(
     "เลือกหน้าการทำงาน",
-    ["🔥 จัดบิล 5 คู่ทองคำ", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
+    ["🔥 จัดบิล 5 คู่ทองคำ (เจาะลึกสถิติ)", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
 )
 
 st.sidebar.markdown("---")
 
-if menu_choice == "🔥 จัดบิล 5 คู่ทองคำ":
+if menu_choice == "🔥 จัดบิล 5 คู่ทองคำ (เจาะลึกสถิติ)":
   st.sidebar.header("ตั้งค่าการสแกน")
   if "quota_remaining" in st.session_state:
     st.sidebar.metric(
@@ -350,13 +439,15 @@ if menu_choice == "🔥 จัดบิล 5 คู่ทองคำ":
   )
   st.session_state["budget"] = budget
 
-  scan_btn = st.sidebar.button("🚀 สแกนและจัดบิล 5 คู่ทองคำ", type="primary")
+  scan_btn = st.sidebar.button(
+      "🚀 สแกนและจัดบิล 5 คู่ทองคำ (วิเคราะห์ฟอร์มลึก)", type="primary"
+  )
 
   if scan_btn:
     if not selected:
       st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
     else:
-      with st.spinner("กำลังคัดกรองคู่เด็ดระดับ VIP..."):
+      with st.spinner("กำลังประมวลผลสถิติ 5 นัดและเรตราคาตลาด..."):
         res_all = []
         quota_err = False
         for l_key in selected:
@@ -374,7 +465,7 @@ if menu_choice == "🔥 จัดบิล 5 คู่ทองคำ":
           df = pd.DataFrame(res_all)
           df = df.drop_duplicates(subset=["match"]).reset_index(drop=True)
           st.session_state["saved_scan_df"] = df
-          st.success(f"สแกนสำเร็จ! คัดกรองคู่แข่งขันเรียบร้อย")
+          st.success("สแกนสำเร็จ! ดึงสถิติฟอร์มและจัดเรียงบิลเรียบร้อย")
 
   if (
       "saved_scan_df" in st.session_state
@@ -383,45 +474,48 @@ if menu_choice == "🔥 จัดบิล 5 คู่ทองคำ":
     df = st.session_state["saved_scan_df"]
     budg = st.session_state.get("budget", 1000)
 
-    # แบ่งเป็น 2 แท็บ: บิล 5 คู่ทองคำ (Quant) และ บิล 5 คู่ทองคำ (Trap Hunter)
     tab_quant, tab_trap = st.tabs(
         [
-            "📊 บิลหลัก Quant (สเต็ป 5 คู่ทองคำ)",
-            "🧠 บิลหลัก Trap Hunter (สเต็ป 5 คู่ทองคำ)",
+            "📊 บิลหลัก Quant (สเต็ป 5 คู่ทองคำ + ฟอร์ม)",
+            "🧠 บิลหลัก Trap Hunter (สเต็ป 5 คู่ทองคำ + จับกับดัก)",
         ]
     )
 
     # --- TAB 1: Quant Golden Slip ---
     with tab_quant:
-      st.subheader("🔥 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ - Pure Quant)")
+      st.subheader(
+          "🔥 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ - Pure Quant + Deep Form)"
+      )
       st.write(
-          f"• **งบลงทุนจัดบิล:** {budg} บาท (จัดเรียงตามความมั่นใจสูงสุด)"
+          f"• **งบลงทุนจัดบิล:** {budg} บาท (เรียงตามคะแนนความมั่นใจจากสถิติจริง)"
       )
       st.markdown("---")
 
-      # จัดเรียงตามความมั่นใจ (quant_conf) จากมากไปน้อย
       df_quant_sorted = df.sort_values(
           by="quant_conf", ascending=False
       ).reset_index(drop=True)
 
       for _, row in df_quant_sorted.head(5).iterrows():
         st.markdown(
-            f"✅ **{row['match']}** (ความมั่นใจ: `{row['quant_conf']}%`)<br>👉"
-            f" เลือก: `{row['quant_pick']}` | ค่าน้ำ: `{row['quant_odds']}` |"
-            f" สถานะ: **{row['result']}**",
+            f"✅ **{row['match']}** (ความมั่นใจ:"
+            f" `{row['quant_conf']}%`)<br><small"
+            f" style='color:gray;'>📊 {row['form_info']}</small><br>👉 เลือก:"
+            f" `{row['quant_pick']}` | ค่าน้ำ: `{row['quant_odds']}` | สถานะ:"
+            f" **{row['result']}**",
             unsafe_allow_html=True,
         )
         st.markdown("---")
 
     # --- TAB 2: Trap Hunter Golden Slip ---
     with tab_trap:
-      st.subheader("🎯 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ - Trap Hunter)")
+      st.subheader(
+          "🎯 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ - Trap Hunter + Form Check)"
+      )
       st.write(
-          f"• **งบลงทุนจัดบิล:** {budg} บาท (จัดเรียงตามความคมในการจับกับดักราคา)"
+          f"• **งบลงทุนจัดบิล:** {budg} บาท (เรียงตามความคมในการจับกับดักราคาและฟอร์ม)"
       )
       st.markdown("---")
 
-      # จัดเรียงตามคะแนนจับกับดัก (trap_score) จากมากไปน้อย
       df_trap_sorted = df.sort_values(
           by="trap_score", ascending=False
       ).reset_index(drop=True)
@@ -429,17 +523,16 @@ if menu_choice == "🔥 จัดบิล 5 คู่ทองคำ":
       for _, row in df_trap_sorted.head(5).iterrows():
         st.markdown(
             f"🎯 **{row['match']}** (คะแนนจับกับดัก:"
-            f" `{row['trap_score']}%`)<br>👉 เลือก: `{row['trap_pick']}` |"
-            f" ค่าน้ำ: `{row['trap_odds']}`<br><small"
+            f" `{row['trap_score']}%`)<br><small"
+            f" style='color:gray;'>📊 {row['form_info']}</small><br>👉 เลือก:"
+            f" `{row['trap_pick']}` | ค่าน้ำ: `{row['trap_odds']}`<br><small"
             f" style='color:orange;'>{row['trap_note']}</small> | สถานะ:"
             f" **{row['result']}**",
             unsafe_allow_html=True,
         )
         st.markdown("---")
   else:
-    st.info(
-        "💡 กรุณากดปุ่ม '🚀 สแกนและจัดบิล 5 คู่ทองคำ' ที่เมนูด้านข้างเพื่อเริ่มสร้างโพย"
-    )
+    st.info("💡 กรุณากดปุ่มสแกนที่เมนูด้านข้างเพื่อเริ่มต้นใช้งาน")
 
 elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)":
   st.subheader("🏆 ตรวจผลบิลอัตโนมัติ")
