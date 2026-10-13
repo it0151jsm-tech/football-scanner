@@ -43,9 +43,15 @@ def get_active_leagues():
       "soccer_france_league1": "F1",
       "soccer_netherlands_eredivisie": "N1",
       "soccer_portugal_primeira_liga": "P1",
+      "soccer_uefa_champs_league": None,
   }
 
   sorted_leagues = {
+      "soccer_uefa_champs_league": {
+          "name": "UEFA Champions League (ยูฟ่า แชมเปียนส์ลีก)",
+          "key": "soccer_uefa_champs_league",
+          "csv": None,
+      },
       "soccer_epl": {
           "name": "Premier League (พรีเมียร์ลีก อังกฤษ)",
           "key": "soccer_epl",
@@ -144,7 +150,7 @@ def get_league_standings(df):
 
 
 # ==============================================================================
-# 3. ADVANCED QUANT MATH & CONFIDENCE SCORING ENGINE (คงเดิม 100%)
+# 3. ADVANCED QUANT MATH & CONFIDENCE SCORING ENGINE
 # ==============================================================================
 def norm_cdf(x):
   return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
@@ -224,16 +230,16 @@ def calculate_confidence_score(ev, hr, ar, h_scored, a_scored, pick_type):
 
 def analyze_match_advanced(df, h_api, a_api, m_date):
   res = {
-      "h_net": None,
-      "a_net": None,
-      "lambda_h": None,
-      "lambda_a": None,
-      "h_scored": 0,
-      "a_scored": 0,
+      "h_net": 0.0,
+      "a_net": 0.0,
+      "lambda_h": 1.3,
+      "lambda_a": 1.1,
+      "h_scored": 1.2,
+      "a_scored": 1.0,
       "hr": 7,
       "ar": 7,
-      "h_info": "พัก 7 วัน",
-      "a_info": "พัก 7 วัน",
+      "h_info": "พัก 7 วัน (บอลถ้วย/ไม่มี CSV)",
+      "a_info": "พัก 7 วัน (บอลถ้วย/ไม่มี CSV)",
       "h2h": "ไม่พบประวัติพบกันล่าสุด",
       "h2h_score": 0,
       "home_mapped": h_api,
@@ -278,8 +284,6 @@ def analyze_match_advanced(df, h_api, a_api, m_date):
   res["h2h_score"] = h2h_sc
 
   if len(home_home_df) < 2 or len(away_away_df) < 2:
-    res["h_info"] = f"พัก {hr} วัน (ข้อมูลเหย้าไม่พอ)"
-    res["a_info"] = f"พัก {ar} วัน (ข้อมูลเยือนไม่พอ)"
     return res
 
   h_scored = home_home_df["FTHG"].mean()
@@ -388,7 +392,7 @@ def check_match_result_free(
 
 
 # ==============================================================================
-# 5. SCANNER CORE WITH WARNING FLAGS (สไตล์บ้านผลบอล)
+# 5. SCANNER CORE WITH WARNING FLAGS
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -468,7 +472,7 @@ def scan_league(leg_info, hours_limit):
 
     hdc_label, hdc_odds, ev_hdc = "รอเปิด", 1.0, -999.0
     line_val = 0.0
-    if sp_mkt and h_net is not None:
+    if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
       h_obj = next((o for o in outcomes if o["name"] == home), None)
       a_obj = next((o for o in outcomes if o["name"] == away), None)
@@ -501,7 +505,7 @@ def scan_league(leg_info, hours_limit):
           )
 
     tot_label, tot_odds, ev_tot = "รอเปิด", 1.0, -999.0
-    if tot_mkt and lambda_h is not None:
+    if tot_mkt:
       outcomes = tot_mkt.get("outcomes", [])
       over = next((o for o in outcomes if o["name"] == "Over"), None)
       under = next((o for o in outcomes if o["name"] == "Under"), None)
@@ -582,7 +586,7 @@ def scan_league(leg_info, hours_limit):
 
 
 # ==============================================================================
-# 6. STREAMLIT UI (VIP QUANT DASHBOARD - SEPARATE MENUS)
+# 6. STREAMLIT UI (VIP QUANT DASHBOARD)
 # ==============================================================================
 active_leagues = get_active_leagues()
 
@@ -608,12 +612,7 @@ if menu_choice == "🔍 สแกนหาคู่ลงทุน (+EV)":
   selected = st.sidebar.multiselect(
       "เลือกรายการลีก",
       options=list(options.keys()),
-      default=[
-          "soccer_epl",
-          "soccer_england_championship",
-          "soccer_england_league_one",
-          "soccer_england_league_two",
-      ],
+      default=["soccer_uefa_champs_league", "soccer_england_championship"],
       format_func=lambda x: options[x],
   )
 
@@ -621,7 +620,7 @@ if menu_choice == "🔍 สแกนหาคู่ลงทุน (+EV)":
       "กรอบเวลาการแข่งขัน", options=[24, 36, 48, 72], index=0
   )
   only_value = st.sidebar.checkbox(
-      "แสดงเฉพาะคู่ที่มี +EV >= 2.0% เท่านั้น", value=True
+      "แสดงเฉพาะคู่ที่มี +EV >= 2.0% เท่านั้น", value=False
   )
   budget = st.sidebar.number_input(
       "งบลงทุนรวมวันนี้ (บาท)", value=1000, step=100
@@ -768,7 +767,6 @@ elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (�
             break
         csv_df = fetch_csv_stats(csv_code) if csv_code else None
 
-        # ตัดข้อมูลอันดับออกเพื่อนำชื่อทีมไปแมตช์หาผลแข่ง
         raw_match_name = r["match"].split(" [อันดับ")[0]
         parts = raw_match_name.split(" vs ")
         if len(parts) == 2:
@@ -841,6 +839,5 @@ elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (�
   else:
     st.warning(
         "⚠️ ยังไม่มีข้อมูลโพยบิลในระบบ กรุณาไปที่เมนูซ้าย **'🔍 สแกนหาคู่ลงทุน"
-        " (+EV)'** เพื่อกดสแกนโพยก่อน 1 ครั้ง (ระบบจะจำค่าไว้ให้ท่านกดตรวจผลที่หน้านี้ได้ตลอดเวลา"
-        " โดยไม่เสียโควตาเพิ่ม)"
+        " (+EV)'** เพื่อกดสแกนโพยก่อน 1 ครั้ง"
     )
