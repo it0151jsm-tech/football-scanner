@@ -5,19 +5,18 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. SETUP & CONFIGURATION (BOOKMAKER EV+ & TRAP DUAL-ENGINE)
+# 1. SETUP & CONFIGURATION (ALL-MARKET DUAL-ENGINE)
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Bookmaker VIP", page_icon="⚽", layout="centered"
+    page_title="Value Bet Pro - All-Market VIP", page_icon="⚽", layout="centered"
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Bookmaker EV+ & Trap"
-    " Hunter)</h3>",
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (All-Market EV+ & Trap)</h3>",
     unsafe_allow_html=True,
 )
 st.caption(
-    "ระบบ 2 สมองระดับสูง: ผสมวิธีคิดแบบโต๊ะ (Expected Value) + อ่านราคาดักมหาชน"
+    "ระบบ 2 สมองฉบับไร้ขีดจำกัด: แนะนำตัวชัวร์ครบทุกตลาด (ต่อ / รอง / สูง / ต่ำ)"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
@@ -127,11 +126,17 @@ def get_temporal_standings(df, match_date):
     h, a = row["HomeTeam"], row["AwayTeam"]
     hg, ag = int(row["FTHG"]), int(row["FTAG"])
     if h not in table:
-      table[h] = {"pts": 0, "gd": 0}
+      table[h] = {"pts": 0, "gd": 0, "gf": 0, "ga": 0, "mp": 0}
     if a not in table:
-      table[a] = {"pts": 0, "gd": 0}
+      table[a] = {"pts": 0, "gd": 0, "gf": 0, "ga": 0, "mp": 0}
     table[h]["gd"] += hg - ag
     table[a]["gd"] += ag - hg
+    table[h]["gf"] += hg
+    table[h]["ga"] += ag
+    table[a]["gf"] += ag
+    table[a]["ga"] += hg
+    table[h]["mp"] += 1
+    table[a]["mp"] += 1
     if hg > ag:
       table[h]["pts"] += 3
     elif ag > hg:
@@ -142,7 +147,14 @@ def get_temporal_standings(df, match_date):
   sorted_teams = sorted(
       table.items(), key=lambda x: (x[1]["pts"], x[1]["gd"]), reverse=True
   )
-  return {team[0]: rank + 1 for rank, team in enumerate(sorted_teams)}
+  res = {}
+  for rank, (team, stats) in enumerate(sorted_teams):
+    res[team] = {
+        "rank": rank + 1,
+        "avg_gf": stats["gf"] / max(stats["mp"], 1),
+        "avg_ga": stats["ga"] / max(stats["mp"], 1),
+    }
+  return res
 
 
 def format_handicap_pick(home, line):
@@ -176,7 +188,7 @@ def check_match_result(csv_df, home_mapped, away_mapped, match_date=None):
 
 
 # ==============================================================================
-# 3. BOOKMAKER THINKING & TRAP SCANNER
+# 3. ALL-MARKET EV+ & TRAP SCANNER ENGINE
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -184,7 +196,7 @@ def scan_league(leg_info, hours_limit):
   params = {
       "apiKey": API_KEY,
       "regions": "eu",
-      "markets": "h2h,spreads,totals",
+      "markets": "spreads,totals",  # ดึงทั้งแฮนดิแคป และสูง/ต่ำ
       "oddsFormat": "decimal",
   }
   try:
@@ -219,6 +231,8 @@ def scan_league(leg_info, hours_limit):
     bm_list = m.get("bookmakers", [])
     if not bm_list:
       continue
+
+    # ดึงราคาตลาด Spreads และ Totals
     sp_mkt = next(
         (
             k
@@ -228,99 +242,185 @@ def scan_league(leg_info, hours_limit):
         ),
         None,
     )
+    tot_mkt = next(
+        (
+            k
+            for bm in bm_list
+            for k in bm.get("markets", [])
+            if k["key"] == "totals"
+        ),
+        None,
+    )
 
     standings = get_temporal_standings(csv_df, m_dt) if csv_df is not None else {}
-    hrank, arank = standings.get(home), standings.get(away)
+    h_data = standings.get(home, {})
+    a_data = standings.get(away, {})
+    hrank, arank = h_data.get("rank"), a_data.get("rank")
     rank_str = f" [อันดับ {hrank} vs {arank}]" if (hrank and arank) else ""
 
-    # สมอง 1: Bookmaker EV+
+    # --------------------------------------------------------------------------
+    # 1. สมอง EV+ (เปรียบเทียบทุกตลาดเพื่อคัดตัวได้เปรียบสูงสุด)
+    # --------------------------------------------------------------------------
     ev_pick, ev_odds, ev_score, ev_note = (
         format_handicap_pick(home, 0),
         1.90,
         70.0,
-        "ค่าน้ำมาตรฐาน",
-    )
-    # สมอง 2: Trap Hunter
-    trap_pick, trap_odds, trap_score, trap_note = (
-        format_handicap_pick(home, 0),
-        1.90,
-        50.0,
-        "วิเคราะห์ปกติ",
+        "ราคาปกติ",
     )
 
+    candidates = []  # เก็บตัวเลือกจากทุกตลาดเพื่อหาค่า EV สูงสุด
+
+    # 1.1 วิเคราะห์ตลาด Spreads
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
       h_obj = next((o for o in outcomes if o["name"] == home), None)
       a_obj = next((o for o in outcomes if o["name"] == away), None)
-
       if h_obj and a_obj:
         line = h_obj.get("point", 0.0)
         hp, ap = h_obj["price"], a_obj["price"]
 
-        # --- 1. สมองคิดแบบโต๊ะ (Bookmaker EV+) ---
         if hrank and arank:
-          # คำนวณความน่าจะเป็นจริงจากอันดับตารางคะแนน (Win Probability)
           rank_diff = arank - hrank
           true_win_prob = min(max(0.50 + (rank_diff * 0.03), 0.25), 0.85)
-
-          # คำนวณค่าคาดหวัง Expected Value (EV) = (Prob * Odds) - 1
-          # ถ้าเจ้าบ้านเป็นต่อ (line < 0) คำนวณ EV ฝั่งเจ้าบ้าน
           ev_h = (true_win_prob * hp) - 1.0
           ev_a = ((1.0 - true_win_prob) * ap) - 1.0
 
-          if ev_h > ev_a:
-            ev_pick = format_handicap_pick(home, line)
-            ev_odds = hp
-            ev_score = round(70.0 + (ev_h * 100), 1)
-            ev_note = f"📈 Bookie EV+: มีมูลค่ากำไรคาดหวัง (+{round(ev_h*100, 1)}%)"
+          if ev_h >= ev_a:
+            candidates.append({
+                "pick": format_handicap_pick(home, line),
+                "odds": hp,
+                "score": round(70.0 + (ev_h * 100), 1),
+                "note": (
+                    f"📈 EV+ (แฮนดิแคป): ได้เปรียบค่าน้ำต่อ"
+                    f" (+{round(ev_h*100, 1)}%)"
+                ),
+            })
           else:
-            ev_pick = (
-                f"รองทีมเยือน (+{-line})"
-                if line < 0
-                else format_handicap_pick(away, -line)
-            )
-            ev_odds = ap
-            ev_score = round(70.0 + (ev_a * 100), 1)
-            ev_note = f"📈 Bookie EV+: ฝั่งรองคุ้มค่าน้ำมากกว่า (+{round(ev_a*100, 1)}%)"
-        else:
-          ev_pick = format_handicap_pick(home, line)
-          ev_odds = hp
-          ev_score = 72.0
-          ev_note = "📈 Bookie EV+: เรตค่าน้ำตลาดสมดุล"
+            candidates.append({
+                "pick": (
+                    f"รอง {away} (+{-line})"
+                    if line < 0
+                    else format_handicap_pick(away, -line)
+                ),
+                "odds": ap,
+                "score": round(70.0 + (ev_a * 100), 1),
+                "note": (
+                    f"📈 EV+ (แฮนดิแคป): ได้เปรียบค่าน้ำรอง"
+                    f" (+{round(ev_a*100, 1)}%)"
+                ),
+            })
 
-        # --- 2. สมองจับกับดักดักมหาชน (Trap Hunter) ---
-        public_teams = [
-            "Real Madrid",
-            "Barcelona",
-            "Manchester United",
-            "Liverpool",
-            "Arsenal",
-            "Bayern Munich",
-            "Paris Saint-Germain",
-        ]
-        is_public = any(pt in home or pt in away for pt in public_teams)
+    # 1.2 วิเคราะห์ตลาด Totals (สูง/ต่ำ 2.5)
+    if tot_mkt:
+      t_outcomes = tot_mkt.get("outcomes", [])
+      over_obj = next(
+          (o for o in t_outcomes if o["name"].lower() == "over"), None
+      )
+      under_obj = next(
+          (o for o in t_outcomes if o["name"].lower() == "under"), None
+      )
 
-        if is_public and line <= -1.25:
-          # โต๊ะชอบเปิดทีมมหาชนต่อแพง -> สวนรอง
+      if over_obj and under_obj:
+        t_line = over_obj.get("point", 2.5)
+        op, up = over_obj["price"], under_obj["price"]
+
+        if h_data and a_data:
+          # ประเมินประตูรวมคาดหวัง (Expected Goals)
+          exp_goals = (h_data.get("avg_gf", 1.2) + a_data.get("avg_ga", 1.2)) / 2 + (
+              a_data.get("avg_gf", 1.2) + h_data.get("avg_ga", 1.2)
+          ) / 2
+          prob_over = min(
+              max(0.45 + ((exp_goals - t_line) * 0.20), 0.20), 0.80
+          )
+          prob_under = 1.0 - prob_over
+
+          ev_over = (prob_over * op) - 1.0
+          ev_under = (prob_under * up) - 1.0
+
+          if ev_over > ev_under and exp_goals > 2.7:
+            candidates.append({
+                "pick": f"🔥 สกอร์สูง (Over {t_line})",
+                "odds": op,
+                "score": round(72.0 + (ev_over * 100), 1),
+                "note": (
+                    f"⚽ EV+ (สูง/ต่ำ): เกมบุกจัดจ้าน คาดยิงรวม {round(exp_goals,1)} ลูก"
+                ),
+            })
+          elif ev_under > ev_over and exp_goals < 2.3:
+            candidates.append({
+                "pick": f"🛡️ สกอร์ต่ำ (Under {t_line})",
+                "odds": up,
+                "score": round(72.0 + (ev_under * 100), 1),
+                "note": (
+                    f"🛡️ EV+ (สูง/ต่ำ): เกมรับเหนียว คาดยิงรวม {round(exp_goals,1)} ลูก"
+                ),
+            })
+
+    # คัดเลือกตลาดที่มีค่า EV Score สูงสุดขึ้นเป็นตัวแนะนำชัวร์
+    if candidates:
+      best = max(candidates, key=lambda x: x["score"])
+      ev_pick, ev_odds, ev_score, ev_note = (
+          best["pick"],
+          best["odds"],
+          best["score"],
+          best["note"],
+      )
+
+    # --------------------------------------------------------------------------
+    # 2. สมอง Trap Hunter (ตรวจจับกับดักราคาแฮนดิแคป & สูง/ต่ำ)
+    # --------------------------------------------------------------------------
+    trap_pick, trap_odds, trap_score, trap_note = (
+        format_handicap_pick(home, 0),
+        1.90,
+        60.0,
+        "ราคาปกติ",
+    )
+    public_teams = [
+        "Real Madrid",
+        "Barcelona",
+        "Manchester United",
+        "Liverpool",
+        "Arsenal",
+        "Bayern Munich",
+        "Paris Saint-Germain",
+    ]
+    is_public = any(pt in home or pt in away for pt in public_teams)
+
+    if sp_mkt and is_public:
+      outcomes = sp_mkt.get("outcomes", [])
+      h_obj = next((o for o in outcomes if o["name"] == home), None)
+      a_obj = next((o for o in outcomes if o["name"] == away), None)
+      if h_obj and a_obj:
+        line = h_obj.get("point", 0.0)
+        hp, ap = h_obj["price"], a_obj["price"]
+        if line <= -1.25:
           trap_pick = (
               f"รอง {away} (+{-line})"
               if home in str(public_teams)
               else f"รอง {home} (+{line})"
           )
           trap_odds = ap if home in str(public_teams) else hp
-          trap_score = 90.0
-          trap_note = "🔥 Public Bias Trap: โต๊ะเปิดราคาบีบทีมมหาชน -> สวนรองได้เปรียบ"
-        elif hrank and arank and (hrank - arank >= 5) and line >= -0.25:
-          # อันดับห่างแต่ต่อน้อย
-          trap_pick = format_handicap_pick(home, line)
-          trap_odds = hp
-          trap_score = 88.0
-          trap_note = "🔥 Sharp Trap: อันดับต่างแต่ต่อน้อยผิดปกติ -> โต๊ะซ่อนของ"
-        else:
-          trap_pick = format_handicap_pick(home, line)
-          trap_odds = hp
-          trap_score = 65.0
-          trap_note = "🛡️ Standard Play: ราคาเปิดตามกรอบมาตรฐาน"
+          trap_score = 92.0
+          trap_note = "🔥 Public Bias Trap: โต๊ะเปิดต่อแพงบีบทีมมหาชน -> สวนรองได้เปรียบ"
+    elif tot_mkt:
+      t_outcomes = tot_mkt.get("outcomes", [])
+      over_obj = next(
+          (o for o in t_outcomes if o["name"].lower() == "over"), None
+      )
+      if over_obj and over_obj["price"] <= 1.55:
+        # ราคาสูงไหลต่ำเกินไป ให้ระวังราคากั๊ก
+        trap_pick = f"🛡️ สกอร์ต่ำ (Under {over_obj.get('point', 2.5)})"
+        trap_odds = next(
+            (o["price"] for o in t_outcomes if o["name"].lower() == "under"),
+            1.90,
+        )
+        trap_score = 85.0
+        trap_note = "🔥 Total Trap: โต๊ะเปิดค่าน้ำสูงล่อตา -> สวนต่ำได้เปรียบ"
+      else:
+        trap_pick = ev_pick
+        trap_odds = ev_odds
+        trap_score = 65.0
+        trap_note = "🛡️ Standard Play: เลือกตลาดตามค่าความคุ้มค่า"
 
     match_res = check_match_result(csv_df, home, away, m_dt)
 
@@ -343,27 +443,25 @@ def scan_league(leg_info, hours_limit):
 
 
 # ==============================================================================
-# 4. STREAMLIT UI (BOOKMAKER VIP DASHBOARD)
+# 4. STREAMLIT UI DASHBOARD
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("📌 เมนูจัดโพย 2 สมอง (Bookmaker)")
+st.sidebar.header("📌 เมนูจัดโพย 2 สมอง (ทุกตลาด)")
 menu_choice = st.sidebar.radio(
     "เลือกหน้าการทำงาน",
-    ["🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 คู่)", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
+    ["🔥 จัดบิลสเต็ป VIP (ทุกตลาด)", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
 )
 
 st.sidebar.markdown("---")
 
-if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 คู่)":
+if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตลาด)":
   st.sidebar.header("ตั้งค่าการสแกน")
   if "quota_remaining" in st.session_state:
     st.sidebar.metric(
         label="โควตา API คงเหลือ",
         value=f"{st.session_state['quota_remaining']} ครั้ง",
     )
-  else:
-    st.sidebar.info("โควตา API: กดสร้างโพยเพื่ออัปเดต")
 
   options = {k: v["name"] for k, v in active_leagues.items()}
   selected = st.sidebar.multiselect(
@@ -384,14 +482,16 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
   st.session_state["budget"] = budget
 
   scan_btn = st.sidebar.button(
-      "🚀 สแกนและจัดบิลสเต็ป (คิดแบบโต๊ะ Bookmaker)", type="primary"
+      "🚀 สแกนและจัดบิล (คัดตัวชัวร์ทุกตลาด: ต่อ/รอง/สูง/ต่ำ)", type="primary"
   )
 
   if scan_btn:
     if not selected:
       st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
     else:
-      with st.spinner("กำลังคำนวณมูลค่าความคุ้มค่า (EV+) และสแกนกับดัก..."):
+      with st.spinner(
+          "กำลังวิเคราะห์ทุกตลาด (ต่อ/รอง/สูง/ต่ำ) เพื่อหาตัวได้เปรียบสูงสุด..."
+      ):
         res_all = []
         quota_err = False
         for l_key in selected:
@@ -409,7 +509,7 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
           df = pd.DataFrame(res_all)
           df = df.drop_duplicates(subset=["match"]).reset_index(drop=True)
           st.session_state["saved_scan_df"] = df
-          st.success(f"สแกนสำเร็จ! ดึงข้อมูลมาทั้งหมด {len(df)} คู่")
+          st.success(f"สแกนสำเร็จ! ประมวลผลสำเร็จ {len(df)} คู่")
 
   if (
       "saved_scan_df" in st.session_state
@@ -418,8 +518,8 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
     df = st.session_state["saved_scan_df"]
 
     tab_ev, tab_trap = st.tabs([
-        "📈 สมองที่ 1: Bookmaker EV+ (เน้นความคุ้มค่าน้ำ)",
-        "🎯 สมองที่ 2: Trap Hunter (เน้นอ่านกับดักมหาชน)",
+        "📈 สมองที่ 1: Best Value Signal (คัดตัวคุ้มสุดจากทุกตลาด)",
+        "🎯 สมองที่ 2: Trap Hunter (ดักกับดักราคาต่อ/สูงต่ำ)",
     ])
 
     def display_slips(df_sorted, is_trap=False):
@@ -443,8 +543,8 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
         for idx, row in df_sorted.head(n).iterrows():
           if not is_trap:
             st.markdown(
-                f"**{idx+1}. {row['match']}** (คะแนน EV+:"
-                f" `{row['ev_score']}%`)<br>👉 เลือก: `{row['ev_pick']}` |"
+                f"**{idx+1}. {row['match']}** (คะแนนความคุ้มค่า:"
+                f" `{row['ev_score']}%`)<br>👉 แนะนำ: **`{row['ev_pick']}`** |"
                 f" ค่าน้ำ: `{row['ev_odds']}`<br><small"
                 f" style='color:lightgreen;'>{row['ev_note']}</small> |"
                 f" สถานะ: **{row['result']}**",
@@ -453,7 +553,7 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
           else:
             st.markdown(
                 f"**{idx+1}. {row['match']}** (คะแนนจับกับดัก:"
-                f" `{row['trap_score']}%`)<br>👉 เลือก: `{row['trap_pick']}` |"
+                f" `{row['trap_score']}%`)<br>👉 แนะนำ: **`{row['trap_pick']}`** |"
                 f" ค่าน้ำ: `{row['trap_odds']}`<br><small"
                 f" style='color:orange;'>{row['trap_note']}</small> | สถานะ:"
                 f" **{row['result']}**",
@@ -461,17 +561,15 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
             )
         st.markdown("---")
 
-    # --- TAB 1: EV+ Slips ---
     with tab_ev:
-      st.subheader("📈 โพยสเต็ปสาย Bookmaker EV+ (คัดคู่ที่ได้เปรียบค่าน้ำสูง)")
+      st.subheader("📈 โพยสเต็ปสาย Best Value Signal (ผสมต่อ/รอง/สูง/ต่ำ)")
       df_ev_sorted = df.sort_values(by="ev_score", ascending=False).reset_index(
           drop=True
       )
       display_slips(df_ev_sorted, is_trap=False)
 
-    # --- TAB 2: Trap Hunter Slips ---
     with tab_trap:
-      st.subheader("🎯 โพยสเต็ปสาย Trap Hunter (คัดคู่สวนกระแสมหาชน)")
+      st.subheader("🎯 โพยสเต็ปสาย Trap Hunter")
       df_trap_sorted = df.sort_values(
           by="trap_score", ascending=False
       ).reset_index(drop=True)
@@ -489,8 +587,8 @@ elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (�
     df = st.session_state["saved_scan_df"]
     for _, r in df.iterrows():
       st.write(
-          f"⚽ **{r['match']}** ➔ EV+: `{r['ev_pick']}` | Trap:"
-          f" `{r['trap_pick']}` | ผลสรุป: **{r['result']}**"
+          f"⚽ **{r['match']}** ➔ แนะนำ: `{r['ev_pick']}` | สรุปผล:"
+          f" **{r['result']}**"
       )
   else:
     st.warning("⚠️ ยังไม่มีโพยในระบบ กรุณาสร้างโพยก่อน")
