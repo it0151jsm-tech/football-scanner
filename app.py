@@ -6,20 +6,18 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. SETUP & CONFIGURATION (FULL MULTI-STEP DUAL-ENGINE)
+# 1. SETUP & CONFIGURATION (BUG-FIXED DUAL-ENGINE)
 # ==============================================================================
 st.set_page_config(
     page_title="Value Bet Pro - Deep Form VIP", page_icon="⚽", layout="centered"
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Dual-Engine Multi-Step"
-    " VIP)</h3>",
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Bug-Fixed Dual-Engine)"
+    "</h3>",
     unsafe_allow_html=True,
 )
-st.caption(
-    "ระบบวิเคราะห์ 2 สมอง: วิเคราะห์ฟอร์มลึก + จัดบิลสเต็ป 5, 9, 13, 20 คู่"
-)
+st.caption("ระบบวิเคราะห์ 2 สมอง: แก้ไขการแสดงผลเรตราคาแฮนดิแคปให้ถูกต้องแม่นยำ")
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
 
@@ -206,6 +204,16 @@ def get_team_home_away_form(df, team, is_home, match_date, n=3):
   return {"pts": pts, "gf": gf, "ga": ga}
 
 
+def format_handicap_pick(home, line, is_fav=True):
+  """ฟังก์ชันจัดรูปแบบราคาต่อรองให้ถูกต้องตามความเป็นจริง"""
+  if line < 0:
+    return f"ต่อ {home} ({line})"
+  elif line > 0:
+    return f"รอง {home} (+{line})"
+  else:
+    return f"วาง {home} (เสมอ)"
+
+
 # ==============================================================================
 # 3. RESULT CHECKER ENGINE
 # ==============================================================================
@@ -316,26 +324,11 @@ def scan_league(leg_info, hours_limit):
           quant_conf = min(
               max(70.0 + (rank_diff * 1.5) + (form_diff * 1.2), 55.0), 96.0
           )
-
-          if hrank < arank and h_form["pts"] >= a_form["pts"]:
-            quant_pick = (
-                f"ต่อ {home} ({line})"
-                if line < 0
-                else f"วาง {home} (เสมอ)"
-            )
-            quant_odds = hp
-          elif hrank > arank:
-            quant_pick = f"รอง {home} (+{line})" if line > 0 else f"รอง {home} (0)"
-            quant_odds = hp
-          else:
-            quant_pick = (
-                f"ต่อ {home} ({line})"
-                if line < 0
-                else f"วาง {home} (เสมอ)"
-            )
-            quant_odds = hp
+          quant_pick = format_handicap_pick(home, line)
+          quant_odds = hp
         else:
-          quant_pick = f"ต่อ {home} ({line})" if line < 0 else f"วาง {home} (เสมอ)"
+          # ไม่มีตาราง (เช่น UCL) ใช้ราคาตลาดตรงๆ
+          quant_pick = format_handicap_pick(home, line)
           quant_odds = hp
           quant_conf = 70.0
 
@@ -357,9 +350,7 @@ def scan_league(leg_info, hours_limit):
                 "🔥 Trap Detected: ต่อแพงเกินไป + ทีมเยือนนอกบ้านสู้ได้ -> สวนรอง"
             )
           else:
-            trap_pick = (
-                f"ต่อ {home} ({line})" if line < 0 else f"รอง {home} (+{line})"
-            )
+            trap_pick = format_handicap_pick(home, line)
             trap_odds = hp
             trap_score = 65.0
             trap_note = (
@@ -367,12 +358,10 @@ def scan_league(leg_info, hours_limit):
                 f" {away}[{a_form['form_str']}])"
             )
         else:
-          trap_pick = (
-              f"ต่อ {home} ({line})" if line < 0 else f"วาง {home} (เสมอ)"
-          )
+          trap_pick = format_handicap_pick(home, line)
           trap_odds = hp
           trap_score = 60.0
-          trap_note = "🛡️ บอลเปิดเรตปกติ ไม่มีข้อมูลตารางเปรียบเทียบ"
+          trap_note = "🛡️ บอลเปิดเรตปกติ ไม่มีข้อมูลตารางเปรียบเทียบ (UCL)"
 
     match_res = check_match_result(csv_df, home, away, m_dt)
 
@@ -439,7 +428,7 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
   st.session_state["budget"] = budget
 
   scan_btn = st.sidebar.button(
-      "🚀 สแกนและจัดบิลสเต็ปทุกชุด", type="primary"
+      "🚀 สแกนและจัดบิลสเต็ปทุกชุด (แก้บั๊กราคาแล้ว)", type="primary"
   )
 
   if scan_btn:
@@ -478,7 +467,6 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (5, 9, 13, 20 ค�
         "🧠 สายอ่านกับดักราคา (Trap Hunter)",
     ])
 
-    # ฟังก์ชันช่วย render บิลสเต็ปตามจำนวนคู่
     def display_slips(df_sorted, is_trap=False):
       total_matches = len(df_sorted)
       steps = [5, 9, 13, 20]
