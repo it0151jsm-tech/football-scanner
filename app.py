@@ -30,7 +30,6 @@ WEATHER_API_KEY = ""  # ใส่ OpenWeatherMap API Key ฟรีได้ (ถ
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
-  # แมปชื่อลีกหลักทั่วยุโรปกับรหัส CSV สถิติย้อนหลัง
   csv_map = {
       "soccer_epl": {"csv": "E0", "city": "London"},
       "soccer_spain_la_liga": {"csv": "SP1", "city": "Madrid"},
@@ -63,7 +62,6 @@ def get_active_leagues():
   except Exception:
     pass
 
-  # Fallback พื้นฐานถ้าดึง API ลีกไม่ได้
   if not leagues_dict:
     leagues_dict = {
         "soccer_epl": {
@@ -446,7 +444,7 @@ def scan_league(leg_info, hours_limit):
           "ราคาปกติ",
       )
 
-    # --- 3. Smart Trap Hunter Filter (ไม่สวนมั่ว เช็กความล้า + xG ก่อน) ---
+    # --- 3. Smart Trap Hunter Filter ---
     trap_pick, trap_odds, trap_score, trap_note = (
         ev_pick,
         ev_odds,
@@ -473,7 +471,6 @@ def scan_league(leg_info, hours_limit):
         line = h_obj.get("point", 0.0)
         hp, ap = h_obj["price"], a_obj["price"]
 
-        # เช็กเงื่อนไข Smart Trap: ต่อแพง (-1.25 ขึ้นไป) + ฟอร์มฝืดหรือล้า (< 4 วัน) ถึงจะสวน
         if (
             line <= -1.25
             and home in str(public_teams)
@@ -549,9 +546,7 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (Smart 3-Engine)":
   selected = st.sidebar.multiselect(
       "เลือกรายการลีก (หลากหลายทั่วยุโรป)",
       options=list(options.keys()),
-      default=list(options.keys())[
-          :4
-      ],  : # เลือกตั้งต้นมาให้หลากหลายแบบอัตโนมัติ
+      default=list(options.keys())[:4],
       format_func=lambda x: options[x],
   )
 
