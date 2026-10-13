@@ -5,70 +5,46 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. SETUP & CONFIGURATION (FIXED ALL-MARKET ENGINE)
+# 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - All-Market VIP", page_icon="⚽", layout="centered"
+    page_title="Super Quant VIP - Smart 3-Engine", page_icon="⚽", layout="centered"
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (All-Market EV+ & Trap"
-    " Fixed)</h3>",
+    "<h3 style='text-align: center;'>⚽ Super Quant VIP (Smart 3-Engine &"
+    " Diversity)</h3>",
     unsafe_allow_html=True,
 )
-st.caption("ระบบ 2 สมอง: แก้ไขจุดดึงราคาต่อรอง + สูง/ต่ำ แม่นยำ 100%")
+st.caption(
+    "ระบบวิเคราะห์อัจฉริยะ: ครบทุก 10+ ลีกดังทั่วยุโรป + xG จำลอง + Smart Trap"
+    " Filter"
+)
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
+WEATHER_API_KEY = ""  # ใส่ OpenWeatherMap API Key ฟรีได้ (ถ้ามี)
 
 
 # ==============================================================================
-# 2. DATA FETCHING & STATS ENGINE
+# 2. EXPANDED LEAGUE DIVERSITY & ADVANCED STATS ENGINE
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
+  # แมปชื่อลีกหลักทั่วยุโรปกับรหัส CSV สถิติย้อนหลัง
   csv_map = {
-      "soccer_epl": "E0",
-      "soccer_england_championship": "E1",
-      "soccer_england_league_one": "E2",
-      "soccer_england_league_two": "E3",
-      "soccer_spain_la_liga": "SP1",
-      "soccer_italy_serie_a": "I1",
-      "soccer_germany_bundesliga": "D1",
-      "soccer_france_league1": "F1",
-      "soccer_netherlands_eredivisie": "N1",
-      "soccer_portugal_primeira_liga": "P1",
-      "soccer_uefa_champs_league": None,
+      "soccer_epl": {"csv": "E0", "city": "London"},
+      "soccer_spain_la_liga": {"csv": "SP1", "city": "Madrid"},
+      "soccer_italy_serie_a": {"csv": "I1", "city": "Rome"},
+      "soccer_germany_bundesliga": {"csv": "D1", "city": "Munich"},
+      "soccer_france_league1": {"csv": "F1", "city": "Paris"},
+      "soccer_netherlands_eredivisie": {"csv": "N1", "city": "Amsterdam"},
+      "soccer_portugal_primeira_liga": {"csv": "P1", "city": "Lisbon"},
+      "soccer_england_championship": {"csv": "E1", "city": "Birmingham"},
+      "soccer_england_league_one": {"csv": "E2", "city": "Manchester"},
+      "soccer_england_league_two": {"csv": "E3", "city": "Liverpool"},
   }
 
-  sorted_leagues = {
-      "soccer_uefa_champs_league": {
-          "name": "UEFA Champions League (ยูฟ่า แชมเปียนส์ลีก)",
-          "key": "soccer_uefa_champs_league",
-          "csv": None,
-      },
-      "soccer_epl": {
-          "name": "Premier League (พรีเมียร์ลีก อังกฤษ)",
-          "key": "soccer_epl",
-          "csv": "E0",
-      },
-      "soccer_england_championship": {
-          "name": "Championship (เดอะแชมเปียนชิพ อังกฤษ)",
-          "key": "soccer_england_championship",
-          "csv": "E1",
-      },
-      "soccer_england_league_one": {
-          "name": "League One (ลีกวัน อังกฤษ)",
-          "key": "soccer_england_league_one",
-          "csv": "E2",
-      },
-      "soccer_england_league_two": {
-          "name": "League Two (ลีกทู อังกฤษ)",
-          "key": "soccer_england_league_two",
-          "csv": "E3",
-      },
-  }
-
-  other_leagues = {}
+  leagues_dict = {}
   try:
     res = requests.get(
         f"https://api.the-odds-api.com/v4/sports/?apiKey={API_KEY}"
@@ -77,16 +53,52 @@ def get_active_leagues():
       for item in res.json():
         if item.get("group") == "Soccer" and item.get("active"):
           k = item["key"]
-          if k not in sorted_leagues:
-            other_leagues[k] = {
-                "name": item["title"],
-                "key": k,
-                "csv": csv_map.get(k),
-            }
+          meta = csv_map.get(k, {"csv": None, "city": "London"})
+          leagues_dict[k] = {
+              "name": item["title"],
+              "key": k,
+              "csv": meta["csv"],
+              "city": meta["city"],
+          }
   except Exception:
     pass
 
-  return {**sorted_leagues, **other_leagues}
+  # Fallback พื้นฐานถ้าดึง API ลีกไม่ได้
+  if not leagues_dict:
+    leagues_dict = {
+        "soccer_epl": {
+            "name": "Premier League (พรีเมียร์ลีก อังกฤษ)",
+            "key": "soccer_epl",
+            "csv": "E0",
+            "city": "London",
+        },
+        "soccer_spain_la_liga": {
+            "name": "La Liga (ลาลีกา สเปน)",
+            "key": "soccer_spain_la_liga",
+            "csv": "SP1",
+            "city": "Madrid",
+        },
+        "soccer_italy_serie_a": {
+            "name": "Serie A (กัลโช่ เซเรีย อา อิตาลี)",
+            "key": "soccer_italy_serie_a",
+            "csv": "I1",
+            "city": "Rome",
+        },
+        "soccer_germany_bundesliga": {
+            "name": "Bundesliga (บุนเดสลีกา เยอรมนี)",
+            "key": "soccer_germany_bundesliga",
+            "csv": "D1",
+            "city": "Munich",
+        },
+        "soccer_uefa_champs_league": {
+            "name": "UEFA Champions League (ยูฟ่า แชมเปียนส์ลีก)",
+            "key": "soccer_uefa_champs_league",
+            "csv": None,
+            "city": "London",
+        },
+    }
+
+  return leagues_dict
 
 
 @st.cache_data(ttl=1800)
@@ -103,9 +115,7 @@ def fetch_csv_stats(csv_code):
         df["Date_dt"] = pd.to_datetime(
             df["Date"], format="%d/%m/%Y", errors="coerce"
         )
-        dfs.append(
-            df[["Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]].dropna()
-        )
+        dfs.append(df)
     except Exception:
       pass
   if dfs:
@@ -123,7 +133,7 @@ def get_temporal_standings(df, match_date):
   table = {}
   for _, row in past_df.iterrows():
     h, a = row["HomeTeam"], row["AwayTeam"]
-    hg, ag = int(row["FTHG"]), int(row["FTAG"])
+    hg, ag = int(row.get("FTHG", 0)), int(row.get("FTAG", 0))
     if h not in table:
       table[h] = {"pts": 0, "gd": 0, "gf": 0, "ga": 0, "mp": 0}
     if a not in table:
@@ -143,6 +153,7 @@ def get_temporal_standings(df, match_date):
     else:
       table[h]["pts"] += 1
       table[a]["pts"] += 1
+
   sorted_teams = sorted(
       table.items(), key=lambda x: (x[1]["pts"], x[1]["gd"]), reverse=True
   )
@@ -154,6 +165,79 @@ def get_temporal_standings(df, match_date):
         "avg_ga": stats["ga"] / max(stats["mp"], 1),
     }
   return res
+
+
+def get_advanced_team_metrics(csv_df, home_team, away_team, match_date):
+  default_res = {
+      "home_xg": 1.3,
+      "away_xg": 1.2,
+      "home_rest": 7,
+      "away_rest": 7,
+      "sot_str": "",
+  }
+  if csv_df is None or csv_df.empty:
+    return default_res
+
+  past_df = csv_df[csv_df["Date_dt"] < match_date]
+  if past_df.empty:
+    return default_res
+
+  h_matches = past_df[
+      (past_df["HomeTeam"] == home_team) | (past_df["AwayTeam"] == home_team)
+  ].tail(5)
+  a_matches = past_df[
+      (past_df["HomeTeam"] == away_team) | (past_df["AwayTeam"] == away_team)
+  ].tail(5)
+
+  h_sot, a_sot = 0, 0
+  if "HST" in past_df.columns:
+    for _, r in h_matches.iterrows():
+      h_sot += (
+          int(r["HST"])
+          if r["HomeTeam"] == home_team
+          else int(r.get("AST", 0))
+      )
+    for _, r in a_matches.iterrows():
+      a_sot += (
+          int(r["HST"])
+          if r["HomeTeam"] == away_team
+          else int(r.get("AST", 0))
+      )
+
+  h_count = max(len(h_matches), 1)
+  a_count = max(len(a_matches), 1)
+
+  home_xg = (
+      round((h_sot / h_count) * 0.26, 2)
+      if h_sot > 0
+      else round(h_count * 0.3, 2)
+  )
+  away_xg = (
+      round((a_sot / a_count) * 0.26, 2)
+      if a_sot > 0
+      else round(a_count * 0.3, 2)
+  )
+
+  h_last = h_matches["Date_dt"].max() if not h_matches.empty else None
+  a_last = a_matches["Date_dt"].max() if not a_matches.empty else None
+
+  h_rest = (match_date - h_last).days if h_last is not None else 7
+  a_rest = (match_date - a_last).days if a_last is not None else 7
+
+  sot_info = (
+      f" (ยิงเข้ากรอบเฉลี่ย {round(h_sot/h_count, 1)} vs"
+      f" {round(a_sot/a_count, 1)} ครั้ง)"
+      if h_sot > 0
+      else ""
+  )
+
+  return {
+      "home_xg": max(home_xg, 0.6),
+      "away_xg": max(away_xg, 0.5),
+      "home_rest": h_rest,
+      "away_rest": a_rest,
+      "sot_str": sot_info,
+  }
 
 
 def format_handicap_pick(home, line):
@@ -187,12 +271,11 @@ def check_match_result(csv_df, home_mapped, away_mapped, match_date=None):
 
 
 # ==============================================================================
-# 3. ALL-MARKET EV+ & TRAP SCANNER ENGINE (FIXED MARKETS)
+# 3. SMART 3-ENGINE SCANNER LOGIC
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
   url = f"https://api.the-odds-api.com/v4/sports/{leg_info['key']}/odds/"
-  # แก้ไขดึงทั้ง h2h, spreads, totals ให้ครบ
   params = {
       "apiKey": API_KEY,
       "regions": "eu",
@@ -232,11 +315,7 @@ def scan_league(leg_info, hours_limit):
     if not bm_list:
       continue
 
-    # ดึงราคาตลาดต่างๆ จากเจ้ามือแรกที่มีข้อมูลครบ
-    sp_mkt = None
-    tot_mkt = None
-    h2h_mkt = None
-
+    sp_mkt, tot_mkt, h2h_mkt = None, None, None
     for bm in bm_list:
       for k in bm.get("markets", []):
         if k["key"] == "spreads" and not sp_mkt:
@@ -252,9 +331,10 @@ def scan_league(leg_info, hours_limit):
     hrank, arank = h_data.get("rank"), a_data.get("rank")
     rank_str = f" [อันดับ {hrank} vs {arank}]" if (hrank and arank) else ""
 
+    metrics = get_advanced_team_metrics(csv_df, home, away, m_dt)
     candidates = []
 
-    # 1. ตลาดแฮนดิแคป (Spreads)
+    # --- 1. ตลาดแฮนดิแคป & xG ---
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
       h_obj = next((o for o in outcomes if o["name"] == home), None)
@@ -265,7 +345,19 @@ def scan_league(leg_info, hours_limit):
 
         if hrank and arank:
           rank_diff = arank - hrank
-          true_win_prob = min(max(0.50 + (rank_diff * 0.03), 0.25), 0.85)
+          rest_bonus = (
+              0.05
+              if metrics["home_rest"] > metrics["away_rest"] + 2
+              else (
+                  -0.05
+                  if metrics["away_rest"] > metrics["home_rest"] + 2
+                  else 0
+              )
+          )
+          true_win_prob = min(
+              max(0.50 + (rank_diff * 0.03) + rest_bonus, 0.20), 0.85
+          )
+
           ev_h = (true_win_prob * hp) - 1.0
           ev_a = ((1.0 - true_win_prob) * ap) - 1.0
 
@@ -273,10 +365,10 @@ def scan_league(leg_info, hours_limit):
             candidates.append({
                 "pick": format_handicap_pick(home, line),
                 "odds": hp,
-                "score": round(70.0 + (ev_h * 100), 1),
+                "score": round(72.0 + (ev_h * 100), 1),
                 "note": (
                     f"📈 EV+ (แฮนดิแคป): ได้เปรียบค่าน้ำต่อ"
-                    f" (+{round(ev_h*100, 1)}%)"
+                    f" (+{round(ev_h*100, 1)}%){metrics['sot_str']}"
                 ),
             })
           else:
@@ -287,21 +379,14 @@ def scan_league(leg_info, hours_limit):
                     else format_handicap_pick(away, -line)
                 ),
                 "odds": ap,
-                "score": round(70.0 + (ev_a * 100), 1),
+                "score": round(72.0 + (ev_a * 100), 1),
                 "note": (
                     f"📈 EV+ (แฮนดิแคป): ได้เปรียบค่าน้ำรอง"
-                    f" (+{round(ev_a*100, 1)}%)"
+                    f" (+{round(ev_a*100, 1)}%){metrics['sot_str']}"
                 ),
             })
-        else:
-          candidates.append({
-              "pick": format_handicap_pick(home, line),
-              "odds": hp,
-              "score": 75.0,
-              "note": f"📈 EV+ (แฮนดิแคป): เรตราคาต่อรอง {line}",
-          })
 
-    # 2. ตลาดสูง/ต่ำ (Totals)
+    # --- 2. ตลาดสูง/ต่ำ ---
     if tot_mkt:
       t_outcomes = tot_mkt.get("outcomes", [])
       over_obj = next(
@@ -315,11 +400,10 @@ def scan_league(leg_info, hours_limit):
         t_line = over_obj.get("point", 2.5)
         op, up = over_obj["price"], under_obj["price"]
 
-        exp_goals = (
-            (h_data.get("avg_gf", 1.3) + a_data.get("avg_ga", 1.2)) / 2
-            + (a_data.get("avg_gf", 1.2) + h_data.get("avg_ga", 1.3)) / 2
+        exp_goals = (metrics["home_xg"] + metrics["away_xg"]) / 2 * 2.1
+        prob_over = min(
+            max(0.45 + ((exp_goals - t_line) * 0.22), 0.15), 0.85
         )
-        prob_over = min(max(0.45 + ((exp_goals - t_line) * 0.20), 0.20), 0.80)
         prob_under = 1.0 - prob_over
 
         ev_over = (prob_over * op) - 1.0
@@ -329,43 +413,23 @@ def scan_league(leg_info, hours_limit):
           candidates.append({
               "pick": f"🔥 สกอร์สูง (Over {t_line})",
               "odds": op,
-              "score": round(73.0 + (ev_over * 100), 1),
+              "score": round(74.0 + (ev_over * 100), 1),
               "note": (
-                  f"⚽ EV+ (สูง/ต่ำ): เกมบุกจัดจ้าน คาดยิงรวม {round(exp_goals,1)} ลูก"
+                  f"⚽ EV+ (สูง/ต่ำ): xG คาดยิงรวม {round(exp_goals,1)} ลูก"
+                  f"{metrics['sot_str']}"
               ),
           })
-        elif ev_under > ev_over and exp_goals < 2.4:
+        elif ev_under > ev_over and exp_goals < 2.3:
           candidates.append({
               "pick": f"🛡️ สกอร์ต่ำ (Under {t_line})",
               "odds": up,
-              "score": round(73.0 + (ev_under * 100), 1),
+              "score": round(74.0 + (ev_under * 100), 1),
               "note": (
-                  f"🛡️ EV+ (สูง/ต่ำ): เกมรับเหนียว คาดยิงรวม {round(exp_goals,1)} ลูก"
+                  f"🛡️ EV+ (สูง/ต่ำ): เกมรับเหนียว คาดยิงรวม"
+                  f" {round(exp_goals,1)} ลูก"
               ),
           })
 
-    # 3. Fallback: ตลาดชนะ/แพ้/เสมอ (H2H) หากไม่มีแฮนดิแคป
-    if not candidates and h2h_mkt:
-      outcomes = h2h_mkt.get("outcomes", [])
-      h_obj = next((o for o in outcomes if o["name"] == home), None)
-      a_obj = next((o for o in outcomes if o["name"] == away), None)
-      if h_obj and a_obj:
-        if h_obj["price"] < a_obj["price"]:
-          candidates.append({
-              "pick": f"วาง {home} (ชนะ)",
-              "odds": h_obj["price"],
-              "score": 71.0,
-              "note": "📈 H2H Market: เจ้าบ้านได้เปรียบราคาจ่าย",
-          })
-        else:
-          candidates.append({
-              "pick": f"วาง {away} (ชนะ)",
-              "odds": a_obj["price"],
-              "score": 71.0,
-              "note": "📈 H2H Market: ทีมเยือนได้เปรียบราคาจ่าย",
-          })
-
-    # สรุปผลสมอง EV+
     if candidates:
       best = max(candidates, key=lambda x: x["score"])
       ev_pick, ev_odds, ev_score, ev_note = (
@@ -376,15 +440,13 @@ def scan_league(leg_info, hours_limit):
       )
     else:
       ev_pick, ev_odds, ev_score, ev_note = (
-          f"วาง {home} (ชนะ)",
+          f"วาง {home} (เสมอ)",
           1.90,
           70.0,
           "ราคาปกติ",
       )
 
-    # --------------------------------------------------------------------------
-    # 4. สมอง Trap Hunter
-    # --------------------------------------------------------------------------
+    # --- 3. Smart Trap Hunter Filter (ไม่สวนมั่ว เช็กความล้า + xG ก่อน) ---
     trap_pick, trap_odds, trap_score, trap_note = (
         ev_pick,
         ev_odds,
@@ -399,6 +461,7 @@ def scan_league(leg_info, hours_limit):
         "Arsenal",
         "Bayern Munich",
         "Paris Saint-Germain",
+        "Manchester City",
     ]
     is_public = any(pt in home or pt in away for pt in public_teams)
 
@@ -409,15 +472,37 @@ def scan_league(leg_info, hours_limit):
       if h_obj and a_obj:
         line = h_obj.get("point", 0.0)
         hp, ap = h_obj["price"], a_obj["price"]
-        if line <= -1.25:
-          trap_pick = (
-              f"รอง {away} (+{-line})"
-              if home in str(public_teams)
-              else f"รอง {home} (+{line})"
-          )
-          trap_odds = ap if home in str(public_teams) else hp
+
+        # เช็กเงื่อนไข Smart Trap: ต่อแพง (-1.25 ขึ้นไป) + ฟอร์มฝืดหรือล้า (< 4 วัน) ถึงจะสวน
+        if (
+            line <= -1.25
+            and home in str(public_teams)
+            and (metrics["home_rest"] < 4 or metrics["home_xg"] < 1.4)
+        ):
+          trap_pick = f"รอง {away} (+{-line})"
+          trap_odds = ap
           trap_score = 92.0
-          trap_note = "🔥 Public Bias Trap: โต๊ะเปิดต่อแพงบีบทีมมหาชน -> สวนรองได้เปรียบ"
+          trap_note = (
+              "🔥 Smart Trap: ทีมมหาชนต่อแพง + มีความล้า/ฟอร์มฝืด ->"
+              " สวนรองได้เปรียบ"
+          )
+        elif (
+            line >= 1.25
+            and away in str(public_teams)
+            and (metrics["away_rest"] < 4 or metrics["away_xg"] < 1.4)
+        ):
+          trap_pick = f"รอง {home} (+{line})"
+          trap_odds = hp
+          trap_score = 92.0
+          trap_note = (
+              "🔥 Smart Trap: ทีมเยือนมหาชนต่อแพง + มีความล้า ->"
+              " สวนรองได้เปรียบ"
+          )
+        else:
+          trap_pick = ev_pick
+          trap_odds = ev_odds
+          trap_score = 68.0
+          trap_note = "🛡️ Standard Play: ทีมมหาชนเครื่องแรงตามหน้าเสื่อ (ไม่สวน)"
 
     match_res = check_match_result(csv_df, home, away, m_dt)
 
@@ -444,16 +529,16 @@ def scan_league(leg_info, hours_limit):
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("📌 เมนูจัดโพย 2 สมอง (ทุกตลาด)")
+st.sidebar.header("📌 เมนูจัดโพย Smart 3-Engine")
 menu_choice = st.sidebar.radio(
     "เลือกหน้าการทำงาน",
-    ["🔥 จัดบิลสเต็ป VIP (ทุกตลาด)", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
+    ["🔥 จัดบิลสเต็ป VIP (Smart 3-Engine)", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
 )
 
 st.sidebar.markdown("---")
 
-if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตลาด)":
-  st.sidebar.header("ตั้งค่าการสแกน")
+if menu_choice == "🔥 จัดบิลสเต็ป VIP (Smart 3-Engine)":
+  st.sidebar.header("ตั้งค่าการสแกนลีก")
   if "quota_remaining" in st.session_state:
     st.sidebar.metric(
         label="โควตา API คงเหลือ",
@@ -462,13 +547,11 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตล�
 
   options = {k: v["name"] for k, v in active_leagues.items()}
   selected = st.sidebar.multiselect(
-      "เลือกรายการลีกคืนนี้",
+      "เลือกรายการลีก (หลากหลายทั่วยุโรป)",
       options=list(options.keys()),
-      default=[
-          "soccer_uefa_champs_league",
-          "soccer_england_championship",
-          "soccer_epl",
-      ],
+      default=list(options.keys())[
+          :4
+      ],  : # เลือกตั้งต้นมาให้หลากหลายแบบอัตโนมัติ
       format_func=lambda x: options[x],
   )
 
@@ -479,16 +562,14 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตล�
   st.session_state["budget"] = budget
 
   scan_btn = st.sidebar.button(
-      "🚀 สแกนและจัดบิล (คัดตัวชัวร์ทุกตลาด: ต่อ/รอง/สูง/ต่ำ)", type="primary"
+      "🚀 สแกนและจัดบิล (Smart 3-Engine + ลีกหลากหลาย)", type="primary"
   )
 
   if scan_btn:
     if not selected:
       st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
     else:
-      with st.spinner(
-          "กำลังวิเคราะห์ทุกตลาด (ต่อ/รอง/สูง/ต่ำ) เพื่อหาตัวได้เปรียบสูงสุด..."
-      ):
+      with st.spinner("กำลังดึงข้อมูลลีกที่เลือก และประมวลผล xG + Smart Trap..."):
         res_all = []
         quota_err = False
         for l_key in selected:
@@ -506,7 +587,9 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตล�
           df = pd.DataFrame(res_all)
           df = df.drop_duplicates(subset=["match"]).reset_index(drop=True)
           st.session_state["saved_scan_df"] = df
-          st.success(f"สแกนสำเร็จ! ประมวลผลสำเร็จ {len(df)} คู่")
+          st.success(
+              f"สแกนสำเร็จ! พบการแข่งขัน {len(df)} คู่ จากลีกที่คุณเลือก"
+          )
 
   if (
       "saved_scan_df" in st.session_state
@@ -515,8 +598,8 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตล�
     df = st.session_state["saved_scan_df"]
 
     tab_ev, tab_trap = st.tabs([
-        "📈 สมองที่ 1: Best Value Signal (คัดตัวคุ้มสุดจากทุกตลาด)",
-        "🎯 สมองที่ 2: Trap Hunter (ดักกับดักราคาต่อ/สูงต่ำ)",
+        "📈 สมองที่ 1 & 2: Best Value xG Signal (ทุกตลาด)",
+        "🎯 สมองที่ 3: Smart Trap Hunter (กรองเฉพาะกับดักแท้)",
     ])
 
     def display_slips(df_sorted, is_trap=False):
@@ -540,18 +623,18 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตล�
         for idx, row in df_sorted.head(n).iterrows():
           if not is_trap:
             st.markdown(
-                f"**{idx+1}. {row['match']}** (คะแนนความคุ้มค่า:"
-                f" `{row['ev_score']}%`)<br>👉 แนะนำ: **`{row['ev_pick']}`** |"
-                f" ค่าน้ำ: `{row['ev_odds']}`<br><small"
+                f"**{idx+1}. [{row['league']}] {row['match']}**"
+                f" (คะแนนความคุ้มค่า: `{row['ev_score']}%`)<br>👉 แนะนำ:"
+                f" **`{row['ev_pick']}`** | ค่าน้ำ: `{row['ev_odds']}`<br><small"
                 f" style='color:lightgreen;'>{row['ev_note']}</small> |"
                 f" สถานะ: **{row['result']}**",
                 unsafe_allow_html=True,
             )
           else:
             st.markdown(
-                f"**{idx+1}. {row['match']}** (คะแนนจับกับดัก:"
-                f" `{row['trap_score']}%`)<br>👉 แนะนำ: **`{row['trap_pick']}`** |"
-                f" ค่าน้ำ: `{row['trap_odds']}`<br><small"
+                f"**{idx+1}. [{row['league']}] {row['match']}**"
+                f" (คะแนนจับกับดัก: `{row['trap_score']}%`)<br>👉 แนะนำ:"
+                f" **`{row['trap_pick']}`** | ค่าน้ำ: `{row['trap_odds']}`<br><small"
                 f" style='color:orange;'>{row['trap_note']}</small> | สถานะ:"
                 f" **{row['result']}**",
                 unsafe_allow_html=True,
@@ -566,14 +649,14 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (ทุกตล�
       display_slips(df_ev_sorted, is_trap=False)
 
     with tab_trap:
-      st.subheader("🎯 โพยสเต็ปสาย Trap Hunter")
+      st.subheader("🎯 โพยสเต็ปสาย Smart Trap Hunter")
       df_trap_sorted = df.sort_values(
           by="trap_score", ascending=False
       ).reset_index(drop=True)
       display_slips(df_trap_sorted, is_trap=True)
 
   else:
-    st.info("💡 กรุณากดปุ่มสแกนที่เมนูด้านข้างเพื่อเริ่มต้นสร้างโพย")
+    st.info("💡 กรุณาเลือกเลือกลีกที่เมนูด้านข้าง แล้วกดปุ่มสแกนเริ่มต้นสร้างโพย")
 
 elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)":
   st.subheader("🏆 ตรวจผลบิลอัตโนมัติ")
@@ -584,8 +667,8 @@ elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (�
     df = st.session_state["saved_scan_df"]
     for _, r in df.iterrows():
       st.write(
-          f"⚽ **{r['match']}** ➔ แนะนำ: `{r['ev_pick']}` | สรุปผล:"
-          f" **{r['result']}**"
+          f"⚽ **[{r['league']}] {r['match']}** ➔ แนะนำ: `{r['ev_pick']}` |"
+          f" สรุปผล: **{r['result']}**"
       )
   else:
     st.warning("⚠️ ยังไม่มีโพยในระบบ กรุณาสร้างโพยก่อน")
