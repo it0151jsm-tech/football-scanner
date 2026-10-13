@@ -6,19 +6,18 @@ import requests
 import streamlit as st
 
 # ==============================================================================
-# 1. SETUP & CONFIGURATION (DUAL-ENGINE PRO EDITION)
+# 1. SETUP & CONFIGURATION (GOLDEN SLIP DUAL-ENGINE)
 # ==============================================================================
 st.set_page_config(
-    page_title="Value Bet Pro - Dual Engine VIP", page_icon="⚽", layout="centered"
+    page_title="Value Bet Pro - Golden Slip VIP", page_icon="⚽", layout="centered"
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Dual Engine VIP)</h3>",
+    "<h3 style='text-align: center;'>⚽ Value Bet Pro (Golden Slip VIP)</h3>",
     unsafe_allow_html=True,
 )
 st.caption(
-    "ระบบวิเคราะห์คู่บอล 2 มิติ: สายคณิตศาสตร์จ๋า (Quant) VS สายอ่านกับดักราคาบ่อน"
-    " (Trap Hunter)"
+    "ระบบจัดโพย 2 มิติ: คัดเฉพาะ 'บิล 5 คู่ทองคำ' ที่มีความมั่นใจและเข้าเกณฑ์ที่สุด"
 )
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
@@ -171,7 +170,7 @@ def check_match_result(csv_df, home_mapped, away_mapped, pick, match_date=None):
 
 
 # ==============================================================================
-# 4. DUAL ANALYSIS ENGINE (QUANT vs TRAP HUNTER)
+# 4. DUAL ANALYSIS & GOLDEN SCORING ENGINE
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -228,9 +227,13 @@ def scan_league(leg_info, hours_limit):
     hrank, arank = standings.get(home), standings.get(away)
     rank_str = f" [อันดับ {hrank} vs {arank}]" if (hrank and arank) else ""
 
-    # ค่าเริ่มต้นสำหรับสองบิล
     quant_pick, quant_odds, quant_conf = "รอเปิด", 1.90, 75.0
-    trap_pick, trap_odds, trap_note = "รอเปิด", 1.90, "วิเคราะห์ปกติ"
+    trap_pick, trap_odds, trap_score, trap_note = (
+        "รอเปิด",
+        1.90,
+        50.0,
+        "วิเคราะห์ปกติ",
+    )
 
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
@@ -240,8 +243,10 @@ def scan_league(leg_info, hours_limit):
         line = h_obj.get("point", 0.0)
         hp, ap = h_obj["price"], a_obj["price"]
 
-        # --- 1. บิลสายคณิตศาสตร์ (Quant Engine: เน้นอันดับและสถิติพื้นฐาน) ---
+        # --- 1. สายคณิตศาสตร์ (Quant) ---
         if hrank and arank:
+          diff = abs(hrank - arank)
+          quant_conf = min(70.0 + (diff * 2.5), 95.0)
           if hrank < arank:
             quant_pick = (
                 f"ต่อ {home} ({line})"
@@ -249,47 +254,45 @@ def scan_league(leg_info, hours_limit):
                 else f"วาง {home} (เสมอ)"
             )
             quant_odds = hp
-            quant_conf = 82.5
           else:
             quant_pick = f"รอง {home} (+{line})" if line > 0 else f"รอง {home} (0)"
             quant_odds = hp
-            quant_conf = 78.0
         else:
-          quant_pick = f"วาง {home} (เสมอ)" if line == 0 else f"ต่อ {home} ({line})"
+          quant_pick = f"ต่อ {home} ({line})" if line < 0 else f"วาง {home} (เสมอ)"
           quant_odds = hp
           quant_conf = 72.0
 
-        # --- 2. บิลสายอ่านกับดักราคา (Trap Hunter Engine: จับไต๋บ่อน) ---
+        # --- 2. สายอ่านกับดักราคา (Trap Hunter) ---
         if hrank and arank:
-          rank_diff = hrank - arank  # ถ้าบวกเยอะ แปลว่าเจ้าบ้านอันดับแย่กว่าทีมเยือนมาก
+          rank_diff = hrank - arank
           if rank_diff >= 6 and line >= -0.5:
-            # เข้าข่ายกับดัก: อันดับห่างกันเยอะ แต่บ่อนเปิดต่อน้อย หรือเปิดเสมอ/รอง
-            trap_pick = f"วาง {home} (สเกาท์กับดัก: เปิดราคาข่ม/ต่อน้อยผิดปกติ)"
+            trap_pick = f"วาง {home} (เปิดราคาข่ม/ต่อน้อย)"
             trap_odds = hp
+            trap_score = 92.0  # ให้คะแนนสูงเพราะเจอ Trap ชัดเจน
             trap_note = (
-                "🎯 Trap Detected: อันดับห่างแต่ต่อน้อย -> มั่นใจเจ้าบ้านมีของ"
+                "🔥 Trap Detected: อันดับห่างแต่ต่อน้อย -> มั่นใจเจ้าบ้านมีของ"
             )
           elif line <= -1.75:
-            # เข้าข่ายกับดัก: ต่อแพงเวอร์ ทีมใหญ่มักยิงไม่ขาด
-            trap_pick = (
-                f"รองทีมเยือน (สเกาท์กับดัก: ต่อแพงเกิน 1.75 เสี่ยงกินเต็มยาก)"
-            )
+            trap_pick = f"รองทีมเยือน (สวนเรตต่อแพงเวอร์ > 1.75)"
             trap_odds = ap
+            trap_score = 88.0
             trap_note = (
-                "🎯 Trap Detected: ต่อแพงลิบลิ่ว -> สวนรองปลอดภัยกว่า"
+                "🔥 Trap Detected: ต่อแพงลิบลิ่ว -> สวนรองปลอดภัยกว่า"
             )
           else:
             trap_pick = (
                 f"ต่อ {home} ({line})" if line < 0 else f"รอง {home} (+{line})"
             )
             trap_odds = hp
-            trap_note = "🛡️ Standard Playตามเรตตลาดปกติ"
+            trap_score = 65.0
+            trap_note = "🛡️ Standard Play ตามเรตตลาดปกติ"
         else:
           trap_pick = (
-              f"วาง {home} (เสมอ)" if line == 0 else f"ต่อ {home} ({line})"
+              f"ต่อ {home} ({line})" if line < 0 else f"วาง {home} (เสมอ)"
           )
           trap_odds = hp
-          trap_note = "🛡️ บอลไม่มีตารางคะแนนอ้างอิง เล่นตามทรงราคา"
+          trap_score = 60.0
+          trap_note = "🛡️ บอลไม่มีตารางคะแนนอ้างอิง"
 
     match_res = check_match_result(csv_df, home, away, quant_pick, m_dt)
 
@@ -298,13 +301,12 @@ def scan_league(leg_info, hours_limit):
         "match_date": m_dt,
         "league": leg_info["name"],
         "match": f"{home} vs {away}{rank_str}",
-        # ข้อมูลบิลคณิตศาสตร์
         "quant_pick": quant_pick,
         "quant_odds": quant_odds,
         "quant_conf": quant_conf,
-        # ข้อมูลบิลอ่านกับดักราคา
         "trap_pick": trap_pick,
         "trap_odds": trap_odds,
+        "trap_score": trap_score,
         "trap_note": trap_note,
         "result": match_res,
     })
@@ -312,19 +314,19 @@ def scan_league(leg_info, hours_limit):
 
 
 # ==============================================================================
-# 5. STREAMLIT UI (DUAL TABS DASHBOARD)
+# 5. STREAMLIT UI (GOLDEN SLIP TABS)
 # ==============================================================================
 active_leagues = get_active_leagues()
 
-st.sidebar.header("📌 เมนูจัดโพยสเต็ป Dual-Engine")
+st.sidebar.header("📌 เมนูจัดโพยสเต็ปทองคำ")
 menu_choice = st.sidebar.radio(
     "เลือกหน้าการทำงาน",
-    ["🔥 สแกนและจัดโพย (แยก 2 บิล)", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
+    ["🔥 จัดบิล 5 คู่ทองคำ", "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)"],
 )
 
 st.sidebar.markdown("---")
 
-if menu_choice == "🔥 สแกนและจัดโพย (แยก 2 บิล)":
+if menu_choice == "🔥 จัดบิล 5 คู่ทองคำ":
   st.sidebar.header("ตั้งค่าการสแกน")
   if "quota_remaining" in st.session_state:
     st.sidebar.metric(
@@ -348,13 +350,13 @@ if menu_choice == "🔥 สแกนและจัดโพย (แยก 2 บ
   )
   st.session_state["budget"] = budget
 
-  scan_btn = st.sidebar.button("🚀 สแกนหาคู่เด็ด (Dual-Engine)", type="primary")
+  scan_btn = st.sidebar.button("🚀 สแกนและจัดบิล 5 คู่ทองคำ", type="primary")
 
   if scan_btn:
     if not selected:
       st.sidebar.warning("กรุณาเลือกอย่างน้อย 1 ลีก")
     else:
-      with st.spinner("กำลังประมวลผลคู่แข่งขันแยกตามกลยุทธ์..."):
+      with st.spinner("กำลังคัดกรองคู่เด็ดระดับ VIP..."):
         res_all = []
         quota_err = False
         for l_key in selected:
@@ -372,7 +374,7 @@ if menu_choice == "🔥 สแกนและจัดโพย (แยก 2 บ
           df = pd.DataFrame(res_all)
           df = df.drop_duplicates(subset=["match"]).reset_index(drop=True)
           st.session_state["saved_scan_df"] = df
-          st.success(f"สแกนสำเร็จ! รวบรวมมาให้เลือก {len(df)} คู่")
+          st.success(f"สแกนสำเร็จ! คัดกรองคู่แข่งขันเรียบร้อย")
 
   if (
       "saved_scan_df" in st.session_state
@@ -381,50 +383,75 @@ if menu_choice == "🔥 สแกนและจัดโพย (แยก 2 บ
     df = st.session_state["saved_scan_df"]
     budg = st.session_state.get("budget", 1000)
 
-    # แยกเมนู/แท็บแสดงผลออกเป็น 2 บิลชัดเจนตามที่พี่ต้องการ
+    # แบ่งเป็น 2 แท็บ: บิล 5 คู่ทองคำ (Quant) และ บิล 5 คู่ทองคำ (Trap Hunter)
     tab_quant, tab_trap = st.tabs(
-        ["📊 บิลสายคณิตศาสตร์จ๋า (Pure Quant)", "🧠 บิลสายอ่านกับดักราคา (Trap Hunter)"]
+        [
+            "📊 บิลหลัก Quant (สเต็ป 5 คู่ทองคำ)",
+            "🧠 บิลหลัก Trap Hunter (สเต็ป 5 คู่ทองคำ)",
+        ]
     )
 
-    # --- TAB 1: สายคณิตศาสตร์จ๋า ---
+    # --- TAB 1: Quant Golden Slip ---
     with tab_quant:
-      st.subheader("📊 โพยสายคณิตศาสตร์ & สถิติตารางคะแนน (Pure Quant)")
-      st.caption("คัดเลือกโดยยึดอันดับตารางและสถิติความเป็นจริงเป็นหลัก")
+      st.subheader("🔥 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ - Pure Quant)")
       st.write(
-          f"• **งบจัดบิลหลัก (สเต็ป 5):** {round(budg * 0.6)} บาท | **บิลต่อยอด"
-          f" (สเต็ป 8):** {round(budg * 0.4)} บาท"
+          f"• **งบลงทุนจัดบิล:** {budg} บาท (จัดเรียงตามความมั่นใจสูงสุด)"
       )
       st.markdown("---")
 
-      def render_quant_slip(title, data_sub, target_count):
-        st.markdown(f"#### {title}")
-        for _, row in data_sub.head(target_count).iterrows():
-          st.markdown(
-              f"✅ **{row['match']}**<br>👉 ทีเด็ด (Quant):"
-              f" `{row['quant_pick']}` | ค่าน้ำ: `{row['quant_odds']}` | ความมั่นใจ:"
-              f" `{row['quant_conf']}%`<br>สถานะ: **{row['result']}**",
-              unsafe_allow_html=True,
-          )
+      # จัดเรียงตามความมั่นใจ (quant_conf) จากมากไปน้อย
+      df_quant_sorted = df.sort_values(
+          by="quant_conf", ascending=False
+      ).reset_index(drop=True)
+
+      for _, row in df_quant_sorted.head(5).iterrows():
+        st.markdown(
+            f"✅ **{row['match']}** (ความมั่นใจ: `{row['quant_conf']}%`)<br>👉"
+            f" เลือก: `{row['quant_pick']}` | ค่าน้ำ: `{row['quant_odds']}` |"
+            f" สถานะ: **{row['result']}**",
+            unsafe_allow_html=True,
+        )
         st.markdown("---")
 
-      render_quant_slip("🔥 บิลหลัก Quant (สเต็ป 5 คู่)", df, 5)
-      render_quant_slip("📈 บิลต่อยอด Quant (สเต็ป 8 คู่)", df, 8)
-
-    # --- TAB 2: สายอ่านกับดักราคา ---
+    # --- TAB 2: Trap Hunter Golden Slip ---
     with tab_trap:
-      st.subheader("🧠 โพยสายอ่านกับดักราคาบ่อน (Trap Hunter)")
-      st.caption(
-          "เจาะลึกเรตราคาผิดปกติ ต่อน้อยเกินไป หรือต่อแพงเวอร์เพื่อสวนทางกับดักบ่อน"
-      )
+      st.subheader("🎯 บิลหลัก VIP (สเต็ป 5 คู่ทองคำ - Trap Hunter)")
       st.write(
-          f"• **งบจัดบิลล่ากับดัก (สเต็ป 5):** {round(budg * 0.6)} บาท |"
-          f" **บิลเสริม (สเต็ป 8):** {round(budg * 0.4)} บาท"
+          f"• **งบลงทุนจัดบิล:** {budg} บาท (จัดเรียงตามความคมในการจับกับดักราคา)"
       )
       st.markdown("---")
 
-      def render_trap_slip(title, data_sub, target_count):
-        st.markdown(f"#### {title}")
-        for _, row in data_sub.head(target_count).iterrows():
-          st.markdown(
-              f"🎯 **{row['match']}**<br>👉 ทีเด็ด (Trap):"
-              f" `
+      # จัดเรียงตามคะแนนจับกับดัก (trap_score) จากมากไปน้อย
+      df_trap_sorted = df.sort_values(
+          by="trap_score", ascending=False
+      ).reset_index(drop=True)
+
+      for _, row in df_trap_sorted.head(5).iterrows():
+        st.markdown(
+            f"🎯 **{row['match']}** (คะแนนจับกับดัก:"
+            f" `{row['trap_score']}%`)<br>👉 เลือก: `{row['trap_pick']}` |"
+            f" ค่าน้ำ: `{row['trap_odds']}`<br><small"
+            f" style='color:orange;'>{row['trap_note']}</small> | สถานะ:"
+            f" **{row['result']}**",
+            unsafe_allow_html=True,
+        )
+        st.markdown("---")
+  else:
+    st.info(
+        "💡 กรุณากดปุ่ม '🚀 สแกนและจัดบิล 5 คู่ทองคำ' ที่เมนูด้านข้างเพื่อเริ่มสร้างโพย"
+    )
+
+elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)":
+  st.subheader("🏆 ตรวจผลบิลอัตโนมัติ")
+  if (
+      "saved_scan_df" in st.session_state
+      and not st.session_state["saved_scan_df"].empty
+  ):
+    df = st.session_state["saved_scan_df"]
+    for _, r in df.iterrows():
+      st.write(
+          f"⚽ **{r['match']}** ➔ Quant: `{r['quant_pick']}` | Trap:"
+          f" `{r['trap_pick']}` | ผลสรุป: **{r['result']}**"
+      )
+  else:
+    st.warning("⚠️ ยังไม่มีโพยในระบบ กรุณาสร้างโพยก่อน")
