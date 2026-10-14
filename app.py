@@ -9,7 +9,7 @@ import requests
 import streamlit as st
 
 # =========================================================
-# VALUE BET PRO — HYBRID QUANT ENGINE (COMPLETE EDITION)
+# VALUE BET PRO — HYBRID QUANT ENGINE (MANUAL LEAGUE SELECT)
 # =========================================================
 
 APP_NAME = "Value Bet Pro"
@@ -25,22 +25,36 @@ st.set_page_config(
 )
 
 st.markdown(
-    "<h2 style='text-align: center;'>⚽ Value Bet Pro (Hybrid Engine)</h2>",
+    "<h2 style='text-align: center;'>⚽ Value Bet Pro (Flexible Scan Edition)</h2>",
     unsafe_allow_html=True,
 )
-st.caption("รวมร่างความแม่นยำ: ราคาหลักตรงเป๊ะ + โมเดลคำนวณสำรองกัน None + จัดบิลสเต็ป 5, 9, 13, 20 คู่ + ระบบบันทึก SQLite")
+st.caption("ระบบวิเคราะห์อัตโนมัติ: เลือกกกสแกนอิสระ ไม่ดึงออโต้ประหยัดโควตา API + ราคาหลักมาตรฐาน 1.80 - 2.05 + จัดบิลสเต็ป 5, 9, 13, 20 คู่")
 
+# รวบรวมรายชื่อลีกทั้งหมดให้เลือกครบถ้วน
 LEAGUES = {
     "พรีเมียร์ลีก อังกฤษ": "soccer_epl",
+    "แชมเปียนชิพ อังกฤษ": "soccer_efl_champ",
+    "ลีกวัน อังกฤษ": "soccer_england_league1",
+    "ลีกทู อังกฤษ": "soccer_england_league2",
     "ลาลีกา สเปน": "soccer_spain_la_liga",
     "บุนเดสลีกา เยอรมนี": "soccer_germany_bundesliga",
     "เซเรียอา อิตาลี": "soccer_italy_serie_a",
     "ลีกเอิง ฝรั่งเศส": "soccer_france_ligue_one",
-    "ยูฟ่า แชมเปียนส์ลีก": "soccer_uefa_champs_league",
-    "ยูฟ่า ยูโรปาลีก": "soccer_uefa_europa_league",
     "เอเรดิวิซี เนเธอร์แลนด์": "soccer_netherlands_eredivisie",
     "โปรตุเกส พรีเมราลีกา": "soccer_portugal_primeira_liga",
-    "เมเจอร์ลีก ซอคเกอร์ (MLS)": "soccer_usa_mls",
+    "สกอตติช พรีเมียร์ชิพ": "soccer_spl",
+    "เจลีก ญี่ปุ่น": "soccer_japan_j_league",
+    "เคลีก เกาหลีใต้": "soccer_korea_k_league_1",
+    "ไทยลีก": "soccer_thailand_thai_league",
+    "ออสเตรีย บุนเดสลีกา": "soccer_austria_bundesliga",
+    "สวิส ซูเปอร์ลีก": "soccer_switzerland_superleague",
+    "กรีซ ซูเปอร์ลีก": "soccer_greece_super_league",
+    "MLS สหรัฐฯ": "soccer_usa_mls",
+    "บราซิล ซีรีเอ": "soccer_brazil_campeonato",
+    "อาร์เจนตินา พรีเมรา ดิวิชัน": "soccer_argentina_primera_division",
+    "ยูฟ่า แชมเปียนส์ลีก": "soccer_uefa_champs_league",
+    "ยูฟ่า ยูโรปาลีก": "soccer_uefa_europa_league",
+    "ยูฟ่า คอนเฟอเรนซ์ลีก": "soccer_uefa_europa_conference_league",
 }
 
 # ---------------------------------------------------------
@@ -145,7 +159,7 @@ def fetch_events_cached(sport_key, api_key):
     return res.json(), dict(res.headers)
 
 # ---------------------------------------------------------
-# HYBRID EVALUATION ENGINE
+# ACCURATE EVALUATION ENGINE
 # ---------------------------------------------------------
 def parse_and_evaluate_match(event, league_name):
     home = event.get("home_team", "")
@@ -167,7 +181,7 @@ def parse_and_evaluate_match(event, league_name):
                 if odds is None:
                     continue
 
-                # 💡 ล็อกเฉพาะราคาหลักมาตรฐาน (1.80 - 2.05) ตัดราคาทางเลือกมั่วออก
+                # 💡 ล็อกเฉพาะราคาหลักมาตรฐาน (1.80 - 2.05)
                 if not (1.80 <= odds <= 2.05):
                     continue
 
@@ -175,10 +189,12 @@ def parse_and_evaluate_match(event, league_name):
                     if name not in (home, away):
                         continue
                     
-                    if name == home:
-                        selection = f"ต่อ {home} ({line})" if line < 0 else (f"รอง {home} (+{line})" if line > 0 else f"วาง {home} (เสมอ)")
+                    if line < 0:
+                        selection = f"ต่อ {name} ({line})"
+                    elif line > 0:
+                        selection = f"รอง {name} (+{line})"
                     else:
-                        selection = f"ต่อ {away} ({-line})" if line > 0 else (f"รอง {away} (+{-line})" if line < 0 else f"วาง {away} (เสมอ)")
+                        selection = f"วาง {name} (เสมอ)"
 
                     implied_prob = 1.0 / odds
                     model_prob = min(max(implied_prob * 1.03, 0.48), 0.65)
@@ -230,7 +246,7 @@ def parse_and_evaluate_match(event, league_name):
     return best_pick
 
 # ---------------------------------------------------------
-# SIDEBAR SETTINGS
+# SIDEBAR SETTINGS (DEFAULT BLANK TO SAVE QUOTA)
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("⚙️ ตั้งค่าระบบ")
@@ -239,10 +255,11 @@ with st.sidebar:
         st.session_state["runtime_api_key"] = key_input.strip()
 
     st.divider()
+    # ตั้งค่า default=[] เพื่อให้ช่องว่างไว้ให้เลือกเอง ป้องกันการดึงข้อมูลอัตโนมัติ
     selected_leagues = st.multiselect(
         "เลือกลีกที่ต้องการสแกน",
         options=list(LEAGUES.keys()),
-        default=["พรีเมียร์ลีก อังกฤษ", "ลาลีกา สเปน", "บุนเดสลีกา เยอรมนี", "เซเรียอา อิตาลี", "ยูฟ่า แชมเปียนส์ลีก"]
+        default=[]
     )
 
 # ---------------------------------------------------------
@@ -257,7 +274,7 @@ with tab_scan:
     
     col_btn, _ = st.columns([1, 3])
     with col_btn:
-        scan_clicked = st.button("🚀 สแกนหาคู่มั่นใจสูง (ราคาหลักมาตรฐาน)", type="primary", use_container_width=True)
+        scan_clicked = st.button("🚀 กดคลิกเพื่อสแกนลีกที่เลือก", type="primary", use_container_width=True)
 
     if scan_clicked:
         fetch_events_cached.clear()
@@ -265,7 +282,7 @@ with tab_scan:
     if not api_key:
         st.warning("กรุณาใส่ API Key ที่แถบด้านข้างก่อนสแกน")
     elif not selected_leagues:
-        st.warning("กรุณาเลือกลีกอย่างน้อย 1 ลีก")
+        st.info("💡 กรุณาติ๊กเลือกลีกที่ต้องการในแถบด้านข้างซ้าย แล้วค่อยกดปุ่ม 'กดคลิกเพื่อสแกนลีกที่เลือก' เพื่อประหยัดโควตา API")
     else:
         all_picks = []
         errors = []
@@ -303,7 +320,7 @@ with tab_scan:
                 "selection": "คำแนะนำ", "odds": "ค่าน้ำ", "confidence": "ความมั่นใจ (%)", "ev": "EV (%)", "bookmaker": "เจ้ามือ"
             }), use_container_width=True, hide_index=True)
         else:
-            st.info("ไม่พบคู่แข่งขันใน 24 ชั่วโมงข้างหน้า หรือลีกที่เลือกยังไม่มีโปรแกรมเตะในช่วงเวลานี้")
+            st.warning("ไม่พบคู่แข่งขันใน 24 ชั่วโมงข้างหน้าในลีกที่ท่านเลือก หรือ API ไม่มีราคาในช่วงเวลานี้")
 
 with tab_slips:
     st.subheader("🔥 จัดบิลสเต็ป VIP (คัดตัวที่มั่นใจที่สุดจากราคาหลัก)")
@@ -311,7 +328,7 @@ with tab_slips:
     df_picks = st.session_state.get("cached_picks", pd.DataFrame())
 
     if df_picks.empty:
-        st.warning("กรุณากด 'สแกนหาคู่มั่นใจสูง' ที่แท็บแรกก่อนเพื่อดึงข้อมูลมาจัดบิลสเต็ป")
+        st.warning("กรุณากด 'กดคลิกเพื่อสแกนลีกที่เลือก' ที่แท็บแรกก่อนเพื่อดึงข้อมูลมาจัดบิลสเต็ป")
     else:
         sizes = [5, 9, 13, 20]
         for size in sizes:
