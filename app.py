@@ -1,29 +1,24 @@
 
 import os
+import re
 import math
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime, date
 
 import pandas as pd
 import requests
 import streamlit as st
 
 # ============================================================
-# VALUE BET PRO — INTEGRATED DUAL ENGINE
-# Engine 1: Value Bet / Poisson / Asian Handicap / Totals / EV
-# Engine 2: Opening vs Current Odds / Form / H2H
-# Storage: SQLite
+# VALUE BET PRO - INTEGRATED EDITION
+# Streamlit + The Odds API v4 + Historical Data + SQLite
 # ============================================================
 
 APP_NAME = "Value Bet Pro"
+DB_PATH = Path("value_bet_pro.db")
 ODDS_BASE = "https://api.the-odds-api.com/v4"
 FOOTBALL_DATA_BASE = "https://www.football-data.co.uk/mmz4281"
-
-BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
-DB_PATH = DATA_DIR / "value_bet_pro.db"
 
 st.set_page_config(
     page_title=APP_NAME,
@@ -31,1117 +26,1357 @@ st.set_page_config(
     layout="wide",
 )
 
-# --------------------------- CONFIG ---------------------------
-
-SEASONS = ["2627", "2526", "2425", "2324", "2223"]
+# ------------------------------------------------------------
+# 1. LEAGUE CONFIGURATION
+# Odds API keys are verified against /v4/sports at runtime.
+# Historical codes are used only where a Football-Data code
+# is configured. Other leagues can use an uploaded CSV.
+# ------------------------------------------------------------
 
 LEAGUES = {
-    "Premier League": {"fd": "E0", "odds": "soccer_epl"},
-    "Championship": {"fd": "E1", "odds": "soccer_efl_champ"},
-    "League One": {"fd": "E2", "odds": None},
-    "League Two": {"fd": "E3", "odds": None},
-    "La Liga": {"fd": "SP1", "odds": "soccer_spain_la_liga"},
-    "Bundesliga": {"fd": "D1", "odds": "soccer_germany_bundesliga"},
-    "Serie A": {"fd": "I1", "odds": "soccer_italy_serie_a"},
-    "Ligue 1": {"fd": "F1", "odds": "soccer_france_ligue_one"},
-    "Eredivisie": {"fd": "N1", "odds": "soccer_netherlands_eredivisie"},
-    "Primeira Liga": {"fd": "P1", "odds": "soccer_portugal_primeira_liga"},
-    "Scottish Premiership": {"fd": "SC0", "odds": "soccer_spl"},
+    "Premier League": {
+        "odds_key": "soccer_epl",
+        "fd_code": "E0",
+        "confidence_base": "สูง",
+        "region": "uk",
+    },
+    "Championship": {
+        "odds_key": "soccer_efl_champ",
+        "fd_code": "E1",
+        "confidence_base": "สูง",
+        "region": "uk",
+    },
+    "League One": {
+        "odds_key": "soccer_england_league1",
+        "fd_code": "E2",
+        "confidence_base": "สูง",
+        "region": "uk",
+    },
+    "League Two": {
+        "odds_key": "soccer_england_league2",
+        "fd_code": "E3",
+        "confidence_base": "สูง",
+        "region": "uk",
+    },
+    "La Liga": {
+        "odds_key": "soccer_spain_la_liga",
+        "fd_code": "SP1",
+        "confidence_base": "สูง",
+        "region": "eu",
+    },
+    "Bundesliga": {
+        "odds_key": "soccer_germany_bundesliga",
+        "fd_code": "D1",
+        "confidence_base": "สูง",
+        "region": "eu",
+    },
+    "Serie A": {
+        "odds_key": "soccer_italy_serie_a",
+        "fd_code": "I1",
+        "confidence_base": "สูง",
+        "region": "eu",
+    },
+    "Ligue 1": {
+        "odds_key": "soccer_france_ligue_one",
+        "fd_code": "F1",
+        "confidence_base": "สูง",
+        "region": "eu",
+    },
+    "Eredivisie": {
+        "odds_key": "soccer_netherlands_eredivisie",
+        "fd_code": "N1",
+        "confidence_base": "สูง",
+        "region": "eu",
+    },
+    "Primeira Liga": {
+        "odds_key": "soccer_portugal_primeira_liga",
+        "fd_code": "P1",
+        "confidence_base": "สูง",
+        "region": "eu",
+    },
+    "Scottish Premiership": {
+        "odds_key": "soccer_spl",
+        "fd_code": "SC0",
+        "confidence_base": "สูง",
+        "region": "uk",
+    },
+    "J1 League (Japan)": {
+        "odds_key": "soccer_japan_j_league",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "asia",
+    },
+    "K League 1 (Korea)": {
+        "odds_key": "soccer_korea_k_league_1",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "asia",
+    },
+    "Thai League 1": {
+        "odds_key": "soccer_thailand_thai_league",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "asia",
+    },
+    "Austrian Bundesliga": {
+        "odds_key": "soccer_austria_bundesliga",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "eu",
+    },
+    "Swiss Super League": {
+        "odds_key": "soccer_switzerland_superleague",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "eu",
+    },
+    "Greek Super League": {
+        "odds_key": "soccer_greece_super_league",
+        "fd_code": "G1",
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "eu",
+    },
+    "MLS (USA)": {
+        "odds_key": "soccer_usa_mls",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "us",
+    },
+    "Brazil Série A": {
+        "odds_key": "soccer_brazil_campeonato",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "sa",
+    },
+    "Argentina Primera División": {
+        "odds_key": "soccer_argentina_primera_division",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "sa",
+    },
+    "UEFA Champions League": {
+        "odds_key": "soccer_uefa_champs_league",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "eu",
+    },
+    "UEFA Europa League": {
+        "odds_key": "soccer_uefa_europa_league",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "eu",
+    },
+    "UEFA Conference League": {
+        "odds_key": "soccer_uefa_europa_conference_league",
+        "fd_code": None,
+        "confidence_base": "ต้องตรวจสอบ",
+        "region": "eu",
+    },
 }
 
-ODDS_API_KEY = ""
-try:
-    ODDS_API_KEY = str(st.secrets.get("ODDS_API_KEY", "") or "")
-except Exception:
-    ODDS_API_KEY = ""
+# ------------------------------------------------------------
+# 2. API KEY AND DATABASE
+# ------------------------------------------------------------
 
-ODDS_API_KEY = ODDS_API_KEY or os.getenv("ODDS_API_KEY", "")
+def get_api_key():
+    try:
+        key = st.secrets.get("ODDS_API_KEY", "")
+        if key:
+            return str(key).strip()
+    except Exception:
+        pass
+    return os.getenv("ODDS_API_KEY", "").strip()
 
-REQUEST_HEADERS = {"User-Agent": "ValueBetPro/2.0"}
 
-# ------------------------ DATABASE ----------------------------
-
-def db_connect():
-    conn = sqlite3.connect(DB_PATH, timeout=20)
-    conn.row_factory = sqlite3.Row
-    return conn
+def connect_db():
+    con = sqlite3.connect(DB_PATH, timeout=30)
+    con.row_factory = sqlite3.Row
+    return con
 
 
 def init_db():
-    with db_connect() as conn:
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS odds_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            saved_at TEXT NOT NULL,
-            match_date TEXT,
-            league TEXT,
-            home_team TEXT,
-            away_team TEXT,
-            bookmaker TEXT,
-            market TEXT,
-            selection TEXT,
-            line REAL,
-            odds REAL,
-            source TEXT,
-            snapshot_type TEXT,
-            notes TEXT
-        )
+    with connect_db() as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS odds_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                captured_at TEXT NOT NULL,
+                league TEXT,
+                home_team TEXT,
+                away_team TEXT,
+                market TEXT,
+                selection TEXT,
+                line REAL,
+                odds REAL,
+                source TEXT,
+                note TEXT
+            )
         """)
-        conn.execute("""
-        CREATE TABLE IF NOT EXISTS bets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT NOT NULL,
-            match_date TEXT,
-            league TEXT,
-            home_team TEXT,
-            away_team TEXT,
-            engine TEXT,
-            market TEXT,
-            selection TEXT,
-            line REAL,
-            odds REAL,
-            stake REAL,
-            status TEXT DEFAULT 'Pending',
-            result TEXT,
-            profit REAL,
-            notes TEXT
-        )
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS bets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                league TEXT,
+                home_team TEXT,
+                away_team TEXT,
+                market TEXT,
+                selection TEXT,
+                line REAL,
+                odds REAL,
+                stake REAL,
+                model_probability REAL,
+                ev_percent REAL,
+                data_status TEXT,
+                result TEXT DEFAULT 'Pending',
+                profit REAL DEFAULT 0,
+                note TEXT
+            )
         """)
-        conn.commit()
+        con.commit()
+
+
+def query_db(sql, params=()):
+    with connect_db() as con:
+        return pd.read_sql_query(sql, con, params=params)
+
+
+def save_snapshot(
+    league, home, away, market, selection, line, odds, source, note=""
+):
+    with connect_db() as con:
+        con.execute("""
+            INSERT INTO odds_snapshots
+            (captured_at, league, home_team, away_team, market,
+             selection, line, odds, source, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            datetime.now(timezone.utc).isoformat(),
+            league, home, away, market, selection,
+            line, odds, source, note,
+        ))
+        con.commit()
+
+
+def save_bet(record):
+    with connect_db() as con:
+        con.execute("""
+            INSERT INTO bets
+            (created_at, league, home_team, away_team, market,
+             selection, line, odds, stake, model_probability,
+             ev_percent, data_status, result, profit, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 0, ?)
+        """, (
+            datetime.now(timezone.utc).isoformat(),
+            record["league"],
+            record["home"],
+            record["away"],
+            record["market"],
+            record["selection"],
+            record["line"],
+            record["odds"],
+            record["stake"],
+            record.get("probability"),
+            record.get("ev"),
+            record.get("data_status", "ไม่ทราบ"),
+            record.get("note", ""),
+        ))
+        con.commit()
+
+
+def settle_bet(bet_id, result):
+    with connect_db() as con:
+        row = con.execute(
+            "SELECT stake, odds FROM bets WHERE id = ?", (bet_id,)
+        ).fetchone()
+
+        if row is None:
+            return
+
+        stake = float(row["stake"])
+        odds = float(row["odds"])
+
+        profit_map = {
+            "Win": stake * (odds - 1),
+            "Half Win": stake * (odds - 1) / 2,
+            "Push": 0.0,
+            "Half Loss": -stake / 2,
+            "Loss": -stake,
+        }
+        profit = profit_map.get(result, 0.0)
+
+        con.execute(
+            "UPDATE bets SET result=?, profit=? WHERE id=?",
+            (result, profit, int(bet_id)),
+        )
+        con.commit()
 
 
 init_db()
 
-
-def db_read(query, params=()):
-    with db_connect() as conn:
-        return pd.read_sql_query(query, conn, params=params)
-
-
-def db_write(query, params=()):
-    with db_connect() as conn:
-        conn.execute(query, params)
-        conn.commit()
-
-
-def save_snapshot(record):
-    db_write("""
-        INSERT INTO odds_snapshots
-        (saved_at, match_date, league, home_team, away_team,
-         bookmaker, market, selection, line, odds, source,
-         snapshot_type, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        datetime.now().isoformat(timespec="seconds"),
-        record.get("match_date"),
-        record.get("league"),
-        record.get("home_team"),
-        record.get("away_team"),
-        record.get("bookmaker"),
-        record.get("market"),
-        record.get("selection"),
-        record.get("line"),
-        record.get("odds"),
-        record.get("source", "manual"),
-        record.get("snapshot_type", "current"),
-        record.get("notes", ""),
-    ))
-
-
-def save_bet(record):
-    db_write("""
-        INSERT INTO bets
-        (created_at, match_date, league, home_team, away_team,
-         engine, market, selection, line, odds, stake,
-         status, result, profit, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        datetime.now().isoformat(timespec="seconds"),
-        record.get("match_date"),
-        record.get("league"),
-        record.get("home_team"),
-        record.get("away_team"),
-        record.get("engine"),
-        record.get("market"),
-        record.get("selection"),
-        record.get("line"),
-        record.get("odds"),
-        record.get("stake"),
-        record.get("status", "Pending"),
-        record.get("result"),
-        record.get("profit"),
-        record.get("notes", ""),
-    ))
-
-
-def update_bet_result(bet_id, result, profit):
-    db_write(
-        "UPDATE bets SET status=?, result=?, profit=? WHERE id=?",
-        ("Settled", result, profit, int(bet_id)),
-    )
-
-
-# ------------------------- HELPERS ----------------------------
+# ------------------------------------------------------------
+# 3. GENERAL HELPERS
+# ------------------------------------------------------------
 
 def safe_float(value, default=None):
     try:
-        if value is None or str(value).strip() == "":
-            return default
-        number = float(value)
-        return number if math.isfinite(number) else default
+        result = float(value)
+        if math.isfinite(result):
+            return result
     except (TypeError, ValueError):
-        return default
+        pass
+    return default
 
 
-def norm(value):
-    return " ".join(str(value or "").lower().strip().split())
+def normalize_team(name):
+    text = str(name or "").lower().strip()
+    text = re.sub(r"\b(fc|cf|sc|afc|club|football club)\b", "", text)
+    text = re.sub(r"[^a-z0-9ก-๙]+", "", text)
+    return text
 
 
-def api_get(url, params=None, timeout=25):
+def team_matches(df, team):
+    if df is None or df.empty or not team:
+        return pd.DataFrame()
+
+    target = normalize_team(team)
+    if not target:
+        return pd.DataFrame()
+
+    mask = (
+        df["HomeTeam"].astype(str).map(normalize_team).eq(target)
+        | df["AwayTeam"].astype(str).map(normalize_team).eq(target)
+    )
+    return df.loc[mask].sort_values("Date", ascending=False)
+
+
+def api_get(path, params=None, timeout=20):
+    key = get_api_key()
+    if not key:
+        raise ValueError(
+            "ยังไม่ได้ตั้ง ODDS_API_KEY ใน Streamlit Secrets หรือ Environment"
+        )
+
+    request_params = dict(params or {})
+    request_params["apiKey"] = key
+
     response = requests.get(
-        url,
-        params=params or {},
-        headers=REQUEST_HEADERS,
+        f"{ODDS_BASE}/{path.lstrip('/')}",
+        params=request_params,
         timeout=timeout,
     )
+
+    if response.status_code == 401:
+        raise ValueError("API Key ไม่ถูกต้องหรือไม่ได้รับอนุญาต")
+    if response.status_code == 429:
+        raise ValueError("เรียก API เกินโควตาหรือเกินอัตราที่กำหนด")
     response.raise_for_status()
-    return response.json()
+    return response.json(), response.headers
 
 
-def closest_team(name, candidates):
-    name_norm = norm(name)
-    if not name_norm:
-        return None
+@st.cache_data(ttl=300, show_spinner=False)
+def get_available_sports():
+    data, _ = api_get("sports", {"all": "true"})
+    return data
 
-    normalized = {norm(x): x for x in candidates}
-    if name_norm in normalized:
-        return normalized[name_norm]
 
-    # Conservative alias checks; avoid forcing uncertain matches.
-    aliases = {
-        "man utd": "manchester united",
-        "man united": "manchester united",
-        "spurs": "tottenham",
-        "wolves": "wolverhampton",
-        "west ham": "west ham",
-        "brighton": "brighton",
+def find_sport_key(config):
+    """ตรวจสอบว่าลีกมีอยู่ในรายการกีฬาของ API จริงหรือไม่."""
+    try:
+        sports = get_available_sports()
+    except Exception as exc:
+        return None, f"ตรวจ API ไม่สำเร็จ: {exc}"
+
+    expected = config["odds_key"]
+    active = {
+        item.get("key"): item
+        for item in sports
+        if item.get("active", True)
     }
-    name_norm = aliases.get(name_norm, name_norm)
 
-    if name_norm in normalized:
-        return normalized[name_norm]
+    if expected in active:
+        return expected, "พบลีกใน API"
 
-    return None
+    # ถ้า key ไม่ตรง ให้แสดงตัวเลือกที่ใกล้เคียงเพื่อให้ตรวจเอง
+    base = expected.replace("soccer_", "").replace("_", " ")
+    candidates = [
+        item.get("key", "")
+        for item in sports
+        if base in item.get("key", "").replace("soccer_", "").replace("_", " ")
+        or any(
+            token in item.get("key", "").lower()
+            for token in base.split() if len(token) > 3
+        )
+    ]
+
+    if candidates:
+        return None, "ไม่พบ key ที่ตั้งไว้; ตัวเลือกใกล้เคียง: " + ", ".join(candidates[:5])
+
+    return None, "ไม่พบลีกนี้ในรายการ API ที่บัญชีเข้าถึงได้"
 
 
-# -------------------- HISTORICAL FOOTBALL DATA ----------------
+@st.cache_data(ttl=180, show_spinner=False)
+def fetch_odds(sport_key, regions="uk,eu,us", markets="spreads,totals"):
+    data, headers = api_get(
+        f"sports/{sport_key}/odds",
+        {
+            "regions": regions,
+            "markets": markets,
+            "oddsFormat": "decimal",
+            "dateFormat": "iso",
+        },
+    )
+    remaining = headers.get("x-requests-remaining", "ไม่ทราบ")
+    return data, remaining
+
+
+# ------------------------------------------------------------
+# 4. HISTORICAL RESULTS
+# ------------------------------------------------------------
+
+def normalize_history(df):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # รองรับชื่อคอลัมน์แบบ Football-Data และ CSV ทั่วไป
+    rename = {}
+    aliases = {
+        "date": "Date",
+        "hometeam": "HomeTeam",
+        "home_team": "HomeTeam",
+        "awayteam": "AwayTeam",
+        "away_team": "AwayTeam",
+        "fthg": "FTHG",
+        "homegoals": "FTHG",
+        "home_goals": "FTHG",
+        "ftag": "FTAG",
+        "awaygoals": "FTAG",
+        "away_goals": "FTAG",
+    }
+
+    for col in df.columns:
+        key = str(col).strip().lower().replace(" ", "")
+        if key in aliases:
+            rename[col] = aliases[key]
+
+    df = df.rename(columns=rename)
+
+    required = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]
+    if not all(col in df.columns for col in required):
+        return pd.DataFrame()
+
+    df = df[required].copy()
+    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
+    df["FTHG"] = pd.to_numeric(df["FTHG"], errors="coerce")
+    df["FTAG"] = pd.to_numeric(df["FTAG"], errors="coerce")
+    df = df.dropna(subset=required)
+    df = df.sort_values("Date").reset_index(drop=True)
+    return df
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def load_history(league_code, season_codes):
+def load_football_data(fd_code, seasons):
     frames = []
     errors = []
 
-    for season in season_codes:
-        url = f"{FOOTBALL_DATA_BASE}/{season}/{league_code}.csv"
+    if not fd_code:
+        return pd.DataFrame(), ["ลีกนี้ไม่มีแหล่ง Football-Data ที่กำหนดไว้"]
+
+    for season in seasons:
+        url = f"{FOOTBALL_DATA_BASE}/{season}/{fd_code}.csv"
         try:
-            frame = pd.read_csv(url, on_bad_lines="skip")
-            needed = ["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG", "FTR"]
-            if not all(col in frame.columns for col in needed):
+            response = requests.get(url, timeout=20)
+            if response.status_code != 200:
+                errors.append(f"{season}: HTTP {response.status_code}")
                 continue
-            frame = frame[needed].copy()
-            frame["Season"] = season
-            frames.append(frame)
+
+            from io import StringIO
+            frame = pd.read_csv(StringIO(response.text), on_bad_lines="skip")
+            frame = normalize_history(frame)
+
+            if not frame.empty:
+                frames.append(frame)
+            else:
+                errors.append(f"{season}: ไม่มีคอลัมน์ผลการแข่งขันที่ใช้ได้")
         except Exception as exc:
             errors.append(f"{season}: {exc}")
 
     if not frames:
         return pd.DataFrame(), errors
 
-    df = pd.concat(frames, ignore_index=True)
-    df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
-    for col in ["FTHG", "FTAG"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-
-    df = df.dropna(
-        subset=["Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"]
+    combined = pd.concat(frames, ignore_index=True)
+    combined = combined.drop_duplicates(
+        subset=["Date", "HomeTeam", "AwayTeam"]
     )
-    df = df.sort_values("Date")
-    df = df.drop_duplicates(
-        subset=["Date", "HomeTeam", "AwayTeam"], keep="last"
-    )
-    return df.reset_index(drop=True), errors
+    return combined.sort_values("Date").reset_index(drop=True), errors
 
 
-def team_matches(df, team, venue="all", limit=5):
-    if df.empty or not team:
-        return df.iloc[0:0].copy()
-
-    if venue == "home":
-        out = df[df["HomeTeam"] == team].copy()
-    elif venue == "away":
-        out = df[df["AwayTeam"] == team].copy()
-    else:
-        out = df[
-            (df["HomeTeam"] == team) | (df["AwayTeam"] == team)
-        ].copy()
-
-    return out.sort_values("Date").tail(limit)
-
-
-def form_stats(df, team, venue="all", limit=5):
-    games = team_matches(df, team, venue, limit)
-
-    result = {
-        "n": len(games), "gf": None, "ga": None, "points": None,
-        "wins": 0, "draws": 0, "losses": 0,
-    }
+def recent_form(df, team, n=5):
+    games = team_matches(df, team).tail(n)
     if games.empty:
-        return result
+        return {
+            "played": 0, "wins": 0, "draws": 0, "losses": 0,
+            "gf": None, "ga": None, "points": None,
+        }
 
-    gf, ga, pts = [], [], []
+    wins = draws = losses = gf = ga = points = 0
+
     for _, row in games.iterrows():
-        home = row["HomeTeam"] == team
-        scored = float(row["FTHG"] if home else row["FTAG"])
-        conceded = float(row["FTAG"] if home else row["FTHG"])
-        gf.append(scored)
-        ga.append(conceded)
+        is_home = normalize_team(row["HomeTeam"]) == normalize_team(team)
+        scored = int(row["FTHG"] if is_home else row["FTAG"])
+        conceded = int(row["FTAG"] if is_home else row["FTHG"])
+        gf += scored
+        ga += conceded
 
         if scored > conceded:
-            pts.append(3)
-            result["wins"] += 1
+            wins += 1
+            points += 3
         elif scored == conceded:
-            pts.append(1)
-            result["draws"] += 1
+            draws += 1
+            points += 1
         else:
-            pts.append(0)
-            result["losses"] += 1
+            losses += 1
 
-    result["gf"] = sum(gf) / len(gf)
-    result["ga"] = sum(ga) / len(ga)
-    result["points"] = sum(pts)
-    return result
-
-
-def get_h2h(df, home, away, limit=5):
-    if df.empty:
-        return df.iloc[0:0].copy()
-
-    return df[
-        ((df["HomeTeam"] == home) & (df["AwayTeam"] == away))
-        | ((df["HomeTeam"] == away) & (df["AwayTeam"] == home))
-    ].sort_values("Date").tail(limit)
+    return {
+        "played": len(games), "wins": wins, "draws": draws,
+        "losses": losses, "gf": gf, "ga": ga, "points": points,
+    }
 
 
-def league_averages(df):
-    if df.empty:
-        return 1.45, 1.15
+def head_to_head(df, home, away, n=10):
+    if df is None or df.empty:
+        return pd.DataFrame()
 
-    h = pd.to_numeric(df["FTHG"], errors="coerce").mean()
-    a = pd.to_numeric(df["FTAG"], errors="coerce").mean()
+    home_norm = normalize_team(home)
+    away_norm = normalize_team(away)
 
-    return (
-        float(h) if pd.notna(h) and h > 0 else 1.45,
-        float(a) if pd.notna(a) and a > 0 else 1.15,
+    mask = (
+        (
+            df["HomeTeam"].map(normalize_team).eq(home_norm)
+            & df["AwayTeam"].map(normalize_team).eq(away_norm)
+        )
+        | (
+            df["HomeTeam"].map(normalize_team).eq(away_norm)
+            & df["AwayTeam"].map(normalize_team).eq(home_norm)
+        )
     )
 
-
-def expected_goals(df, home, away):
-    league_home, league_away = league_averages(df)
-    hs = form_stats(df, home, "home", 5)
-    aws = form_stats(df, away, "away", 5)
-
-    # Simple baseline with shrinkage toward league averages.
-    h_attack = (
-        0.65 * hs["gf"] + 0.35 * league_home
-        if hs["n"] >= 2 else league_home
-    )
-    h_defence = (
-        0.65 * hs["ga"] + 0.35 * league_away
-        if hs["n"] >= 2 else league_away
-    )
-    a_attack = (
-        0.65 * aws["gf"] + 0.35 * league_away
-        if aws["n"] >= 2 else league_away
-    )
-    a_defence = (
-        0.65 * aws["ga"] + 0.35 * league_home
-        if aws["n"] >= 2 else league_home
-    )
-
-    xh = max(0.15, min(4.0, (h_attack + a_defence) / 2))
-    xa = max(0.15, min(4.0, (a_attack + h_defence) / 2))
-    return xh, xa, hs, aws
+    return df.loc[mask].sort_values("Date", ascending=False).head(n)
 
 
-# ------------------------ POISSON ------------------------------
+def estimate_expected_goals(df, home, away):
+    """Poisson baseline; not a calibrated betting model."""
+    if df is None or len(df) < 30:
+        return None, None, "ข้อมูลย้อนหลังน้อยกว่า 30 นัด"
+
+    home_games = df[df["HomeTeam"].map(normalize_team).eq(normalize_team(home))]
+    away_games = df[df["AwayTeam"].map(normalize_team).eq(normalize_team(away))]
+
+    if len(home_games) < 3 or len(away_games) < 3:
+        return None, None, "ทีมใดทีมหนึ่งมีข้อมูลเหย้า/เยือนไม่พอ"
+
+    league_home_avg = df["FTHG"].mean()
+    league_away_avg = df["FTAG"].mean()
+
+    if pd.isna(league_home_avg) or pd.isna(league_away_avg):
+        return None, None, "คำนวณค่าเฉลี่ยลีกไม่ได้"
+
+    home_scored = home_games["FTHG"].mean()
+    home_conceded = home_games["FTAG"].mean()
+    away_scored = away_games["FTAG"].mean()
+    away_conceded = away_games["FTHG"].mean()
+
+    # Shrink team estimates toward league averages to reduce small-sample noise.
+    home_attack = (home_scored * len(home_games) + league_home_avg * 5) / (len(home_games) + 5)
+    away_defence = (away_conceded * len(away_games) + league_home_avg * 5) / (len(away_games) + 5)
+    away_attack = (away_scored * len(away_games) + league_away_avg * 5) / (len(away_games) + 5)
+    home_defence = (home_conceded * len(home_games) + league_away_avg * 5) / (len(home_games) + 5)
+
+    lam_home = max(0.05, (home_attack / max(league_home_avg, 0.1)) * away_defence)
+    lam_away = max(0.05, (away_attack / max(league_away_avg, 0.1)) * home_defence)
+
+    return min(lam_home, 4.5), min(lam_away, 4.5), "คำนวณจากผลย้อนหลัง"
+
+
+# ------------------------------------------------------------
+# 5. POISSON AND ASIAN SETTLEMENT
+# ------------------------------------------------------------
 
 def poisson_pmf(k, lam):
-    if lam <= 0:
-        return 1.0 if k == 0 else 0.0
-    return math.exp(-lam) * lam ** k / math.factorial(k)
+    if lam < 0:
+        return 0.0
+    return math.exp(-lam) * (lam ** k) / math.factorial(k)
 
 
-def score_matrix(xh, xa, max_goals=10):
-    rows = []
-    total = 0.0
-    for h in range(max_goals + 1):
-        for a in range(max_goals + 1):
-            p = poisson_pmf(h, xh) * poisson_pmf(a, xa)
-            rows.append((h, a, p))
-            total += p
+def make_score_matrix(lam_home, lam_away, max_goals=10):
+    matrix = []
+    for hg in range(max_goals + 1):
+        for ag in range(max_goals + 1):
+            p = poisson_pmf(hg, lam_home) * poisson_pmf(ag, lam_away)
+            matrix.append((hg, ag, p))
 
-    if total <= 0:
-        return []
+    total = sum(item[2] for item in matrix)
+    if total > 0:
+        matrix = [(h, a, p / total) for h, a, p in matrix]
+    return matrix
 
-    return [(h, a, p / total) for h, a, p in rows]
-
-
-# ---------------------- ASIAN SETTLEMENT -----------------------
 
 def split_asian_line(line):
-    """
-    Quarter lines split into two equal components:
-    -0.75 => [-1.0, -0.5]
-    -0.25 => [-0.5, 0.0]
-     0.25 => [0.0, 0.5]
-     0.75 => [0.5, 1.0]
-    """
-    q = round(float(line) * 4)
-    if q % 2 == 0:
-        return [q / 4]
-    low = math.floor(q / 2) / 2
-    return [low, low + 0.5]
+    """Split quarter lines into two half-stake components."""
+    line = round(float(line) * 4) / 4
+    quarter = round(line * 4) % 2 != 0
+
+    if not quarter:
+        return [(line, 1.0)]
+
+    lower = math.floor(line * 2) / 2
+    upper = math.ceil(line * 2) / 2
+    return [(lower, 0.5), (upper, 0.5)]
 
 
-def component_profit(selection, odds, hg, ag, line, market):
-    if market == "AH":
-        gd = hg - ag if selection == "Home" else ag - hg
-        margin = gd + line
+def component_profit(market, selection, line, hg, ag, odds):
+    if market == "spreads":
+        if selection == "Home":
+            margin = hg - ag + line
+        else:
+            margin = ag - hg + line
     else:
         total = hg + ag
-        margin = total - line if selection == "Over" else line - total
+        if selection == "Over":
+            margin = total - line
+        else:
+            margin = line - total
 
     if margin > 1e-9:
-        return odds - 1.0
+        return odds - 1
     if margin < -1e-9:
-        return -1.0
+        return -1
     return 0.0
 
 
-def asian_profit(selection, odds, hg, ag, line, market):
+def expected_profit(matrix, market, selection, line, odds):
     components = split_asian_line(line)
-    return sum(
-        component_profit(selection, odds, hg, ag, part, market)
-        for part in components
-    ) / len(components)
-
-
-def evaluate_market(matrix, selection, odds, line, market):
-    if not matrix or odds is None or odds <= 1.0:
-        return None
-
     ev = 0.0
-    categories = {
-        "win": 0.0, "half_win": 0.0, "push": 0.0,
-        "half_loss": 0.0, "loss": 0.0,
-    }
 
     for hg, ag, probability in matrix:
-        profit = asian_profit(selection, odds, hg, ag, line, market)
+        profit = 0.0
+        for component_line, weight in components:
+            profit += weight * component_profit(
+                market, selection, component_line, hg, ag, odds
+            )
         ev += probability * profit
 
-        if profit > 1e-8:
-            # A half-win has profit between zero and a full win.
-            if profit >= (odds - 1.0) - 1e-8:
-                categories["win"] += probability
-            else:
-                categories["half_win"] += probability
-        elif profit < -1e-8:
-            if profit <= -1.0 + 1e-8:
-                categories["loss"] += probability
-            else:
-                categories["half_loss"] += probability
-        else:
-            categories["push"] += probability
-
-    return {"ev": ev, **categories}
+    return ev
 
 
-# ------------------------- ODDS API ----------------------------
-
-@st.cache_data(ttl=180, show_spinner=False)
-def fetch_odds(api_key, sport_key, regions):
-    if not api_key:
-        raise ValueError("ยังไม่ได้ตั้งค่า ODDS_API_KEY")
-
-    return api_get(
-        f"{ODDS_BASE}/sports/{sport_key}/odds/",
-        params={
-            "apiKey": api_key,
-            "regions": regions,
-            "markets": "spreads,totals",
-            "oddsFormat": "decimal",
-            "dateFormat": "iso",
-        },
-    )
+def win_probability(matrix, market, selection, line):
+    """Probability of a strictly positive settlement, excluding pushes."""
+    p = 0.0
+    for hg, ag, probability in matrix:
+        profit = 0.0
+        for component_line, weight in split_asian_line(line):
+            profit += weight * component_profit(
+                market, selection, component_line, hg, ag, 2.0
+            )
+        if profit > 0:
+            p += probability
+    return p
 
 
-def parse_odds(events, league_name):
+def analyse_market(matrix, market, selection, line, odds):
+    ev = expected_profit(matrix, market, selection, line, odds)
+    p_win = win_probability(matrix, market, selection, line)
+    return {
+        "probability": p_win,
+        "ev": ev * 100,
+        "expected_profit_per_unit": ev,
+        "odds": odds,
+    }
+
+
+# ------------------------------------------------------------
+# 6. ODDS PARSING AND DATA QUALITY
+# ------------------------------------------------------------
+
+def parse_odds_events(events):
     rows = []
 
-    for event in events:
-        home = event.get("home_team", "")
-        away = event.get("away_team", "")
-        kickoff = event.get("commence_time", "")
-
+    for event in events or []:
         for bookmaker in event.get("bookmakers", []):
-            book = bookmaker.get("title", "Unknown")
-
             for market in bookmaker.get("markets", []):
-                key = market.get("key")
-                market_name = "AH" if key == "spreads" else "OU" if key == "totals" else None
-                if market_name is None:
+                market_key = market.get("key")
+                if market_key not in ("spreads", "totals"):
                     continue
 
-                for outcome in market.get("outcomes", []):
-                    odds = safe_float(outcome.get("price"))
-                    line = safe_float(outcome.get("point"))
-                    if odds is None or line is None:
+                outcomes = market.get("outcomes", [])
+                for outcome in outcomes:
+                    name = outcome.get("name")
+                    price = safe_float(outcome.get("price"))
+                    point = safe_float(outcome.get("point"))
+
+                    if price is None or price <= 1.0:
                         continue
 
-                    selection = outcome.get("name", "")
-                    if market_name == "AH":
-                        if selection == home:
-                            side = "Home"
-                        elif selection == away:
-                            side = "Away"
-                        else:
-                            side = selection
-                    else:
-                        side = selection
-
                     rows.append({
-                        "Kickoff": kickoff,
-                        "League": league_name,
-                        "Home": home,
-                        "Away": away,
-                        "Bookmaker": book,
-                        "Market": market_name,
-                        "Selection": side,
-                        "Line": line,
-                        "Odds": odds,
-                        "Updated": market.get("last_update", ""),
+                        "commence_time": event.get("commence_time"),
+                        "home_team": event.get("home_team"),
+                        "away_team": event.get("away_team"),
+                        "market": market_key,
+                        "selection": name,
+                        "line": point,
+                        "odds": price,
+                        "bookmaker": bookmaker.get("title"),
+                        "last_update": market.get("last_update"),
                     })
 
     return pd.DataFrame(rows)
 
 
-# ------------------------ ENGINE 1 -----------------------------
+def data_quality(odds_available, history_count, team_match_ok):
+    if not odds_available:
+        return "งดวิเคราะห์", "ไม่พบราคาตลาดที่ใช้ได้"
 
-def scan_value_bets(odds_df, history_df, min_ev_pct=2.0):
-    rows = []
-    if odds_df.empty or history_df.empty:
-        return pd.DataFrame()
+    if history_count < 30:
+        return "ต่ำ", "ผลย้อนหลังน้อยกว่า 30 นัด"
 
-    home_names = history_df["HomeTeam"].dropna().unique().tolist()
-    away_names = history_df["AwayTeam"].dropna().unique().tolist()
-    all_names = list(set(home_names + away_names))
+    if not team_match_ok:
+        return "ต่ำ", "จับคู่ชื่อทีมกับข้อมูลย้อนหลังไม่ได้"
 
-    for _, odd in odds_df.iterrows():
-        home = closest_team(odd["Home"], all_names)
-        away = closest_team(odd["Away"], all_names)
+    if history_count < 100:
+        return "ปานกลาง", "มีข้อมูล แต่จำนวนตัวอย่างยังจำกัด"
 
-        if not home or not away or home == away:
-            continue
-
-        xh, xa, hs, aws = expected_goals(history_df, home, away)
-        matrix = score_matrix(xh, xa)
-
-        market = odd["Market"]
-        selection = odd["Selection"]
-        line = float(odd["Line"])
-        odds = float(odd["Odds"])
-
-        if market == "AH" and selection not in ("Home", "Away"):
-            continue
-        if market == "OU":
-            if selection not in ("Over", "Under"):
-                continue
-
-        result = evaluate_market(matrix, selection, odds, line, market)
-        if not result:
-            continue
-
-        ev_pct = result["ev"] * 100
-        if ev_pct < min_ev_pct:
-            continue
-
-        rows.append({
-            "Kickoff": odd["Kickoff"],
-            "League": odd["League"],
-            "Home": odd["Home"],
-            "Away": odd["Away"],
-            "Bookmaker": odd["Bookmaker"],
-            "Market": market,
-            "Selection": selection,
-            "Line": line,
-            "Odds": odds,
-            "EV (%)": ev_pct,
-            "Expected Goals": f"{xh:.2f} - {xa:.2f}",
-            "Model Home Form N": hs["n"],
-            "Model Away Form N": aws["n"],
-            "Updated": odd["Updated"],
-        })
-
-    if not rows:
-        return pd.DataFrame()
-
-    return pd.DataFrame(rows).sort_values("EV (%)", ascending=False)
+    return "ข้อมูลพร้อม", "พบราคาและมีผลย้อนหลังเพียงพอเบื้องต้น"
 
 
-# --------------------- ENGINE 2: PRICE READING -----------------
+def movement_summary(open_line, open_odds, current_line, current_odds):
+    messages = []
 
-def movement_summary(open_line, current_line, open_odds, current_odds, market):
-    line_delta = current_line - open_line
-    odds_delta = current_odds - open_odds
+    if open_line is not None and current_line is not None:
+        if abs(open_line - current_line) < 1e-9:
+            messages.append("แต้มต่อ/เส้นสูงต่ำไม่เปลี่ยน")
+        elif current_line > open_line:
+            messages.append("ตัวเลขเส้นปัจจุบันสูงขึ้น")
+        else:
+            messages.append("ตัวเลขเส้นปัจจุบันลดลง")
 
-    if abs(line_delta) < 1e-9:
-        line_text = "เส้นคงเดิม"
-    elif market == "AH":
-        line_text = (
-            "เส้นเปลี่ยนไปทางบวก"
-            if line_delta > 0 else "เส้นเปลี่ยนไปทางลบ"
-        )
-    else:
-        line_text = "เส้นสูง/ต่ำขยับขึ้น" if line_delta > 0 else "เส้นสูง/ต่ำขยับลง"
+    if open_odds is not None and current_odds is not None:
+        if current_odds > open_odds:
+            messages.append("ราคาจ่ายปัจจุบันสูงขึ้น")
+        elif current_odds < open_odds:
+            messages.append("ราคาจ่ายปัจจุบันลดลง")
+        else:
+            messages.append("ราคาจ่ายไม่เปลี่ยน")
 
-    if abs(odds_delta) < 1e-9:
-        odds_text = "ค่าน้ำคงเดิม"
-    elif odds_delta < 0:
-        odds_text = "ค่าน้ำลดลง"
-    else:
-        odds_text = "ค่าน้ำสูงขึ้น"
+    if not messages:
+        return "ข้อมูลราคาเปิด/ปัจจุบันไม่ครบ"
 
-    return line_text, odds_text, line_delta, odds_delta
+    return " | ".join(messages)
 
 
-# -------------------------- UI ---------------------------------
+# ------------------------------------------------------------
+# 7. APP UI
+# ------------------------------------------------------------
 
 st.title("⚽ Value Bet Pro")
 st.caption(
-    "ระบบ 1: Value Bet / EV | ระบบ 2: อ่านราคาเปิด–ราคาปัจจุบัน "
-    "| ใช้เพื่อวิเคราะห์ ไม่รับประกันกำไร"
+    "Asian Handicap • Over/Under • Expected Value • Match Reading • "
+    "Historical Data Quality • Bet Ledger"
 )
 
-with st.sidebar:
-    st.header("ตั้งค่าการวิเคราะห์")
-    selected_league = st.selectbox("ลีก", list(LEAGUES.keys()))
-    seasons_n = st.selectbox("ฤดูกาลย้อนหลัง", [2, 3, 4, 5], index=2)
-    min_ev_pct = st.slider("EV ขั้นต่ำ (%)", -5.0, 15.0, 2.0, 0.5)
-    regions = st.multiselect(
-        "ภูมิภาคราคาจาก API",
-        ["uk", "eu", "us", "au"],
-        default=["uk", "eu"],
-    )
-    st.caption("ราคาเปิดต้องมาจากข้อมูลจริงหรือกรอกเอง ไม่อนุมานจากราคาปัจจุบัน")
-
-history, history_errors = load_history(
-    LEAGUES[selected_league]["fd"],
-    SEASONS[:seasons_n],
-)
-
-if history.empty:
-    st.warning(
-        "ไม่พบข้อมูล Football-Data สำหรับลีก/ฤดูกาลนี้ "
-        "ระบบ EV จะยังไม่สามารถสแกนคู่ได้"
-    )
-else:
-    st.success(
-        f"ข้อมูลย้อนหลัง {len(history)} นัด | "
-        f"{history['Date'].min().date()} ถึง {history['Date'].max().date()}"
-    )
-
-tabs = st.tabs([
-    "1. Value Bet Engine",
-    "2. Match Reading Engine",
-    "3. Bet Ledger / Backtest",
-    "4. ตั้งค่าและข้อมูล",
+tab_value, tab_read, tab_history, tab_ledger, tab_settings = st.tabs([
+    "Value Bet Engine",
+    "Match Reading Engine",
+    "Historical Data",
+    "Bet Ledger / Backtest",
+    "Settings & League Status",
 ])
 
+league_names = list(LEAGUES.keys())
 
-# ========================= TAB 1: VALUE BET ====================
+# ============================================================
+# TAB 1: VALUE BET ENGINE
+# ============================================================
 
-with tabs[0]:
-    st.subheader("Value Bet Engine")
-    st.write(
-        "สแกนราคา AH และสูง/ต่ำจาก The Odds API "
-        "แล้วคำนวณ EV ด้วยโมเดล Poisson พื้นฐาน"
-    )
+with tab_value:
+    st.subheader("ค้นหาราคาและวิเคราะห์ EV")
 
-    sport_key = LEAGUES[selected_league]["odds"]
+    league = st.selectbox("เลือกลีก", league_names, key="value_league")
+    config = LEAGUES[league]
 
-    if not ODDS_API_KEY:
-        st.error(
-            "ยังไม่ได้ตั้งค่า ODDS_API_KEY ใน Streamlit Secrets "
-            "หรือ Environment Variables"
+    col_a, col_b = st.columns(2)
+    with col_a:
+        regions = st.multiselect(
+            "ภูมิภาคราคาจาก API",
+            ["uk", "eu", "us", "au", "asia"],
+            default=["uk", "eu", "us"],
+            key="value_regions",
         )
-    elif not sport_key:
-        st.info("ลีกนี้ยังไม่มี sport key ที่ตั้งค่าไว้สำหรับ The Odds API")
-    elif st.button("ดึงราคาและสแกน Value Bet", type="primary"):
-        try:
-            with st.spinner("กำลังดึงราคาและคำนวณ EV..."):
-                events = fetch_odds(
-                    ODDS_API_KEY,
-                    sport_key,
-                    ",".join(regions),
-                )
-                odds_df = parse_odds(events, selected_league)
-
-            st.session_state["last_odds_df"] = odds_df
-
-            if odds_df.empty:
-                st.warning("API ไม่พบราคาตลาด AH/สูง-ต่ำสำหรับลีกนี้")
-            elif history.empty:
-                st.warning("มีราคาแล้ว แต่ไม่มีข้อมูลสถิติย้อนหลังเพียงพอ")
-                st.dataframe(odds_df, use_container_width=True)
-            else:
-                value_df = scan_value_bets(
-                    odds_df, history, min_ev_pct
-                )
-                st.session_state["last_value_df"] = value_df
-
-                if value_df.empty:
-                    st.info(
-                        "ไม่พบคู่ที่ผ่านเกณฑ์ EV ในข้อมูลที่ดึงได้ "
-                        "ไม่ได้หมายความว่าไม่มีทีมชนะ"
-                    )
-                else:
-                    st.success(f"พบ {len(value_df)} รายการที่ผ่านเกณฑ์ EV")
-                    st.dataframe(
-                        value_df,
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                    st.download_button(
-                        "ดาวน์โหลดรายการ Value Bet CSV",
-                        data=value_df.to_csv(index=False).encode("utf-8-sig"),
-                        file_name="value_bet_candidates.csv",
-                        mime="text/csv",
-                    )
-
-        except Exception as exc:
-            st.error(f"ดึงหรือประมวลผลราคาไม่สำเร็จ: {exc}")
-
-    if "last_value_df" in st.session_state:
-        value_df = st.session_state["last_value_df"]
-
-        if not value_df.empty:
-            st.markdown("#### บันทึกรายการเป็นเดิมพัน")
-            options = [
-                f"{i} | {r['Home']} vs {r['Away']} | "
-                f"{r['Market']} {r['Selection']} {r['Line']} @ {r['Odds']}"
-                for i, (_, r) in enumerate(value_df.iterrows())
-            ]
-            chosen = st.selectbox("เลือกรายการ", options, key="bet_pick")
-            stake = st.number_input(
-                "เงินเดิมพัน", min_value=0.0, value=100.0, step=10.0
-            )
-            notes = st.text_input("หมายเหตุ", key="ev_bet_notes")
-
-            if st.button("บันทึกเดิมพันที่เลือก"):
-                idx = int(chosen.split("|")[0].strip())
-                row = value_df.iloc[idx]
-                save_bet({
-                    "match_date": row["Kickoff"],
-                    "league": row["League"],
-                    "home_team": row["Home"],
-                    "away_team": row["Away"],
-                    "engine": "Value Bet Engine",
-                    "market": row["Market"],
-                    "selection": row["Selection"],
-                    "line": row["Line"],
-                    "odds": row["Odds"],
-                    "stake": stake,
-                    "status": "Pending",
-                    "notes": notes,
-                })
-                st.success("บันทึกเดิมพันแล้ว")
-
-
-# ======================== TAB 2: MATCH READING =================
-
-with tabs[1]:
-    st.subheader("Match Reading Engine")
-    st.write(
-        "แยกจาก EV Engine: อ่านราคาเปิดเทียบราคาปัจจุบัน "
-        "และใช้ฟอร์มเหย้า–เยือน/H2H เป็นหลักฐานประกอบ"
-    )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        read_home = st.text_input("ทีมเหย้า", key="read_home")
-        open_line = st.number_input(
-            "ราคาเปิด — เส้น", value=-0.25, step=0.25, key="read_open_line"
-        )
-        open_odds = st.number_input(
-            "ค่าน้ำราคาเปิด", min_value=1.01, value=1.90, step=0.01,
-            key="read_open_odds",
-        )
-    with c2:
-        read_away = st.text_input("ทีมเยือน", key="read_away")
-        current_line = st.number_input(
-            "ราคาปัจจุบัน — เส้น", value=-0.25, step=0.25,
-            key="read_current_line",
-        )
-        current_odds = st.number_input(
-            "ค่าน้ำปัจจุบัน", min_value=1.01, value=1.90, step=0.01,
-            key="read_current_odds",
+    with col_b:
+        min_ev = st.number_input(
+            "EV ขั้นต่ำ (%) สำหรับกรองผล",
+            min_value=-100.0,
+            max_value=100.0,
+            value=2.0,
+            step=1.0,
         )
 
-    read_market = st.radio(
-        "ตลาดที่กำลังอ่าน",
-        ["AH", "สูง/ต่ำ"],
-        horizontal=True,
-        key="read_market",
-    )
-    if read_market == "AH":
-        read_selection = st.radio(
-            "ทีมที่เลือก",
-            ["Home", "Away"],
-            format_func=lambda x: "ทีมเหย้า" if x == "Home" else "ทีมเยือน",
-            horizontal=True,
-        )
-        st.caption(
-            "สำหรับ AH ให้กรอกเส้นจากมุมมองทีมที่เลือก "
-            "เช่น ทีมต่อ 0.25 = -0.25, ทีมรอง 0.25 = +0.25"
-        )
-    else:
-        read_selection = st.radio(
-            "สูงหรือต่ำ",
-            ["Over", "Under"],
-            horizontal=True,
-            format_func=lambda x: "สูง" if x == "Over" else "ต่ำ",
-        )
+    if st.button("ดึงราคาและวิเคราะห์ EV", type="primary"):
+        sport_key, sport_status = find_sport_key(config)
+        st.session_state["value_sport_status"] = sport_status
 
-    st.markdown("#### ดึงราคาปัจจุบันจาก The Odds API (ถ้ามี)")
-    if not ODDS_API_KEY:
-        st.caption("ไม่มี API Key — กรอกราคาเองได้")
-    elif not LEAGUES[selected_league]["odds"]:
-        st.caption("ลีกนี้ยังไม่มี sport key สำหรับดึงราคา")
-    elif st.button("ค้นหาราคาปัจจุบันของคู่ที่กรอก"):
-        try:
-            events = fetch_odds(
-                ODDS_API_KEY,
-                LEAGUES[selected_league]["odds"],
-                ",".join(regions),
-            )
-            current_df = parse_odds(events, selected_league)
-            if current_df.empty:
-                st.info("ไม่พบราคาปัจจุบัน")
-            else:
-                matched = current_df[
-                    current_df["Home"].map(norm).eq(norm(read_home))
-                    & current_df["Away"].map(norm).eq(norm(read_away))
-                ]
-                if matched.empty:
-                    st.warning(
-                        "ไม่พบคู่ที่ชื่อทีมตรงกันพอดี "
-                        "ตรวจชื่อทีมและลีก หรือกรอกราคาเอง"
-                    )
-                else:
-                    st.dataframe(matched, use_container_width=True, hide_index=True)
-        except Exception as exc:
-            st.error(f"ดึงราคาไม่สำเร็จ: {exc}")
-
-    if st.button("วิเคราะห์ราคาและสถิติ", type="primary", key="run_reading"):
-        if not read_home.strip() or not read_away.strip():
-            st.error("กรุณากรอกชื่อทีมเหย้าและทีมเยือน")
+        if not sport_key:
+            st.error(sport_status)
         else:
-            line_text, odds_text, line_delta, odds_delta = movement_summary(
-                open_line, current_line, open_odds, current_odds, read_market
-            )
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("การเปลี่ยนแปลงเส้น", line_text, f"{line_delta:+.2f}")
-            c2.metric("การเปลี่ยนแปลงค่าน้ำ", odds_text, f"{odds_delta:+.2f}")
-            c3.metric(
-                "ค่าน้ำเปิด → ปัจจุบัน",
-                f"{open_odds:.2f} → {current_odds:.2f}",
-            )
-
-            st.warning(
-                "เส้นที่ขยับขึ้นหรือลงไม่ได้แปลว่าเป็นสัญญาณซื้อ/ขายโดยตัวมันเอง "
-                "ต้องดูว่ากำลังดูฝั่งใด เส้นใด และราคาใด"
-            )
-
-            if history.empty:
-                st.warning("ไม่มีข้อมูลย้อนหลัง จึงแสดงได้เฉพาะการเปลี่ยนแปลงราคา")
-            else:
-                candidates = list(
-                    set(history["HomeTeam"].dropna())
-                    | set(history["AwayTeam"].dropna())
+            try:
+                events, remaining = fetch_odds(
+                    sport_key,
+                    regions=",".join(regions) if regions else "eu",
                 )
-                home_match = closest_team(read_home, candidates)
-                away_match = closest_team(read_away, candidates)
+                st.session_state["value_events"] = events
+                st.session_state["value_league_loaded"] = league
+                st.session_state["value_remaining"] = remaining
+                st.success(f"ดึงราคาได้ {len(events)} แมตช์")
+            except Exception as exc:
+                st.error(f"ดึงราคาไม่สำเร็จ: {exc}")
 
-                if not home_match or not away_match:
-                    st.warning(
-                        "จับคู่ชื่อทีมกับข้อมูลย้อนหลังไม่ได้อย่างมั่นใจ "
-                        "ตรวจการสะกดชื่อทีมหรือเลือกลีกที่ถูกต้อง"
-                    )
+    if "value_events" in st.session_state:
+        events = st.session_state["value_events"]
+        loaded_league = st.session_state.get("value_league_loaded", league)
+
+        if loaded_league != league:
+            st.warning("ราคาที่แสดงมาจากลีกก่อนหน้า กรุณากดดึงราคาใหม่")
+        else:
+            st.caption(
+                "API requests remaining: "
+                + str(st.session_state.get("value_remaining", "ไม่ทราบ"))
+            )
+
+            rows = parse_odds_events(events)
+            if rows.empty:
+                st.warning(
+                    "ไม่พบตลาด spreads/totals จากราคาที่บัญชีเข้าถึงได้ "
+                    "ลองตรวจลีก ภูมิภาค แพ็กเกจ API และตลาดที่เปิดให้ใช้"
+                )
+            else:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+
+            st.markdown("#### ประเมิน EV ด้วยผลย้อนหลัง")
+            st.info(
+                "ต้องโหลดผลย้อนหลังของลีกจากแท็บ Historical Data ก่อน "
+                "จึงจะใช้ Poisson baseline คำนวณ EV ได้"
+            )
+
+            if st.button("คำนวณ EV จากข้อมูลย้อนหลังที่โหลดไว้"):
+                history = st.session_state.get(
+                    f"history_{league}", pd.DataFrame()
+                )
+
+                if history.empty:
+                    st.error("ยังไม่มีข้อมูลย้อนหลังของลีกนี้")
                 else:
-                    hs = form_stats(history, home_match, "home", 5)
-                    aws = form_stats(history, away_match, "away", 5)
-                    h2h = get_h2h(history, home_match, away_match, 5)
+                    output = []
+                    event_map = {
+                        (
+                            normalize_team(e.get("home_team")),
+                            normalize_team(e.get("away_team")),
+                        ): e
+                        for e in events
+                    }
 
-                    st.markdown("#### ฟอร์มเหย้า–เยือน 5 นัดล่าสุด")
-                    form_df = pd.DataFrame([
-                        {
-                            "ทีม": home_match,
-                            "บริบท": "เหย้า",
-                            "จำนวนเกม": hs["n"],
-                            "ชนะ": hs["wins"],
-                            "เสมอ": hs["draws"],
-                            "แพ้": hs["losses"],
-                            "ยิงเฉลี่ย": hs["gf"],
-                            "เสียเฉลี่ย": hs["ga"],
-                            "คะแนนรวม": hs["points"],
-                        },
-                        {
-                            "ทีม": away_match,
-                            "บริบท": "เยือน",
-                            "จำนวนเกม": aws["n"],
-                            "ชนะ": aws["wins"],
-                            "เสมอ": aws["draws"],
-                            "แพ้": aws["losses"],
-                            "ยิงเฉลี่ย": aws["gf"],
-                            "เสียเฉลี่ย": aws["ga"],
-                            "คะแนนรวม": aws["points"],
-                        },
-                    ])
-                    st.dataframe(
-                        form_df,
-                        use_container_width=True,
-                        hide_index=True,
-                    )
+                    for _, odds_row in rows.iterrows():
+                        home = odds_row["home_team"]
+                        away = odds_row["away_team"]
+                        lam_h, lam_a, model_msg = estimate_expected_goals(
+                            history, home, away
+                        )
 
-                    st.markdown("#### H2H — การพบกันล่าสุด")
-                    if h2h.empty:
-                        st.info("ไม่พบข้อมูลการพบกันในชุดข้อมูลที่โหลดได้")
+                        if lam_h is None:
+                            continue
+
+                        hform = recent_form(history, home, 5)
+                        aform = recent_form(history, away, 5)
+                        h_found = hform["played"] > 0
+                        a_found = aform["played"] > 0
+                        status, status_reason = data_quality(
+                            True, len(history), h_found and a_found
+                        )
+
+                        # A team-specific line must be interpreted from
+                        # that team's own perspective in the spreads market.
+                        if odds_row["market"] == "spreads":
+                            if normalize_team(odds_row["selection"]) == normalize_team(home):
+                                selection = "Home"
+                                line = odds_row["line"]
+                            elif normalize_team(odds_row["selection"]) == normalize_team(away):
+                                selection = "Away"
+                                line = odds_row["line"]
+                            else:
+                                continue
+                        else:
+                            if odds_row["selection"] not in ("Over", "Under"):
+                                continue
+                            selection = odds_row["selection"]
+                            line = odds_row["line"]
+
+                        if line is None:
+                            continue
+
+                        matrix = make_score_matrix(lam_h, lam_a)
+                        result = analyse_market(
+                            matrix, odds_row["market"], selection,
+                            line, odds_row["odds"]
+                        )
+
+                        output.append({
+                            "League": league,
+                            "Home": home,
+                            "Away": away,
+                            "Market": odds_row["market"],
+                            "Selection": odds_row["selection"],
+                            "Line": line,
+                            "Odds": odds_row["odds"],
+                            "Model P(positive)": round(result["probability"] * 100, 2),
+                            "EV %": round(result["ev"], 2),
+                            "Data status": status,
+                            "Data note": status_reason,
+                            "Model note": model_msg,
+                            "Bookmaker": odds_row["bookmaker"],
+                        })
+
+                    result_df = pd.DataFrame(output)
+                    if result_df.empty:
+                        st.warning(
+                            "ยังไม่มีคู่ที่จับคู่กับข้อมูลย้อนหลังได้ "
+                            "ตรวจสอบชื่อทีมและไฟล์ผลย้อนหลัง"
+                        )
                     else:
+                        # Do not label low-quality estimates as recommendations.
+                        result_df["Eligible"] = (
+                            (result_df["EV %"] >= min_ev)
+                            & result_df["Data status"].isin(
+                                ["ข้อมูลพร้อม", "ปานกลาง"]
+                            )
+                        )
                         st.dataframe(
-                            h2h[[
-                                "Date", "HomeTeam", "FTHG", "FTAG", "AwayTeam"
-                            ]].sort_values("Date", ascending=False),
+                            result_df.sort_values("EV %", ascending=False),
                             use_container_width=True,
                             hide_index=True,
                         )
-
-                    st.markdown("#### สรุปหลักฐาน")
-                    if hs["n"] < 3 or aws["n"] < 3:
-                        st.warning(
-                            "ข้อมูลเหย้าหรือเยือนน้อยกว่า 3 นัด "
-                            "ไม่ควรสรุปจากฟอร์มอย่างเดียว"
+                        st.download_button(
+                            "ดาวน์โหลดผลวิเคราะห์ CSV",
+                            result_df.to_csv(index=False).encode("utf-8-sig"),
+                            file_name="value_bet_analysis.csv",
+                            mime="text/csv",
                         )
-                    elif hs["points"] > aws["points"]:
-                        st.info(
-                            "คะแนนจากฟอร์มเหย้าของเจ้าบ้านสูงกว่าคะแนนจากฟอร์มเยือน "
-                            "ของทีมเยือนในตัวอย่างล่าสุด แต่ยังต้องพิจารณาราคาและคุณภาพคู่แข่ง"
-                        )
-                    elif hs["points"] < aws["points"]:
-                        st.info(
-                            "คะแนนจากฟอร์มเหย้าของเจ้าบ้านต่ำกว่าคะแนนจากฟอร์มเยือน "
-                            "ของทีมเยือน ควรตรวจปัจจัยอื่นก่อนเลือกฝั่ง"
-                        )
-                    else:
-                        st.info("คะแนนฟอร์มเหย้าและเยือนใกล้เคียงกัน")
 
-                    st.caption(
-                        "อันดับลีกยังไม่ได้ถูกใช้เป็นตัวตัดสินอัตโนมัติ "
-                        "และ H2H เป็นข้อมูลประกอบ ไม่ใช่หลักฐานยืนยันผล"
-                    )
+                        st.caption(
+                            "EV เป็นค่าประมาณจากโมเดล Poisson พื้นฐาน "
+                            "ไม่ใช่การรับประกันกำไร และยังไม่รวม margin/ข้อจำกัด "
+                            "ของราคาแต่ละเจ้าทั้งหมด"
+                        )
 
-            st.markdown("#### บันทึกราคาเพื่อเปรียบเทียบภายหลัง")
-            snapshot_notes = st.text_input(
-                "หมายเหตุราคา (เช่น บ้านผลบอลช่วงเย็น)", key="snap_notes"
+# ============================================================
+# TAB 2: MATCH READING ENGINE
+# ============================================================
+
+with tab_read:
+    st.subheader("อ่านราคาเปิดเทียบราคาปัจจุบัน")
+
+    r1, r2 = st.columns(2)
+    with r1:
+        read_league = st.selectbox(
+            "ลีก", league_names, key="read_league"
+        )
+        home = st.text_input("ทีมเหย้า", key="read_home")
+        away = st.text_input("ทีมเยือน", key="read_away")
+    with r2:
+        market_label = st.selectbox(
+            "ตลาด", ["Asian Handicap", "สูง/ต่ำ"], key="read_market"
+        )
+        bookmaker = st.text_input(
+            "เจ้ามือ/แหล่งราคา (ระบุให้ตรงกัน)", key="read_bookmaker"
+        )
+
+    market_key = "spreads" if market_label == "Asian Handicap" else "totals"
+
+    st.markdown("#### ราคาเปิด")
+    o1, o2 = st.columns(2)
+    with o1:
+        opening_line = st.number_input(
+            "เส้นเปิด (เช่น -0.25, 2.5)",
+            value=0.0, step=0.25, key="opening_line"
+        )
+    with o2:
+        opening_odds = st.number_input(
+            "ราคาจ่ายเปิด", min_value=1.01, value=1.90,
+            step=0.01, key="opening_odds"
+        )
+
+    st.markdown("#### ราคาเย็น / ราคาปัจจุบัน")
+    c1, c2 = st.columns(2)
+    with c1:
+        current_line = st.number_input(
+            "เส้นปัจจุบัน", value=0.0, step=0.25, key="current_line"
+        )
+    with c2:
+        current_odds = st.number_input(
+            "ราคาจ่ายปัจจุบัน", min_value=1.01, value=1.90,
+            step=0.01, key="current_odds"
+        )
+
+    note = st.text_area(
+        "บันทึกเพิ่มเติม เช่น เวลาเก็บราคา/ข่าว/สภาพทีม",
+        key="reading_note"
+    )
+
+    if st.button("อ่านราคาและบันทึก Snapshot", type="primary"):
+        if not home.strip() or not away.strip():
+            st.error("กรอกชื่อทีมเหย้าและทีมเยือนก่อน")
+        else:
+            movement = movement_summary(
+                opening_line, opening_odds, current_line, current_odds
             )
-            snapshot_book = st.text_input(
-                "เจ้ามือ/แหล่งราคา", value="บ้านผลบอล / กรอกเอง",
-                key="snap_book",
+            st.markdown("**ผลเปรียบเทียบราคา:** " + movement)
+
+            save_snapshot(
+                read_league, home, away, market_key,
+                "Opening", opening_line, opening_odds,
+                bookmaker or "Manual", note,
             )
+            save_snapshot(
+                read_league, home, away, market_key,
+                "Current", current_line, current_odds,
+                bookmaker or "Manual", note,
+            )
+            st.success("บันทึกราคาเปิดและราคาปัจจุบันแล้ว")
 
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("บันทึกเป็นราคาเปิด"):
-                    save_snapshot({
-                        "match_date": None,
-                        "league": selected_league,
-                        "home_team": read_home,
-                        "away_team": read_away,
-                        "bookmaker": snapshot_book,
-                        "market": read_market,
-                        "selection": read_selection,
-                        "line": open_line,
-                        "odds": open_odds,
-                        "source": "manual",
-                        "snapshot_type": "opening",
-                        "notes": snapshot_notes,
-                    })
-                    st.success("บันทึกราคาเปิดแล้ว")
+    st.markdown("#### ฟอร์ม 5 นัดและ H2H")
+    history = st.session_state.get(
+        f"history_{read_league}", pd.DataFrame()
+    )
 
-            with col_b:
-                if st.button("บันทึกเป็นราคาปัจจุบัน"):
-                    save_snapshot({
-                        "match_date": None,
-                        "league": selected_league,
-                        "home_team": read_home,
-                        "away_team": read_away,
-                        "bookmaker": snapshot_book,
-                        "market": read_market,
-                        "selection": read_selection,
-                        "line": current_line,
-                        "odds": current_odds,
-                        "source": "manual",
-                        "snapshot_type": "current",
-                        "notes": snapshot_notes,
-                    })
-                    st.success("บันทึกราคาปัจจุบันแล้ว")
+    if home.strip() and away.strip():
+        if history.empty:
+            st.info(
+                "ยังไม่มีผลย้อนหลังของลีกนี้ ให้โหลดไฟล์จากแท็บ "
+                "Historical Data ก่อน"
+            )
+        else:
+            form_h = recent_form(history, home, 5)
+            form_a = recent_form(history, away, 5)
+            h2h = head_to_head(history, home, away)
 
-            if st.button("บันทึกการอ่านนี้เป็นเดิมพัน"):
-                save_bet({
-                    "match_date": None,
-                    "league": selected_league,
-                    "home_team": read_home,
-                    "away_team": read_away,
-                    "engine": "Match Reading Engine",
-                    "market": read_market,
-                    "selection": read_selection,
-                    "line": current_line,
-                    "odds": current_odds,
-                    "stake": 100.0,
-                    "status": "Pending",
-                    "notes": "บันทึกจาก Match Reading Engine",
-                })
-                st.success("บันทึกรายการเดิมพันแล้ว (เงินเดิมพันเริ่มต้น 100)")
+            f1, f2 = st.columns(2)
+            with f1:
+                st.write(f"**{home} — 5 นัดล่าสุด**")
+                st.json(form_h)
+            with f2:
+                st.write(f"**{away} — 5 นัดล่าสุด**")
+                st.json(form_a)
 
+            st.write("**H2H ล่าสุดที่พบในไฟล์**")
+            if h2h.empty:
+                st.info("ไม่พบ H2H ในข้อมูลที่โหลด")
+            else:
+                st.dataframe(h2h, use_container_width=True, hide_index=True)
 
-# ===================== TAB 3: LEDGER / BACKTEST ================
+    st.caption(
+        "ระบบไม่ตีความว่าเส้นขึ้น/ลงหมายถึงทีมใดจะชนะโดยอัตโนมัติ "
+        "ต้องพิจารณาทีมที่ถือราคา ทิศทางเส้น ราคาเจ้ามือ และเวลาเก็บข้อมูล"
+    )
 
-with tabs[2]:
-    st.subheader("Bet Ledger / Backtest")
-    st.caption("บันทึกผลจริงเองเพื่อให้ ROI อิงจากผลที่ตรวจสอบแล้ว")
+    st.markdown("#### บันทึก Match Reading เป็นรายการเดิมพัน")
+    read_selection = st.selectbox(
+        "ฝั่งที่เลือก",
+        ["Home", "Away", "Over", "Under"],
+        key="read_selection",
+    )
+    read_stake = st.number_input(
+        "เงินเดิมพัน (หน่วยเงินของบัญชี)",
+        min_value=0.0, value=100.0, step=10.0,
+        key="read_stake",
+    )
+    read_odds = st.number_input(
+        "ราคาที่จะเข้าเดิมพัน",
+        min_value=1.01, value=1.90, step=0.01,
+        key="read_bet_odds",
+    )
+    read_line = st.number_input(
+        "เส้นที่เดิมพัน", value=0.0, step=0.25,
+        key="read_bet_line",
+    )
 
-    bets = db_read("SELECT * FROM bets ORDER BY id DESC")
+    if st.button("บันทึกเดิมพัน"):
+        if not home.strip() or not away.strip():
+            st.error("กรอกชื่อทีมก่อน")
+        else:
+            save_bet({
+                "league": read_league,
+                "home": home,
+                "away": away,
+                "market": market_key,
+                "selection": read_selection,
+                "line": read_line,
+                "odds": read_odds,
+                "stake": read_stake,
+                "probability": None,
+                "ev": None,
+                "data_status": "Manual Reading — ยังไม่ยืนยัน EV",
+                "note": note,
+            })
+            st.success("บันทึกรายการเดิมพันแล้ว")
 
+# ============================================================
+# TAB 3: HISTORICAL DATA
+# ============================================================
+
+with tab_history:
+    st.subheader("โหลดผลย้อนหลังและตรวจสอบคุณภาพข้อมูล")
+
+    history_league = st.selectbox(
+        "เลือกลีกที่จะโหลดผลย้อนหลัง",
+        league_names,
+        key="history_league",
+    )
+    hist_config = LEAGUES[history_league]
+
+    st.write("**แหล่งข้อมูลอัตโนมัติ:** Football-Data.co.uk")
+    st.caption(
+        "รองรับเฉพาะลีก/ฤดูกาลที่แหล่งข้อมูลมีจริง "
+        "หากลีกไม่รองรับ ให้ใช้ CSV ที่มี Date, HomeTeam, AwayTeam, FTHG, FTAG"
+    )
+
+    default_seasons = ["2627", "2526", "2425", "2324", "2223"]
+    seasons = st.multiselect(
+        "ฤดูกาล Football-Data",
+        ["2627", "2526", "2425", "2324", "2223", "2122", "2021", "1920"],
+        default=default_seasons,
+        key="history_seasons",
+    )
+
+    if st.button("โหลด Football-Data"):
+        history, errors = load_football_data(
+            hist_config.get("fd_code"), seasons
+        )
+        st.session_state[f"history_{history_league}"] = history
+        st.session_state[f"errors_{history_league}"] = errors
+
+        if history.empty:
+            st.error("ไม่พบข้อมูลย้อนหลังที่ใช้ได้")
+        else:
+            st.success(f"โหลดผลย้อนหลังได้ {len(history)} นัด")
+
+        if errors:
+            with st.expander("รายละเอียดคำเตือนการโหลด"):
+                st.write(errors)
+
+    uploaded = st.file_uploader(
+        "หรืออัปโหลด CSV ผลย้อนหลังของลีกนี้",
+        type=["csv"],
+        key=f"upload_{history_league}",
+    )
+
+    if uploaded is not None:
+        try:
+            raw = pd.read_csv(uploaded)
+            normalized = normalize_history(raw)
+            if normalized.empty:
+                st.error(
+                    "รูปแบบ CSV ไม่ถูกต้อง ต้องมีคอลัมน์ Date, HomeTeam, "
+                    "AwayTeam, FTHG, FTAG (หรือชื่อที่เทียบเท่า)"
+                )
+            else:
+                st.session_state[f"history_{history_league}"] = normalized
+                st.success(f"นำเข้าข้อมูลแล้ว {len(normalized)} นัด")
+        except Exception as exc:
+            st.error(f"อ่านไฟล์ CSV ไม่สำเร็จ: {exc}")
+
+    loaded_history = st.session_state.get(
+        f"history_{history_league}", pd.DataFrame()
+    )
+
+    st.markdown("#### สถานะข้อมูลของลีกที่เลือก")
+    sport_key, sport_status = find_sport_key(hist_config) if get_api_key() else (
+        None, "ยังไม่ได้ตั้ง API Key"
+    )
+
+    history_count = len(loaded_history)
+    if history_count:
+        status = "ข้อมูลพร้อม" if history_count >= 100 else (
+            "ปานกลาง" if history_count >= 30 else "ต่ำ"
+        )
+    else:
+        status = "งดวิเคราะห์"
+
+    status_table = pd.DataFrame([{
+        "League": history_league,
+        "Configured Odds API Key": hist_config["odds_key"],
+        "API status": sport_status,
+        "History source": (
+            "Loaded CSV / Football-Data" if history_count else "ไม่มีข้อมูล محمّل"
+        ),
+        "Historical matches": history_count,
+        "Data status": status,
+        "Confidence meaning": (
+            "คุณภาพข้อมูลเท่านั้น ไม่ใช่โอกาสชนะ"
+        ),
+    }])
+    st.dataframe(status_table, use_container_width=True, hide_index=True)
+
+    if not loaded_history.empty:
+        st.dataframe(
+            loaded_history.tail(100).sort_values("Date", ascending=False),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.download_button(
+            "ดาวน์โหลดข้อมูลย้อนหลัง CSV",
+            loaded_history.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"history_{history_league.replace(' ', '_')}.csv",
+            mime="text/csv",
+        )
+
+    st.markdown("#### สรุปสถานะลีกทั้งหมด")
+    all_status = []
+
+    for name, cfg in LEAGUES.items():
+        hist = st.session_state.get(f"history_{name}", pd.DataFrame())
+        n = len(hist)
+        if n >= 100:
+            data_status = "ข้อมูลพร้อม"
+        elif n >= 30:
+            data_status = "ปานกลาง"
+        elif n > 0:
+            data_status = "ต่ำ"
+        else:
+            data_status = "ยังไม่มีผลย้อนหลัง"
+
+        all_status.append({
+            "League": name,
+            "Odds API Key (configured)": cfg["odds_key"],
+            "Historical source code": cfg.get("fd_code") or "ต้องอัปโหลด CSV",
+            "Historical matches loaded": n,
+            "Data status": data_status,
+        })
+
+    st.dataframe(
+        pd.DataFrame(all_status),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+# ============================================================
+# TAB 4: BET LEDGER / BACKTEST
+# ============================================================
+
+with tab_ledger:
+    st.subheader("รายการเดิมพันและผลย้อนหลัง")
+
+    bets = query_db("SELECT * FROM bets ORDER BY id DESC")
     if bets.empty:
         st.info("ยังไม่มีรายการเดิมพัน")
     else:
-        settled = bets[bets["status"] == "Settled"].copy()
-        if not settled.empty:
-            settled["stake"] = pd.to_numeric(settled["stake"], errors="coerce").fillna(0)
-            settled["profit"] = pd.to_numeric(settled["profit"], errors="coerce").fillna(0)
-            total_stake = settled["stake"].sum()
-            total_profit = settled["profit"].sum()
-            roi = total_profit / total_stake * 100 if total_stake > 0 else 0
-            win_rate = (
-                (settled["profit"] > 0).mean() * 100 if len(settled) else 0
-            )
+        settled = bets[bets["result"] != "Pending"].copy()
+        total_stake = settled["stake"].sum() if not settled.empty else 0.0
+        net_profit = settled["profit"].sum() if not settled.empty else 0.0
+        roi = (net_profit / total_stake * 100) if total_stake else 0.0
+        decided = len(settled)
+        wins = int(settled["result"].isin(["Win", "Half Win"]).sum()) if decided else 0
+        win_rate = wins / decided * 100 if decided else 0.0
 
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("เดิมพันที่ปิดผลแล้ว", len(settled))
-            c2.metric("กำไร/ขาดทุน", f"{total_profit:+.2f}")
-            c3.metric("ROI", f"{roi:+.2f}%")
-            c4.metric("อัตรารายการที่กำไร", f"{win_rate:.1f}%")
-        else:
-            st.info("ยังไม่มีรายการที่ปิดผลแล้ว")
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("เดิมพันที่ตัดสินแล้ว", decided)
+        m2.metric("กำไร/ขาดทุนสุทธิ", f"{net_profit:.2f}")
+        m3.metric("ROI", f"{roi:.2f}%")
+        m4.metric("Win / Half Win rate", f"{win_rate:.2f}%")
 
         st.dataframe(bets, use_container_width=True, hide_index=True)
+
         st.download_button(
             "ดาวน์โหลด Bet Ledger CSV",
-            data=bets.to_csv(index=False).encode("utf-8-sig"),
-            file_name="value_bet_pro_ledger.csv",
+            bets.to_csv(index=False).encode("utf-8-sig"),
+            file_name="value_bet_ledger.csv",
             mime="text/csv",
         )
 
-        pending = bets[bets["status"] == "Pending"]
-        if not pending.empty:
-            st.markdown("#### บันทึกผลเดิมพัน")
-            bet_ids = pending["id"].astype(int).tolist()
-            selected_id = st.selectbox("เลือกรายการ ID", bet_ids)
-            result_choice = st.selectbox(
-                "ผลการแข่งขัน/เดิมพัน",
+        st.markdown("#### ตัดสินผลเดิมพัน")
+        pending = bets[bets["result"] == "Pending"]
+
+        if pending.empty:
+            st.info("ไม่มีเดิมพันที่รอผล")
+        else:
+            bet_options = {
+                f'#{int(row["id"])} | {row["league"]} | '
+                f'{row["home_team"]} vs {row["away_team"]} | '
+                f'{row["selection"]} {row["line"]} @ {row["odds"]}':
+                    int(row["id"])
+                for _, row in pending.iterrows()
+            }
+
+            chosen_label = st.selectbox(
+                "เลือกรายการเดิมพัน", list(bet_options.keys())
+            )
+            chosen_result = st.selectbox(
+                "ผลเดิมพัน",
                 ["Win", "Half Win", "Push", "Half Loss", "Loss"],
             )
-            selected_row = pending[pending["id"] == selected_id].iloc[0]
-            stake_value = safe_float(selected_row["stake"], 0.0) or 0.0
-            odds_value = safe_float(selected_row["odds"], 1.0) or 1.0
 
-            profit_values = {
-                "Win": stake_value * (odds_value - 1),
-                "Half Win": stake_value * (odds_value - 1) / 2,
-                "Push": 0.0,
-                "Half Loss": -stake_value / 2,
-                "Loss": -stake_value,
-            }
-            preview_profit = profit_values[result_choice]
-            st.write(f"กำไร/ขาดทุนที่จะบันทึก: **{preview_profit:+.2f}**")
-
-            if st.button("ยืนยันผลเดิมพัน"):
-                update_bet_result(
-                    selected_id, result_choice, preview_profit
-                )
-                st.success("อัปเดตผลแล้ว")
+            if st.button("บันทึกผลเดิมพัน"):
+                settle_bet(bet_options[chosen_label], chosen_result)
+                st.success("บันทึกผลแล้ว กรุณารีเฟรช/เปิดแท็บใหม่เพื่อตรวจสอบ")
                 st.rerun()
 
-    st.markdown("#### ประวัติราคาเปิดและราคาปัจจุบัน")
-    snapshots = db_read(
-        "SELECT * FROM odds_snapshots ORDER BY id DESC LIMIT 500"
+    st.markdown("#### ราคา Snapshot")
+    snapshots = query_db(
+        "SELECT * FROM odds_snapshots ORDER BY id DESC LIMIT 1000"
     )
     if snapshots.empty:
-        st.info("ยังไม่มีประวัติราคาที่บันทึก")
+        st.info("ยังไม่มี Snapshot ราคา")
     else:
         st.dataframe(snapshots, use_container_width=True, hide_index=True)
         st.download_button(
-            "ดาวน์โหลดประวัติราคา CSV",
-            data=snapshots.to_csv(index=False).encode("utf-8-sig"),
-            file_name="value_bet_pro_odds_snapshots.csv",
+            "ดาวน์โหลด Snapshots CSV",
+            snapshots.to_csv(index=False).encode("utf-8-sig"),
+            file_name="odds_snapshots.csv",
             mime="text/csv",
         )
 
+# ============================================================
+# TAB 5: SETTINGS
+# ============================================================
 
-# ======================= TAB 4: SETTINGS =======================
+with tab_settings:
+    st.subheader("Settings & League Status")
 
-with tabs[3]:
-    st.subheader("การตั้งค่าและข้อจำกัด")
+    if get_api_key():
+        st.success("พบ API Key ใน Secrets/Environment")
+    else:
+        st.warning(
+            "ยังไม่พบ API Key ให้เพิ่ม ODDS_API_KEY ใน Streamlit Secrets"
+        )
 
-    st.write(
-        "สถานะ The Odds API:",
-        "ตั้งค่าแล้ว" if ODDS_API_KEY else "ยังไม่ได้ตั้งค่า",
-    )
-
-    st.markdown("#### ตั้งค่า API Key อย่างปลอดภัย")
-    st.write("สร้างไฟล์ `.streamlit/secrets.toml` แล้วใส่:")
-    st.code('ODDS_API_KEY = "ใส่_API_KEY_ของคุณ"', language="toml")
+    st.markdown("#### วิธีตั้งค่า Secrets")
+    st.code('ODDS_API_KEY = "YOUR_THE_ODDS_API_KEY"', language="toml")
 
     st.markdown("#### แหล่งข้อมูล")
     st.markdown(
+        "- The Odds API: https://the-odds-api.com/\n"
         "- Football-Data.co.uk: https://www.football-data.co.uk/\n"
-        "- The Odds API: https://the-odds-api.com/liveapi/guides/v4/"
+        "- Streamlit secrets: "
+        "https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management"
     )
 
-    st.markdown("#### ข้อจำกัดของโมเดล")
-    st.markdown("""
-- EV ขึ้นอยู่กับความแม่นยำของโมเดล Poisson ซึ่งเวอร์ชันนี้ยังเป็นโมเดลพื้นฐาน
-- ข้อมูลฟอร์มใช้ผลล่าสุด 5 นัดแยกเหย้าและเยือน ไม่ได้ปรับคุณภาพคู่แข่งครบถ้วน
-- ไม่มีการรับประกันกำไร อัตราชนะ หรือผลตอบแทนในอนาคต
-- The Odds API ให้ราคาปัจจุบันตามตลาดและเจ้ามือที่มีข้อมูล ไม่ใช่ราคาเปิดย้อนหลังทุกคู่
-- การกรอกราคาเปิดเองต้องบันทึกให้ตรงกับตลาด ฝั่ง เส้น และเจ้ามือเดียวกันจึงจะเปรียบเทียบได้ดี
-- ผลเดิมพันที่บันทึกเป็น Win/Half Win/Push/Half Loss/Loss ต้องตรวจให้ตรงกับกติกา AH ของเจ้ามือ
-- ฐานข้อมูล SQLite อยู่ในโฟลเดอร์ `data/` ควรสำรองไฟล์ `value_bet_pro.db` เป็นประจำ
-""")
+    st.warning(
+        "ข้อจำกัดสำคัญ: key ของลีกอาจแตกต่างจากที่กำหนดไว้ "
+        "ระบบตรวจสอบกับ /v4/sports แต่ไม่ได้เปลี่ยน key ให้อัตโนมัติ "
+        "ถ้าพบ key อื่น ให้ตรวจสอบว่าเป็นลีกเดียวกันก่อนแก้ config"
+    )
+
+    st.info(
+        "ระดับข้อมูลในแอปวัดจากจำนวนแมตช์ที่โหลดและการจับคู่ข้อมูลเบื้องต้น "
+        "ไม่ใช่ผลทดสอบย้อนหลังแบบ walk-forward และไม่ใช่ความน่าจะเป็นที่เดิมพันจะชนะ"
+    )
 
 st.divider()
 st.caption(
-    "Value Bet Pro — ใช้เพื่อวิเคราะห์และทดสอบระบบเท่านั้น "
-    "ตรวจสอบราคาและข้อมูลก่อนตัดสินใจเดิมพันทุกครั้ง"
+    "Value Bet Pro — ใช้เพื่อวิเคราะห์ข้อมูลเท่านั้น "
+    "ผล EV ขึ้นอยู่กับคุณภาพข้อมูล สมมติฐานโมเดล ราคาเดิมพัน และตลาดจริง"
 )
