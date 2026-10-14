@@ -1,3 +1,4 @@
+import os
 import math
 from datetime import datetime, timedelta, timezone
 import pandas as pd
@@ -8,23 +9,42 @@ import streamlit as st
 # 1. SETUP & CONFIGURATION
 # ==============================================================================
 st.set_page_config(
-    page_title="Super Quant VIP - Smart 3-Engine", page_icon="⚽", layout="centered"
+    page_title="Super Quant VIP - Permanent Save", page_icon="⚽", layout="centered"
 )
 
 st.markdown(
-    "<h3 style='text-align: center;'>⚽ Super Quant VIP (Fixed Odds Engine)</h3>",
+    "<h3 style='text-align: center;'>⚽ Super Quant VIP (Permanent Save Engine)</h3>",
     unsafe_allow_html=True,
 )
-st.caption(
-    "ระบบวิเคราะห์อัจฉริยะ: ดึงราคาต่อรองจริงแม่นยำ ไม่ติดบั๊กชื่อทีม"
-)
+st.caption("ระบบวิเคราะห์อัจฉริยะ: บันทึกโพยลงไฟล์ถาวร ปิดแอปข้ามคืนข้อมูลไม่หาย")
 
 API_KEY = "9b01dce091987a5fc57447a84e05badc"
-WEATHER_API_KEY = ""
+SAVE_FILE = "saved_slips.csv"  # ไฟล์สำหรับเซฟโพยถาวร
 
 
 # ==============================================================================
-# 2. EXPANDED LEAGUE DIVERSITY & ADVANCED STATS ENGINE
+# 2. HELPER FUNCTIONS FOR PERMANENT STORAGE
+# ==============================================================================
+def save_scan_to_file(df):
+  """บันทึกโพยลงไฟล์ CSV ถาวรบนเซิร์ฟเวอร์"""
+  try:
+    df.to_csv(SAVE_FILE, index=False, encoding="utf-8-sig")
+  except Exception:
+    pass
+
+
+def load_scan_from_file():
+  """โหลดโพยที่เคยเซฟไว้จากไฟล์ CSV"""
+  if os.path.exists(SAVE_FILE):
+    try:
+      return pd.read_csv(SAVE_FILE, encoding="utf-8-sig")
+    except Exception:
+      return pd.DataFrame()
+  return pd.DataFrame()
+
+
+# ==============================================================================
+# 3. EXPANDED LEAGUE DIVERSITY & STATS ENGINE
 # ==============================================================================
 @st.cache_data(ttl=1800)
 def get_active_leagues():
@@ -267,7 +287,7 @@ def check_match_result(csv_df, home_mapped, away_mapped, match_date=None):
 
 
 # ==============================================================================
-# 3. FIXED SCANNER LOGIC (NO STANDINGS DEPENDENCY BLOCK)
+# 4. SCANNER LOGIC
 # ==============================================================================
 def scan_league(leg_info, hours_limit):
   csv_df = fetch_csv_stats(leg_info["csv"])
@@ -330,7 +350,7 @@ def scan_league(leg_info, hours_limit):
     metrics = get_advanced_team_metrics(csv_df, home, away, m_dt)
     candidates = []
 
-    # --- 1. ตลาดแฮนดิแคป (บังคับดึงเรตราคาจริงเสมอ แม้หาอันดับไม่เจอ) ---
+    # --- 1. ตลาดแฮนดิแคป ---
     if sp_mkt:
       outcomes = sp_mkt.get("outcomes", [])
       h_obj = next((o for o in outcomes if o["name"] == home), None)
@@ -339,7 +359,6 @@ def scan_league(leg_info, hours_limit):
         line = h_obj.get("point", 0.0)
         hp, ap = h_obj["price"], a_obj["price"]
 
-        # คำนวณความน่าจะเป็นโดยใช้ xG และอันดับ (ถ้ามี)
         rank_diff = (arank - hrank) if (hrank and arank) else (
             metrics["home_xg"] - metrics["away_xg"]
         ) * 2
@@ -435,7 +454,6 @@ def scan_league(leg_info, hours_limit):
           best["note"],
       )
     else:
-      # Fallback กรณีไม่มีข้อมูลจริงๆ ให้ดึงราคา H2H ตรงๆ แทนที่จะเป็นเสมอ 1.9
       ev_pick, ev_odds, ev_score, ev_note = (
           f"วาง {home} (เหย้า)",
           1.90,
@@ -507,6 +525,9 @@ def scan_league(leg_info, hours_limit):
         "match_date": m_dt,
         "league": leg_info["name"],
         "match": f"{home} vs {away}{rank_str}",
+        "csv_code": leg_info["csv"],
+        "home_mapped": home,
+        "away_mapped": away,
         "ev_pick": ev_pick,
         "ev_odds": ev_odds,
         "ev_score": min(max(ev_score, 60.0), 98.0),
@@ -521,7 +542,7 @@ def scan_league(leg_info, hours_limit):
 
 
 # ==============================================================================
-# 4. STREAMLIT UI DASHBOARD
+# 5. STREAMLIT UI DASHBOARD
 # ==============================================================================
 active_leagues = get_active_leagues()
 
@@ -550,13 +571,8 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (Smart 3-Engine)":
   )
 
   hours_limit = st.sidebar.selectbox("กรอบเวลาการแข่งขัน", options=[24, 48], index=0)
-  budget = st.sidebar.number_input(
-      "งบลงทุนรวมวันนี้ (บาท)", value=1000, step=100
-  )
-  st.session_state["budget"] = budget
-
   scan_btn = st.sidebar.button(
-      "🚀 สแกนและจัดบิล (Smart 3-Engine + ลีกหลากหลาย)", type="primary"
+      "🚀 สแกนและจัดบิล (Auto-Save ถาวร)", type="primary"
   )
 
   if scan_btn:
@@ -580,16 +596,20 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (Smart 3-Engine)":
         elif res_all:
           df = pd.DataFrame(res_all)
           df = df.drop_duplicates(subset=["match"]).reset_index(drop=True)
+
+          # บันทึกลง Session และเซฟลงไฟล์ถาวร
           st.session_state["saved_scan_df"] = df
+          save_scan_to_file(df)
+
           st.success(
-              f"สแกนสำเร็จ! พบการแข่งขัน {len(df)} คู่ จากลีกที่คุณเลือก"
+              f"สแกนสำเร็จ! พบ {len(df)} คู่ (ระบบเซฟโพยไว้ให้ถาวรแล้ว)"
           )
 
-  if (
-      "saved_scan_df" in st.session_state
-      and not st.session_state["saved_scan_df"].empty
-  ):
-    df = st.session_state["saved_scan_df"]
+  # โหลดข้อมูลจากไฟล์อัตโนมัติหากไม่มีใน Session
+  saved_df = st.session_state.get("saved_scan_df", load_scan_from_file())
+
+  if saved_df is not None and not saved_df.empty:
+    df = saved_df
 
     tab_ev, tab_trap = st.tabs([
         "📈 สมองที่ 1 & 2: Best Value xG Signal (ทุกตลาด)",
@@ -653,16 +673,27 @@ if menu_choice == "🔥 จัดบิลสเต็ป VIP (Smart 3-Engine)":
     st.info("💡 กรุณาเลือกเลือกลีกที่เมนูด้านข้าง แล้วกดปุ่มสแกนเริ่มต้นสร้างโพย")
 
 elif menu_choice == "🏆 ตรวจผลบิลย้อนหลัง (ฟรี)":
-  st.subheader("🏆 ตรวจผลบิลอัตโนมัติ")
-  if (
-      "saved_scan_df" in st.session_state
-      and not st.session_state["saved_scan_df"].empty
-  ):
-    df = st.session_state["saved_scan_df"]
-    for _, r in df.iterrows():
-      st.write(
-          f"⚽ **[{r['league']}] {r['match']}** ➔ แนะนำ: `{r['ev_pick']}` |"
-          f" สรุปผล: **{r['result']}**"
-      )
+  st.subheader("🏆 ตรวจผลบิลอัตโนมัติ (ดึงจากบันทึกถาวร)")
+
+  # ดึงโพยล่าสุดจากไฟล์ถาวร
+  df_saved = load_scan_from_file()
+
+  if df_saved is not None and not df_saved.empty:
+    with st.spinner("กำลังดึงข้อมูลสกอร์ล่าสุดมาอัปเดต..."):
+      for idx, r in df_saved.iterrows():
+        # ดึง CSV ล่าสุดมาเช็กผลจริงอีกรอบแบบเรียลไทม์
+        csv_df = fetch_csv_stats(r.get("csv_code"))
+        res_str = check_match_result(
+            csv_df,
+            r.get("home_mapped"),
+            r.get("away_mapped"),
+            r.get("match_date"),
+        )
+        st.write(
+            f"⚽ **[{r['league']}] {r['match']}**<br>👉 แนะนำ:"
+            f" `{r['ev_pick']}` | สรุปผล: **{res_str}**",
+            unsafe_allow_html=True,
+        )
+        st.markdown("---")
   else:
-    st.warning("⚠️ ยังไม่มีโพยในระบบ กรุณาสร้างโพยก่อน")
+    st.warning("⚠️ ยังไม่มีโพยในระบบที่บันทึกไว้ กรุณาสร้างโพยก่อน")
