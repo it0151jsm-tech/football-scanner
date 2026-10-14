@@ -18,7 +18,7 @@ st.markdown(
 )
 st.caption("ระบบวิเคราะห์อัจฉริยะ: บันทึกโพยลงไฟล์ถาวร ปิดแอปข้ามคืนข้อมูลไม่หาย")
 
-API_KEY = "9b01dce091987a5fc57447a84e05badc"
+API_KEY = "58b4a9f398fef35f1b8c26add2eac952"
 SAVE_FILE = "saved_slips.csv"  # ไฟล์สำหรับเซฟโพยถาวร
 
 
