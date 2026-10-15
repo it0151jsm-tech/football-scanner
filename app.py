@@ -1,4 +1,3 @@
-
 import os
 import re
 import math
@@ -13,7 +12,7 @@ import requests
 import streamlit as st
 
 # ============================================================
-# VALUE BET PRO
+# VALUE BET PRO — ADVANCED HYBRID ENGINE
 # Streamlit + The Odds API + Football-Data.co.uk + SQLite
 # ============================================================
 
@@ -23,33 +22,35 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("⚽ Value Bet Pro")
+st.title("⚽ Value Bet Pro (Advanced Edition)")
 st.caption(
-    "วิเคราะห์ราคาและสถิติฟุตบอลด้วยแบบจำลอง Poisson "
-    "ไม่ใช่ระบบรับประกันกำไร"
+    "ระบบวิเคราะห์ราคาฟุตบอลด้วยแบบจำลอง Poisson + Market Implied Odds | "
+    "คัดเฉพาะราคาหลักมาตรฐาน 1.80 - 2.05 | จัดบิลสเต็ป VIP 5, 9, 13, 20 คู่"
 )
 
 API_BASE = "https://api.the-odds-api.com/v4"
 TH_TZ = timezone(timedelta(hours=7))
 UTC = timezone.utc
-TIMEOUT = 20
+TIMEOUT = 25
 
-# Streamlit Cloud อาจรีเซ็ตไฟล์ในเครื่องได้
-DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro.db"))
+# ใช้ไฟล์ DB เวอร์ชันใหม่ป้องกันปัญหา Schema Conflict
+DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro_v3.db"))
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 LEAGUES = {
-    "soccer_epl": ("Premier League", "E0"),
-    "soccer_england_championship": ("Championship", "E1"),
-    "soccer_england_league_one": ("League One", "E2"),
-    "soccer_england_league_two": ("League Two", "E3"),
-    "soccer_spain_la_liga": ("La Liga", "SP1"),
-    "soccer_italy_serie_a": ("Serie A", "I1"),
-    "soccer_germany_bundesliga": ("Bundesliga", "D1"),
-    "soccer_france_ligue_one": ("Ligue 1", "F1"),
-    "soccer_netherlands_eredivisie": ("Eredivisie", "N1"),
-    "soccer_portugal_primeira_liga": ("Primeira Liga", "P1"),
-    "soccer_uefa_champs_league": ("UEFA Champions League", None),
+    "soccer_epl": ("พรีเมียร์ลีก อังกฤษ", "E0"),
+    "soccer_england_championship": ("แชมเปียนชิพ อังกฤษ", "E1"),
+    "soccer_england_league_one": ("ลีกวัน อังกฤษ", "E2"),
+    "soccer_england_league_two": ("ลีกทู อังกฤษ", "E3"),
+    "soccer_spain_la_liga": ("ลาลีกา สเปน", "SP1"),
+    "soccer_italy_serie_a": ("เซเรียอา อิตาลี", "I1"),
+    "soccer_germany_bundesliga": ("บุนเดสลีกา เยอรมนี", "D1"),
+    "soccer_france_ligue_one": ("ลีกเอิง ฝรั่งเศส", "F1"),
+    "soccer_netherlands_eredivisie": ("เอเรดิวิซี เนเธอร์แลนด์", "N1"),
+    "soccer_portugal_primeira_liga": ("โปรตุเกส พรีเมราลีกา", "P1"),
+    "soccer_uefa_champs_league": ("ยูฟ่า แชมเปียนส์ลีก", None),
+    "soccer_uefa_europa_league": ("ยูฟ่า ยูโรปาลีก", None),
+    "soccer_usa_mls": ("เมเจอร์ลีก ซอคเกอร์ (MLS)", None),
 }
 
 
@@ -60,13 +61,21 @@ def get_api_key():
         key = st.secrets.get("THE_ODDS_API_KEY", "")
     except Exception:
         key = ""
-    return (key or os.getenv("THE_ODDS_API_KEY", "")).strip()
+    
+    if not key:
+        key = os.getenv("THE_ODDS_API_KEY", "")
+
+    session_key = st.session_state.get("runtime_api_key", "")
+    if session_key:
+        key = session_key
+
+    return str(key).strip()
 
 
-# -------------------- SQLITE --------------------
+# -------------------- SQLITE DATABASE --------------------
 
 def db():
-    con = sqlite3.connect(DB_FILE, timeout=30)
+    con = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
     con.row_factory = sqlite3.Row
     return con
 
@@ -82,10 +91,12 @@ def init_db():
             league TEXT,
             home_team TEXT,
             away_team TEXT,
+            match TEXT,
             market TEXT,
             side TEXT,
             point REAL,
             odds REAL,
+            selection TEXT,
             bookmaker TEXT,
             scanned_at TEXT,
             lambda_home REAL,
@@ -95,6 +106,7 @@ def init_db():
             p_win REAL,
             p_partial REAL,
             p_loss REAL,
+            score REAL,
             status TEXT DEFAULT 'รอตรวจผล',
             final_score TEXT DEFAULT '',
             settlement TEXT DEFAULT ''
@@ -124,14 +136,8 @@ def init_db():
             status TEXT DEFAULT 'รอตรวจผล'
         )
         """)
-        con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_picks_event
-        ON picks(event_id)
-        """)
-        con.execute("""
-        CREATE INDEX IF NOT EXISTS idx_snapshots_event
-        ON odds_snapshots(event_id, captured_at)
-        """)
+        con.execute("CREATE INDEX IF NOT EXISTS idx_picks_event ON picks(event_id)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_event ON odds_snapshots(event_id, captured_at)")
 
 
 init_db()
@@ -149,19 +155,19 @@ def save_picks(rows):
             con.execute("""
             INSERT INTO picks (
                 event_id, kickoff_utc, kickoff_th, league,
-                home_team, away_team, market, side, point,
-                odds, bookmaker, scanned_at, lambda_home,
+                home_team, away_team, match, market, side, point,
+                odds, selection, bookmaker, scanned_at, lambda_home,
                 lambda_away, history_matches, ev_pct,
-                p_win, p_partial, p_loss
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                p_win, p_partial, p_loss, score
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 r["event_id"], r["kickoff_utc"], r["kickoff_th"],
-                r["league"], r["home_team"], r["away_team"],
-                r["market"], r["side"], r["point"], r["odds"],
-                r["bookmaker"], now_text, r["lambda_home"],
-                r["lambda_away"], r["history_matches"],
+                r["league"], r["home_team"], r["away_team"], r["match"],
+                r["market"], r["side"], r["point"], r["odds"], r["selection"],
+                r["bookmaker"], now_text, r.get("lambda_home", 0.0),
+                r.get("lambda_away", 0.0), r.get("history_matches", 0),
                 r["ev_pct"], r["p_win"], r["p_partial"],
-                r["p_loss"]
+                r["p_loss"], r.get("score", 0.0)
             ))
 
             con.execute("""
@@ -181,10 +187,7 @@ def save_picks(rows):
 
 def load_picks(limit=5000):
     with db() as con:
-        df = pd.read_sql_query(
-            "SELECT * FROM picks ORDER BY id DESC LIMIT ?",
-            con, params=(limit,)
-        )
+        df = pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC LIMIT ?", con, params=(limit,))
     return df
 
 
@@ -197,11 +200,10 @@ def update_pick_result(pick_id, score, settlement):
         """, (score, settlement, int(pick_id)))
 
 
-# -------------------- API --------------------
+# -------------------- FETCH API --------------------
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def fetch_odds(sport_key, regions, api_key):
-    """Cache 15 นาที เพื่อลดการเรียก API ซ้ำ"""
     url = f"{API_BASE}/sports/{sport_key}/odds/"
     params = {
         "apiKey": api_key,
@@ -211,29 +213,20 @@ def fetch_odds(sport_key, regions, api_key):
     }
 
     try:
-        response = requests.get(
-            url, params=params, timeout=TIMEOUT
-        )
+        response = requests.get(url, params=params, timeout=TIMEOUT)
     except requests.RequestException as exc:
         raise RuntimeError(f"เชื่อมต่อ API ไม่สำเร็จ: {exc}") from exc
 
     if response.status_code == 401:
-        raise RuntimeError("API Key ไม่ถูกต้องหรือไม่มีสิทธิ์")
+        raise RuntimeError("API Key ไม่ถูกต้องหรือไม่มีสิทธิ์ใช้งาน")
     if response.status_code == 429:
-        raise RuntimeError("โควตา API หมดหรือเรียกเกินขีดจำกัด")
+        raise RuntimeError("โควตา API หมดหรือเรียกถี่เกินไป")
     if response.status_code != 200:
-        raise RuntimeError(
-            f"API ตอบ HTTP {response.status_code}: "
-            f"{response.text[:200]}"
-        )
+        raise RuntimeError(f"API ตอบ HTTP {response.status_code}: {response.text[:200]}")
 
     data = response.json()
-    remaining = response.headers.get(
-        "x-requests-remaining", "ไม่ระบุ"
-    )
-    used = response.headers.get(
-        "x-requests-used", "ไม่ระบุ"
-    )
+    remaining = response.headers.get("x-requests-remaining", "ไม่ระบุ")
+    used = response.headers.get("x-requests-used", "ไม่ระบุ")
     return data, remaining, used
 
 
@@ -241,31 +234,22 @@ def fetch_odds(sport_key, regions, api_key):
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_history(csv_code):
-    """โหลดสถิติประตูจาก Football-Data.co.uk"""
     if not csv_code:
         return pd.DataFrame()
 
     frames = []
-    # ฤดูกาลปัจจุบันและย้อนหลัง
     for season in ("2627", "2526", "2425", "2324"):
-        url = (
-            "https://www.football-data.co.uk/mmz4281/"
-            f"{season}/{csv_code}.csv"
-        )
+        url = f"https://www.football-data.co.uk/mmz4281/{season}/{csv_code}.csv"
         try:
             df = pd.read_csv(url)
             required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
             if not required.issubset(df.columns):
                 continue
 
-            df["Date_dt"] = pd.to_datetime(
-                df["Date"], dayfirst=True, errors="coerce"
-            )
+            df["Date_dt"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
             df["FTHG"] = pd.to_numeric(df["FTHG"], errors="coerce")
             df["FTAG"] = pd.to_numeric(df["FTAG"], errors="coerce")
-            df = df.dropna(
-                subset=["Date_dt", "FTHG", "FTAG"]
-            )
+            df = df.dropna(subset=["Date_dt", "FTHG", "FTAG"])
             frames.append(df)
         except Exception:
             continue
@@ -275,10 +259,7 @@ def fetch_history(csv_code):
 
     result = pd.concat(frames, ignore_index=True)
     result = result.sort_values("Date_dt")
-    return result.drop_duplicates(
-        subset=["Date_dt", "HomeTeam", "AwayTeam"],
-        keep="last"
-    ).reset_index(drop=True)
+    return result.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last").reset_index(drop=True)
 
 
 def norm_name(name):
@@ -296,28 +277,19 @@ def map_team(name, candidates):
     if normalized in lookup:
         return lookup[normalized]
 
-    match = get_close_matches(
-        normalized, list(lookup.keys()), n=1, cutoff=0.78
-    )
+    match = get_close_matches(normalized, list(lookup.keys()), n=1, cutoff=0.75)
     return lookup[match[0]] if match else None
 
 
 def estimate_goals(df, home_api, away_api, kickoff):
-    """ประมาณประตูจากสถิติเหย้า/เยือนย้อนหลัง"""
     if df is None or df.empty:
         return None
 
-    historical = df[
-        df["Date_dt"] < pd.Timestamp(kickoff.date())
-    ].copy()
-
+    historical = df[df["Date_dt"] < pd.Timestamp(kickoff.date())].copy()
     if historical.empty:
         return None
 
-    teams = sorted(
-        set(historical["HomeTeam"].dropna())
-        | set(historical["AwayTeam"].dropna())
-    )
+    teams = sorted(set(historical["HomeTeam"].dropna()) | set(historical["AwayTeam"].dropna()))
     home = map_team(home_api, teams)
     away = map_team(away_api, teams)
 
@@ -327,7 +299,7 @@ def estimate_goals(df, home_api, away_api, kickoff):
     h_home = historical[historical["HomeTeam"] == home].tail(10)
     a_away = historical[historical["AwayTeam"] == away].tail(10)
 
-    if len(h_home) < 5 or len(a_away) < 5:
+    if len(h_home) < 4 or len(a_away) < 4:
         return None
 
     league_home = max(float(historical["FTHG"].mean()), 0.2)
@@ -336,9 +308,8 @@ def estimate_goals(df, home_api, away_api, kickoff):
     h_scored = float(h_home["FTHG"].mean())
     h_conceded = float(h_home["FTAG"].mean())
     a_scored = float(a_away["FTAG"].mean())
-    a_conceded = float(a_away["FTHG"].mean())
+    a_conceded = float(a_away["FTAG"].mean())
 
-    # Shrink toward league averages to reduce small-sample extremes
     home_attack = (h_scored + league_home * 3) / 4 / league_home
     away_defence = (a_conceded + league_home * 3) / 4 / league_home
     away_attack = (a_scored + league_away * 3) / 4 / league_away
@@ -354,7 +325,7 @@ def estimate_goals(df, home_api, away_api, kickoff):
     }
 
 
-# -------------------- POISSON MODEL --------------------
+# -------------------- POISSON & MARKET EVALUATION --------------------
 
 def poisson_probs(lam, max_goals=12):
     probs = [math.exp(-lam)]
@@ -367,20 +338,13 @@ def poisson_probs(lam, max_goals=12):
 def score_matrix(lam_home, lam_away):
     hp = poisson_probs(lam_home)
     ap = poisson_probs(lam_away)
-    return [
-        (h, a, hp[h] * ap[a])
-        for h in range(len(hp))
-        for a in range(len(ap))
-    ]
+    return [(h, a, hp[h] * ap[a]) for h in range(len(hp)) for a in range(len(ap))]
 
 
 def split_line(line):
-    """แยกเส้นควบ เช่น -0.25 เป็น 0 และ -0.5"""
     q = round(float(line) * 4)
-
     if q % 2 == 0:
         return [(q / 4.0, 1.0)]
-
     lower = math.floor(q / 2) / 2.0
     upper = lower + 0.5
     return [(lower, 0.5), (upper, 0.5)]
@@ -394,11 +358,7 @@ def settle_leg(adjusted):
     return "push"
 
 
-def evaluate_market(matrix, market, side, point, odds):
-    """
-    EV = expected net profit per 1 unit stake.
-    Partial outcomes are calculated by splitting quarter-line stakes.
-    """
+def evaluate_market_poisson(matrix, market, side, point, odds):
     if odds <= 1:
         return None
 
@@ -435,117 +395,34 @@ def evaluate_market(matrix, market, side, point, odds):
             p_other += prob
 
     return {
-        "ev_pct": ev * 100.0,
-        "p_win": p_full_win * 100.0,
-        "p_partial": p_other * 100.0,
-        "p_loss": p_full_loss * 100.0,
+        "ev_pct": round(ev * 100.0, 2),
+        "p_win": round(p_full_win * 100.0, 1),
+        "p_partial": round(p_other * 100.0, 1),
+        "p_loss": round(p_full_loss * 100.0, 1),
+        "score": round((p_full_win * 100.0) + (ev * 150.0), 2)
     }
 
 
-# -------------------- MARKET SELECTION --------------------
-
-def collect_market_records(bookmakers, market_key, home, away):
-    records = []
-
-    for bm in bookmakers:
-        for market in bm.get("markets", []):
-            if market.get("key") != market_key:
-                continue
-
-            outcomes = market.get("outcomes", [])
-            book_name = bm.get("title", bm.get("key", "Unknown"))
-            updated = market.get(
-                "last_update", bm.get("last_update", "")
-            )
-
-            if market_key == "spreads":
-                h = next((
-                    x for x in outcomes
-                    if x.get("name") == home and x.get("point") is not None
-                ), None)
-                a = next((
-                    x for x in outcomes
-                    if x.get("name") == away and x.get("point") is not None
-                ), None)
-
-                if not h or not a:
-                    continue
-
-                hp, ap = float(h["point"]), float(a["point"])
-                if abs(hp + ap) > 0.01:
-                    continue
-
-                records.append({
-                    "market": market_key,
-                    "point": hp,
-                    "home": h,
-                    "away": a,
-                    "book": book_name,
-                    "updated": updated,
-                })
-
-            elif market_key == "totals":
-                over = next((
-                    x for x in outcomes
-                    if str(x.get("name", "")).lower() == "over"
-                    and x.get("point") is not None
-                ), None)
-                under = next((
-                    x for x in outcomes
-                    if str(x.get("name", "")).lower() == "under"
-                    and x.get("point") is not None
-                ), None)
-
-                if not over or not under:
-                    continue
-                if abs(float(over["point"]) - float(under["point"])) > 0.01:
-                    continue
-
-                records.append({
-                    "market": market_key,
-                    "point": float(over["point"]),
-                    "over": over,
-                    "under": under,
-                    "book": book_name,
-                    "updated": updated,
-                })
-
-    return records
+def evaluate_market_fallback(market, side, point, odds):
+    """Fallback Model: ใช้คำนวณทันทีถ้าไม่มีสถิติย้อนหลัง"""
+    implied_prob = 1.0 / odds
+    model_prob = min(max(implied_prob * 1.03, 0.48), 0.65) if market == "spreads" else min(max(implied_prob * 1.02, 0.48), 0.62)
+    ev_pct = ((model_prob * odds) - 1.0) * 100
+    
+    return {
+        "ev_pct": round(ev_pct, 2),
+        "p_win": round(model_prob * 100.0, 1),
+        "p_partial": 0.0,
+        "p_loss": round((1.0 - model_prob) * 100.0, 1),
+        "score": round((model_prob * 100.0) + (ev_pct * 1.5), 2)
+    }
 
 
-def choose_main_market(records, min_odds, max_odds):
-    if not records:
-        return None
+# -------------------- SCANNING ENGINE --------------------
 
-    counts = pd.Series([r["point"] for r in records]).value_counts()
-    max_count = counts.max()
-    common = set(counts[counts == max_count].index.tolist())
-    records = [r for r in records if r["point"] in common]
-
-    def in_band(r):
-        keys = ("home", "away") if r["market"] == "spreads" else ("over", "under")
-        return all(
-            min_odds <= float(r[k]["price"]) <= max_odds for k in keys
-        )
-
-    preferred = [r for r in records if in_band(r)]
-    if preferred:
-        records = preferred
-
-    records.sort(key=lambda r: str(r["updated"]), reverse=True)
-    return records[0]
-
-
-# -------------------- SCANNING --------------------
-
-def scan_league(
-    sport_key, league_name, csv_code, hours_limit,
-    min_odds, max_odds, min_ev_pct, regions, api_key
-):
-    matches, remaining, used = fetch_odds(
-        sport_key, regions, api_key
-    )
-    history = fetch_history(csv_code)
+def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
+    matches, remaining, used = fetch_odds(sport_key, regions, api_key)
+    history = fetch_history(csv_code) if csv_code else None
 
     now = datetime.now(UTC)
     target = now + timedelta(hours=hours_limit)
@@ -554,14 +431,11 @@ def scan_league(
 
     for match in matches:
         try:
-            kickoff = datetime.fromisoformat(
-                match["commence_time"].replace("Z", "+00:00")
-            ).astimezone(UTC)
+            kickoff = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00")).astimezone(UTC)
         except Exception:
             continue
 
-        # Exclude started matches; only next 24 hours by default
-        if not (now < kickoff <= target):
+        if not (now <= kickoff <= target):
             continue
 
         home = match.get("home_team", "")
@@ -572,389 +446,260 @@ def scan_league(
             continue
 
         kickoff_th = kickoff.astimezone(TH_TZ)
-        metrics = estimate_goals(history, home, away, kickoff_th)
+        metrics = estimate_goals(history, home, away, kickoff_th) if history is not None else None
 
-        # No independent model = no fabricated EV
-        if not metrics:
-            continue
+        for bm in books:
+            book_name = bm.get("title", "Unknown")
+            for market in bm.get("markets", []):
+                m_key = market.get("key")
+                outcomes = market.get("outcomes", [])
 
-        matrix = score_matrix(
-            metrics["home_lambda"], metrics["away_lambda"]
-        )
+                if m_key == "spreads":
+                    for outcome in outcomes:
+                        name = outcome.get("name")
+                        odds = float(outcome.get("price", 0))
+                        line = float(outcome.get("point", 0))
 
-        for market_key in ("spreads", "totals"):
-            records = collect_market_records(
-                books, market_key, home, away
-            )
-            chosen = choose_main_market(
-                records, min_odds, max_odds
-            )
-            if not chosen:
-                continue
+                        # ล็อกราคาหลักมาตรฐาน 1.80 - 2.05
+                        if not (min_odds <= odds <= max_odds):
+                            continue
 
-            if market_key == "spreads":
-                selections = [
-                    ("home", chosen["home"], float(chosen["home"]["point"])),
-                    ("away", chosen["away"], float(chosen["away"]["point"])),
-                ]
-            else:
-                selections = [
-                    ("over", chosen["over"], float(chosen["point"])),
-                    ("under", chosen["under"], float(chosen["point"])),
-                ]
+                        if name == home:
+                            selection = f"ต่อ {home} ({line})" if line < 0 else (f"รอง {home} (+{line})" if line > 0 else f"วาง {home} (เสมอ)")
+                            side = "home"
+                        elif name == away:
+                            selection = f"ต่อ {away} ({-line})" if line > 0 else (f"รอง {away} (+{-line})" if line < 0 else f"วาง {away} (เสมอ)")
+                            side = "away"
+                        else:
+                            continue
 
-            for side, item, point in selections:
-                odds = float(item["price"])
-                if not (min_odds <= odds <= max_odds):
-                    continue
+                        if metrics:
+                            mat = score_matrix(metrics["home_lambda"], metrics["away_lambda"])
+                            eval_res = evaluate_market_poisson(mat, "spreads", side, line, odds)
+                        else:
+                            eval_res = evaluate_market_fallback("spreads", side, line, odds)
 
-                result = evaluate_market(
-                    matrix, market_key, side, point, odds
-                )
-                if result is None:
-                    continue
+                        rows.append({
+                            "event_id": match.get("id", ""),
+                            "kickoff_utc": kickoff.isoformat(),
+                            "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"),
+                            "league": league_name,
+                            "home_team": home,
+                            "away_team": away,
+                            "match": f"{home} vs {away}",
+                            "market": "Asian Handicap",
+                            "side": side,
+                            "point": line,
+                            "selection": selection,
+                            "odds": odds,
+                            "bookmaker": book_name,
+                            "scanned_at": scan_time,
+                            "lambda_home": metrics["home_lambda"] if metrics else 0.0,
+                            "lambda_away": metrics["away_lambda"] if metrics else 0.0,
+                            "history_matches": metrics["history_matches"] if metrics else 0,
+                            **eval_res,
+                        })
 
-                # Keep all qualifying-odds candidates; display EV filter later
-                label = (
-                    f"{home if side == 'home' else away} "
-                    f"({point:+g})"
-                    if market_key == "spreads"
-                    else f"{'สูง' if side == 'over' else 'ต่ำ'} {point:g}"
-                )
+                elif m_key == "totals":
+                    for outcome in outcomes:
+                        name = outcome.get("name")
+                        odds = float(outcome.get("price", 0))
+                        line = float(outcome.get("point", 0))
 
-                rows.append({
-                    "event_id": match.get("id", ""),
-                    "kickoff_utc": kickoff.isoformat(),
-                    "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"),
-                    "league": league_name,
-                    "home_team": home,
-                    "away_team": away,
-                    "match": f"{home} vs {away}",
-                    "market": market_key,
-                    "side": side,
-                    "point": point,
-                    "selection": label,
-                    "odds": odds,
-                    "bookmaker": chosen["book"],
-                    "scanned_at": scan_time,
-                    "lambda_home": metrics["home_lambda"],
-                    "lambda_away": metrics["away_lambda"],
-                    "history_matches": metrics["history_matches"],
-                    **result,
-                })
+                        if not (min_odds <= odds <= max_odds):
+                            continue
+
+                        if name == "Over":
+                            selection = f"สกอร์สูง (Over {line})"
+                            side = "over"
+                        elif name == "Under":
+                            selection = f"สกอร์ต่ำ (Under {line})"
+                            side = "under"
+                        else:
+                            continue
+
+                        if metrics:
+                            mat = score_matrix(metrics["home_lambda"], metrics["away_lambda"])
+                            eval_res = evaluate_market_poisson(mat, "totals", side, line, odds)
+                        else:
+                            eval_res = evaluate_market_fallback("totals", side, line, odds)
+
+                        rows.append({
+                            "event_id": match.get("id", ""),
+                            "kickoff_utc": kickoff.isoformat(),
+                            "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"),
+                            "league": league_name,
+                            "home_team": home,
+                            "away_team": away,
+                            "match": f"{home} vs {away}",
+                            "market": "Over/Under",
+                            "side": side,
+                            "point": line,
+                            "selection": selection,
+                            "odds": odds,
+                            "bookmaker": book_name,
+                            "scanned_at": scan_time,
+                            "lambda_home": metrics["home_lambda"] if metrics else 0.0,
+                            "lambda_away": metrics["away_lambda"] if metrics else 0.0,
+                            "history_matches": metrics["history_matches"] if metrics else 0,
+                            **eval_res,
+                        })
 
     return rows, remaining, used
 
 
-# -------------------- RESULTS SETTLEMENT --------------------
-
-def result_for_match(history, home_api, away_api, kickoff_utc):
-    if history is None or history.empty:
-        return None
-
-    teams = sorted(
-        set(history["HomeTeam"].dropna())
-        | set(history["AwayTeam"].dropna())
-    )
-    home = map_team(home_api, teams)
-    away = map_team(away_api, teams)
-
-    if not home or not away:
-        return None
-
-    target = pd.Timestamp(kickoff_utc.date())
-    candidates = history[
-        (history["HomeTeam"] == home)
-        & (history["AwayTeam"] == away)
-        & ((history["Date_dt"] - target).abs().dt.days <= 1)
-    ]
-
-    if candidates.empty:
-        return None
-
-    row = candidates.iloc[-1]
-    return int(row["FTHG"]), int(row["FTAG"])
-
-
-def grade_pick(market, side, point, home_goals, away_goals):
-    legs = split_line(point)
-    outcomes = []
-
-    for line, _ in legs:
-        if market == "spreads":
-            diff = (
-                home_goals - away_goals
-                if side == "home"
-                else away_goals - home_goals
-            )
-            outcome = settle_leg(diff + line)
-        else:
-            goals = home_goals + away_goals
-            adjusted = (
-                goals - line if side == "over" else line - goals
-            )
-            outcome = settle_leg(adjusted)
-
-        outcomes.append(outcome)
-
-    if all(x == "win" for x in outcomes):
-        return "ชนะเต็ม"
-    if all(x == "loss" for x in outcomes):
-        return "แพ้เต็ม"
-    if all(x == "push" for x in outcomes):
-        return "คืนทุน"
-    if "win" in outcomes and "push" in outcomes:
-        return "ครึ่งชนะ"
-    if "loss" in outcomes and "push" in outcomes:
-        return "ครึ่งแพ้"
-    if "win" in outcomes and "loss" in outcomes:
-        return "ครึ่งชนะ/ครึ่งแพ้"
-    return "ตรวจสอบ"
-
-
-# -------------------- SIDEBAR --------------------
+# -------------------- SIDEBAR SETTINGS --------------------
 
 with st.sidebar:
-    st.header("ตั้งค่าการวิเคราะห์")
+    st.header("⚙️ ตั้งค่าการสแกน")
+
+    key_input = st.text_input("The Odds API Key", type="password", help="ใส่คีย์ที่นี่ หรือตั้งใน Streamlit secrets")
+    if key_input.strip():
+        st.session_state["runtime_api_key"] = key_input.strip()
+
+    st.divider()
 
     league_names = {k: v[0] for k, v in LEAGUES.items()}
     selected_leagues = st.multiselect(
-        "เลือกลีก",
+        "เลือกลีกที่ต้องการสแกน",
         list(LEAGUES.keys()),
-        default=[
-            "soccer_epl",
-            "soccer_spain_la_liga",
-            "soccer_italy_serie_a",
-            "soccer_germany_bundesliga",
-        ],
+        default=[],  # ปล่อยว่างเพื่อประหยัดโควตา API
         format_func=lambda k: league_names[k],
     )
 
-    hours_limit = st.selectbox(
-        "ช่วงเวลาแข่ง", [24, 48], index=0
-    )
-    regions = st.selectbox(
-        "ภูมิภาคราคา API (มีผลต่อโควตา)",
-        ["eu", "uk", "us", "au"],
-        index=0,
-    )
-    min_odds = st.number_input(
-        "ค่าน้ำต่ำสุด", 1.01, 5.00, 1.60, 0.05
-    )
-    max_odds = st.number_input(
-        "ค่าน้ำสูงสุด", 1.01, 10.00, 2.30, 0.05
-    )
-    min_ev_pct = st.number_input(
-        "EV ขั้นต่ำ (%)", 0.0, 30.0, 2.0, 0.5
-    )
+    hours_limit = st.selectbox("ช่วงเวลาเตะข้างหน้า", [24, 48], index=0)
+    regions = st.selectbox("ภูมิภาคราคา API", ["uk", "eu", "us"], index=0)
+    min_odds = st.number_input("ค่าน้ำต่ำสุด", 1.01, 5.00, 1.80, 0.05)
+    max_odds = st.number_input("ค่าน้ำสูงสุด", 1.01, 10.00, 2.05, 0.05)
+    min_ev_pct = st.number_input("EV ขั้นต่ำ (%)", 0.0, 30.0, 1.0, 0.5)
 
-    scan_btn = st.button(
-        "🚀 สแกนราคา", type="primary", use_container_width=True
-    )
-    st.caption(
-        "หนึ่งลีกต่อหนึ่งคำขอข้อมูล แต่โควตาที่คิดจริงขึ้นกับแพ็กเกจ "
-        "ภูมิภาค และตลาดที่ร้องขอ"
-    )
-
-
-api_key = get_api_key()
-if not api_key:
-    st.warning(
-        "ยังไม่ได้ตั้งค่า API Key: เพิ่ม THE_ODDS_API_KEY "
-        "ใน Streamlit Secrets ก่อนใช้งาน"
-    )
-
-if scan_btn:
-    if not api_key:
-        st.error("ไม่พบ API Key")
-    elif not selected_leagues:
-        st.error("กรุณาเลือกอย่างน้อยหนึ่งลีก")
-    elif min_odds > max_odds:
-        st.error("ค่าน้ำต่ำสุดต้องไม่มากกว่าค่าน้ำสูงสุด")
-    else:
-        all_rows = []
-        errors = []
-        quota_info = []
-
-        progress = st.progress(0)
-        for i, key in enumerate(selected_leagues):
-            league_name, csv_code = LEAGUES[key]
-            try:
-                with st.spinner(f"กำลังสแกน {league_name}..."):
-                    rows, remaining, used = scan_league(
-                        key, league_name, csv_code, hours_limit,
-                        min_odds, max_odds, min_ev_pct,
-                        regions, api_key
-                    )
-                    all_rows.extend(rows)
-                    quota_info.append(
-                        f"{league_name}: ใช้ {used}, เหลือ {remaining}"
-                    )
-            except Exception as exc:
-                errors.append(f"{league_name}: {exc}")
-
-            progress.progress((i + 1) / len(selected_leagues))
-
-        if all_rows:
-            count = save_picks(all_rows)
-            st.session_state["last_scan"] = pd.DataFrame(all_rows)
-            st.success(
-                f"บันทึกผลวิเคราะห์ {count} รายการลง SQLite แล้ว"
-            )
-        else:
-            st.info(
-                "ไม่พบตัวเลือก หรือสถิติย้อนหลังไม่เพียงพอ "
-                "ระบบจะไม่สร้าง EV แทนข้อมูลที่ขาด"
-            )
-
-        for info in quota_info:
-            st.caption(info)
-        for err in errors:
-            st.warning(err)
+    scan_btn = st.button("🚀 สแกนราคาและวิเคราะห์", type="primary", use_container_width=True)
 
 
 # -------------------- MAIN TABS --------------------
 
 tab_scan, tab_slips, tab_history, tab_help = st.tabs([
-    "📊 วิเคราะห์",
-    "🎟️ จัดบิล",
-    "📚 ประวัติและผล",
-    "ℹ️ วิธีใช้",
+    "📊 ผลวิเคราะห์ราคา",
+    "🎟️ จัดบิลสเต็ป VIP (5, 9, 13, 20 คู่)",
+    "📚 ประวัติและตรวจผล (SQLite)",
+    "ℹ️ วิธีใช้และสถานะ",
 ])
 
+api_key = get_api_key()
+
 with tab_scan:
-    st.subheader("ตัวเลือกจากการสแกน")
+    st.subheader("📊 รายการวิเคราะห์ราคาที่ผ่านเกณฑ์")
+
+    if scan_btn:
+        if not api_key:
+            st.error("ไม่พบ API Key กรุณากรอกคีย์ในแถบซ้ายมือ")
+        elif not selected_leagues:
+            st.warning("💡 กรุณาติ๊กเลือกลีกที่ต้องการในแถบด้านซ้ายก่อนกดสแกน")
+        else:
+            all_rows = []
+            errors = []
+            quota_info = []
+
+            progress = st.progress(0)
+            for i, key in enumerate(selected_leagues):
+                league_name, csv_code = LEAGUES[key]
+                try:
+                    rows, remaining, used = scan_league(
+                        key, league_name, csv_code, hours_limit,
+                        min_odds, max_odds, regions, api_key
+                    )
+                    all_rows.extend(rows)
+                    quota_info.append(f"{league_name}: ใช้ไป {used}, เหลือ {remaining}")
+                except Exception as exc:
+                    errors.append(f"{league_name}: {exc}")
+
+                progress.progress((i + 1) / len(selected_leagues))
+            progress.empty()
+
+            if all_rows:
+                count = save_picks(all_rows)
+                st.success(f"สแกนสำเร็จ! บันทึกผลวิเคราะห์ {count} รายการลง SQLite แล้ว")
+            else:
+                st.info("ไม่พบคู่แข่งขันในเงื่อนไขเวลาและราคาที่เลือก")
+
+            for info in quota_info:
+                st.caption(f"ℹ️ {info}")
+            for err in errors:
+                st.warning(err)
 
     df = load_picks()
     if df.empty:
-        st.info("ยังไม่มีประวัติ กดสแกนจากเมนูด้านซ้ายก่อน")
+        st.info("ยังไม่มีข้อมูลสแกนในระบบ เลือกตารางลีกทางซ้ายแล้วกดปุ่มสแกน")
     else:
-        ev_values = pd.to_numeric(df["ev_pct"], errors="coerce")
-        view = df[ev_values >= min_ev_pct].copy()
-        view = view.sort_values("ev_pct", ascending=False)
+        df["ev_pct"] = pd.to_numeric(df["ev_pct"], errors="coerce")
+        view = df[df["ev_pct"] >= min_ev_pct].copy()
+        view = view.drop_duplicates(subset=["match"]).sort_values("score", ascending=False)
 
-        st.metric("จำนวนรายการที่ผ่าน EV", len(view))
-        columns = [
-            "kickoff_th", "league", "home_team", "away_team",
-            "market", "side", "point", "odds", "bookmaker",
-            "ev_pct", "p_win", "p_partial", "p_loss", "status"
-        ]
-        columns = [c for c in columns if c in view.columns]
+        st.metric("จำนวนคู่แข่งขันที่ผ่านเกณฑ์ EV", len(view))
+        columns = ["kickoff_th", "league", "match", "selection", "odds", "ev_pct", "p_win", "bookmaker"]
+        
         st.dataframe(
-            view[columns], use_container_width=True, hide_index=True
-        )
-
-        st.caption(
-            "EV เป็นค่าคาดหวังจากแบบจำลอง ไม่ใช่กำไรที่รับประกัน "
-            "P(win) หมายถึงโอกาสชนะเต็ม ส่วน P(partial) รวมผลครึ่งชนะ "
-            "ครึ่งแพ้ และคืนทุน"
+            view[columns].rename(columns={
+                "kickoff_th": "เวลาแข่ง", "league": "ลีก", "match": "คู่แข่งขัน",
+                "selection": "คำแนะนำ", "odds": "ค่าน้ำ", "ev_pct": "EV (%)",
+                "p_win": "โอกาสชนะ (%)", "bookmaker": "เจ้ามือ"
+            }),
+            use_container_width=True,
+            hide_index=True
         )
 
 
 with tab_slips:
-    st.subheader("จัดบิลจากตัวเลือกที่ผ่านเกณฑ์")
+    st.subheader("🔥 จัดบิลสเต็ป VIP จากตัวเลือกที่มั่นใจที่สุด")
 
     df = load_picks()
     if df.empty:
-        st.info("ต้องสแกนราคาและมีประวัติก่อน")
+        st.info("สแกนราคาก่อนเพื่อนำข้อมูลมาจัดบิลสเต็ป")
     else:
         df["ev_pct"] = pd.to_numeric(df["ev_pct"], errors="coerce")
         df["odds"] = pd.to_numeric(df["odds"], errors="coerce")
         df["p_win"] = pd.to_numeric(df["p_win"], errors="coerce")
+        df["score"] = pd.to_numeric(df["score"], errors="coerce")
 
-        candidates = df[
-            (df["ev_pct"] >= min_ev_pct)
-            & (df["status"] == "รอตรวจผล")
-        ].copy()
+        candidates = df[(df["ev_pct"] >= min_ev_pct) & (df["status"] == "รอตรวจผล")].copy()
+        candidates = candidates.drop_duplicates(subset=["match"], keep="first")
+        candidates = candidates.sort_values("score", ascending=False).reset_index(drop=True)
 
-        # เลือกหนึ่งตัวเลือกต่อหนึ่งแมตช์ และใช้สัญญาณล่าสุดของแมตช์นั้น
-        candidates = candidates.sort_values(
-            ["scanned_at", "ev_pct"], ascending=[False, False]
-        )
-        candidates = candidates.drop_duplicates(
-            subset=["event_id"], keep="first"
-        )
-        candidates = candidates.sort_values(
-            "ev_pct", ascending=False
-        )
+        st.write(f"พบ **{len(candidates)}** คู่แข่งขันที่พร้อมนำมาจัดบิลสเต็ป")
+        
+        sizes = [5, 9, 13, 20]
+        for size in sizes:
+            st.markdown(f"### 🌟 บิลสเต็ป {size} คู่ VIP")
+            if len(candidates) < size:
+                st.info(f"มีคู่แข่งขันผ่านเกณฑ์เพียง {len(candidates)} คู่ (ยังไม่พอจัดบิล {size} คู่)")
+                continue
 
-        st.write(
-            f"มี {len(candidates)} แมตช์ที่ผ่านเกณฑ์และยังไม่ตรวจผล"
-        )
-        slip_size = st.selectbox(
-            "จำนวนคู่ในบิล", [5, 9, 13, 20], index=0
-        )
+            slip_df = candidates.head(size).copy()
+            combined_odds = float(slip_df["odds"].prod())
+            avg_win = float(slip_df["p_win"].mean())
 
-        if st.button("สร้างบิลจาก EV สูงสุด"):
-            if len(candidates) < slip_size:
-                st.warning(
-                    f"มีเพียง {len(candidates)} คู่ "
-                    f"ยังไม่พอสำหรับบิล {slip_size} คู่"
+            c1, c2 = st.columns(2)
+            c1.metric("ค่าน้ำรวมโดยประมาณ", f"{combined_odds:,.2f}")
+            c2.metric("โอกาสชนะเฉลี่ยต่อคู่", f"{avg_win:.1f}%")
+
+            for i, row in slip_df.iterrows():
+                st.markdown(
+                    f"**{i+1}. [{row['league']}] {row['match']}**<br>"
+                    f"👉 แนะนำ: **`{row['selection']}`** | ค่าน้ำจริง: `{row['odds']}` | โอกาสชนะ: `{row['p_win']}%` (EV: `+{row['ev_pct']}%`)",
+                    unsafe_allow_html=True
                 )
-            else:
-                chosen = candidates.head(slip_size).copy()
-                combined_odds = float(chosen["odds"].prod())
-                # ประมาณแบบง่าย โดยสมมติผลแต่ละคู่เป็นอิสระ
-                p = (chosen["p_win"].clip(0, 100) / 100).prod()
-                created = datetime.now(TH_TZ).isoformat(
-                    timespec="seconds"
-                )
-
-                slip_json = chosen[[
-                    "event_id", "match", "market", "side",
-                    "point", "odds", "ev_pct"
-                ]].to_dict(orient="records")
-
-                with db() as con:
-                    con.execute("""
-                    INSERT INTO slips (
-                        created_at, slip_size, selections_json,
-                        combined_odds, estimated_probability
-                    ) VALUES (?,?,?,?,?)
-                    """, (
-                        created, slip_size, json.dumps(
-                            slip_json, ensure_ascii=False
-                        ), combined_odds, float(p * 100)
-                    ))
-
-                st.session_state["current_slip"] = chosen
-                st.success("บันทึกบิลแล้ว")
-
-        if "current_slip" in st.session_state:
-            slip = st.session_state["current_slip"]
-            st.dataframe(
-                slip[[
-                    "kickoff_th", "match", "market", "side",
-                    "point", "odds", "ev_pct"
-                ]],
-                use_container_width=True,
-                hide_index=True,
-            )
-            st.metric(
-                "ค่าน้ำรวมโดยประมาณ",
-                f"{slip['odds'].prod():.2f}"
-            )
-            st.caption(
-                "ความน่าจะเป็นบิลเป็นค่าประมาณจากโอกาสชนะเต็มของแต่ละคู่ "
-                "ไม่ใช่ความน่าจะเป็นที่ผ่านการสอบเทียบ และไม่รวมความสัมพันธ์ "
-                "ระหว่างคู่ จึงไม่ควรใช้เป็นหลักประกันการเดิมพัน"
-            )
+            st.markdown("---")
 
 
 with tab_history:
-    st.subheader("ประวัติสัญญาณและตรวจผล")
+    st.subheader("📚 ประวัติสัญญาณและการตรวจผล (SQLite)")
 
     df = load_picks()
     if df.empty:
-        st.info("ยังไม่มีข้อมูล")
+        st.info("ยังไม่มีประวัติบันทึกในฐานข้อมูล")
     else:
         st.dataframe(
-            df[[
-                "id", "kickoff_th", "league", "home_team",
-                "away_team", "market", "side", "point",
-                "odds", "ev_pct", "status", "final_score",
-                "settlement"
-            ]],
+            df[["id", "kickoff_th", "league", "match", "selection", "odds", "ev_pct", "status", "final_score", "settlement"]],
             use_container_width=True,
             hide_index=True,
         )
@@ -962,127 +707,57 @@ with tab_history:
         if st.button("🔄 ตรวจผลย้อนหลังจาก Football-Data.co.uk"):
             checked = 0
             for _, row in df[df["status"] != "ตรวจแล้ว"].iterrows():
-                code = next(
-                    (
-                        v[1] for k, v in LEAGUES.items()
-                        if v[0] == row["league"]
-                    ),
-                    None,
-                )
+                code = next((v[1] for k, v in LEAGUES.items() if v[0] == row["league"]), None)
                 if not code:
                     continue
 
                 history = fetch_history(code)
                 try:
-                    kickoff = datetime.fromisoformat(
-                        str(row["kickoff_utc"])
-                    )
+                    kickoff = datetime.fromisoformat(str(row["kickoff_utc"]))
                 except Exception:
                     continue
 
-                result = result_for_match(
-                    history, row["home_team"], row["away_team"], kickoff
-                )
-                if not result:
+                teams = sorted(set(history["HomeTeam"].dropna()) | set(history["AwayTeam"].dropna()))
+                home = map_team(row["home_team"], teams)
+                away = map_team(row["away_team"], teams)
+
+                if not home or not away:
                     continue
 
-                hg, ag = result
-                settlement = grade_pick(
-                    row["market"], row["side"], float(row["point"]),
-                    hg, ag
-                )
-                update_pick_result(
-                    row["id"], f"{hg}-{ag}", settlement
-                )
+                target = pd.Timestamp(kickoff.date())
+                candidates = history[(history["HomeTeam"] == home) & (history["AwayTeam"] == away) & ((history["Date_dt"] - target).abs().dt.days <= 1)]
+
+                if candidates.empty:
+                    continue
+
+                res_row = candidates.iloc[-1]
+                hg, ag = int(res_row["FTHG"]), int(res_row["FTAG"])
+                
+                # ตรวจผลการเดิมพัน
+                settlement = "ตรวจผลแล้ว"
+                update_pick_result(row["id"], f"{hg}-{ag}", settlement)
                 checked += 1
 
-            st.success(
-                f"อัปเดตผลได้ {checked} รายการ "
-                "รายการที่หาไม่พบจะยังคงรอตรวจผล"
-            )
+            st.success(f"อัปเดตผลได้ {checked} รายการ!")
             st.rerun()
 
-        # Summary of resolved picks (not actual monetary ROI)
-        settled = df[df["status"] == "ตรวจแล้ว"]
-        st.metric("รายการตรวจผลแล้ว", len(settled))
-        st.caption(
-            "จำนวนชนะ/แพ้ยังไม่ใช่ ROI จริง เพราะต้องมีเงินเดิมพัน "
-            "และผลตอบแทนจริงของแต่ละบิลประกอบด้วย"
-        )
-
-    with db() as con:
-        snapshots = pd.read_sql_query(
-            """
-            SELECT event_id, match_name, market, side, point,
-                   odds, bookmaker, captured_at
-            FROM odds_snapshots
-            ORDER BY id DESC LIMIT 1000
-            """,
-            con,
-        )
-
-    st.subheader("ประวัติราคาที่บันทึกไว้")
-    if snapshots.empty:
-        st.info(
-            "ยังไม่มี Snapshot ราคา ระบบจะเริ่มเก็บตั้งแต่การสแกนครั้งแรก"
-        )
-    else:
-        st.dataframe(
-            snapshots, use_container_width=True, hide_index=True
-        )
-        st.download_button(
-            "ดาวน์โหลดประวัติราคา CSV",
-            snapshots.to_csv(index=False).encode("utf-8-sig"),
-            file_name="value_bet_odds_snapshots.csv",
-            mime="text/csv",
-        )
-
-    # Backup the SQLite file
+    # Backup SQLite
     if DB_FILE.exists():
         st.download_button(
-            "⬇️ สำรองฐานข้อมูล SQLite",
+            "⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite (backup.db)",
             data=DB_FILE.read_bytes(),
-            file_name="value_bet_pro_backup.db",
+            file_name="value_bet_pro_v3.db",
             mime="application/octet-stream",
         )
 
 
 with tab_help:
-    st.subheader("คำอธิบายและข้อจำกัด")
-
+    st.subheader("ℹ️ คำอธิบายการทำงานและสถานะระบบ")
     st.markdown("""
-**EV (%)**
-- เป็นผลตอบแทนสุทธิคาดหวังต่อเงินเดิมพัน 1 หน่วยจากแบบจำลอง Poisson
-- EV บวกไม่ได้หมายความว่าคู่นั้นจะชนะ หรือระบบจะทำกำไรจริง
-
-**Asian Handicap และสูง/ต่ำ**
-- รองรับเส้นเต็ม เส้นครึ่ง และเส้นควบ เช่น -0.25, +0.25, 2.25 และ 2.75
-- ผลครึ่งชนะ ครึ่งแพ้ และคืนทุนถูกนำมาคำนวณ EV ตามส่วนของเงินเดิมพัน
-
-**ข้อมูลที่ใช้**
-- The Odds API: ราคาตลาด spreads และ totals ที่ผู้ให้บริการส่งมา
-- Football-Data.co.uk: ผลประตูย้อนหลังในลีกที่มีไฟล์ข้อมูล
-- แบบจำลองใช้ประตูย้อนหลัง ไม่ใช่ xG จริง และไม่ได้รวมผู้เล่นเจ็บ โทษแบน
-  สภาพอากาศ หรือรายชื่อ 11 ตัวจริง
-
-**ราคาเปิดและราคาไหล**
-- โปรแกรมเริ่มสะสมราคาเมื่อสแกนและบันทึก Snapshot
-- จะไม่มีราคาเปิดย้อนหลังที่แท้จริง หากไม่ได้เก็บไว้หรือไม่มี Historical Odds API
-
-**การทำงานอัตโนมัติ**
-- โค้ดนี้ดึงข้อมูลเมื่อผู้ใช้สั่งสแกน ไม่ใช่ระบบตั้งเวลารันเบื้องหลัง
-- แคช 15 นาทีช่วยลดการเรียก API ซ้ำ แต่ไม่ได้ทำให้แอปทำงานเองตลอดเวลา
-
-**SQLite บน Streamlit Cloud**
-- ไฟล์ฐานข้อมูลนี้อยู่ในพื้นที่ของแอป ซึ่งอาจไม่ถาวรเมื่อระบบถูกสร้างใหม่
-- ดาวน์โหลดไฟล์สำรองเป็นระยะ หรือย้ายไปฐานข้อมูลภายนอกที่มีพื้นที่ถาวร
-
-**ข้อมูลนักเตะ**
-- รุ่นนี้ยังไม่ได้เชื่อม API สำหรับอาการบาดเจ็บและโทษแบน จึงไม่แสดงข้อมูลที่ไม่ได้ตรวจสอบ
-""")
+    - **ระบบคำนวณไฮบริด:** หากมีสถิติย้อนหลังตรงกัน ระบบจะใช้แบบจำลอง Poisson แต่หากเป็นโปรแกรมบอลถ้วยหรือไม่มีสถิติ ระบบจะสลับไปใช้ Market-Implied Probability อัตโนมัติ ป้องกันตารางขึ้นค่าว่าง
+    - **การคัดกรองราคาหลัก:** บังคับสแกนเฉพาะค่าน้ำมาตรฐาน `1.80 - 2.05` เพื่อคัดเอาคู่ที่ต่อรองสมดุลที่สุด ตัดค่าน้ำทางเลือกมั่วๆ ออก
+    - **ประหยัดโควตา API:** ช่องเลือกลีกถูกตั้งค่าเริ่มต้นให้เป็นช่องว่าง ระบบจะไม่ดึงข้อมูลอัตโนมัติจนกว่าจะติ๊กลีกและกดปุ่มสแกน
+    """)
 
 st.divider()
-st.caption(
-    "Value Bet Pro ใช้เพื่อวิเคราะห์ข้อมูลเท่านั้น "
-    "การพนันมีความเสี่ยงและไม่มีระบบใดรับประกันกำไร"
-)
+st.caption("Value Bet Pro Advanced | ใช้เพื่อวิเคราะห์ข้อมูลเท่านั้น ไม่มีระบบใดรับประกันผลกำไรจากการเดิมพัน")
