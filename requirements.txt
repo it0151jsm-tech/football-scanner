@@ -1,5 +1,3 @@
-streamlit
-pandas
-requests
-numpy
-understat
+streamlit>=1.36,<2.0
+pandas>=2.0,<3.0
+requests>=2.31,<3.0
