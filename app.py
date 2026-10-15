@@ -35,7 +35,7 @@ TIMEOUT = 25
 DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro_v3.db"))
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-# 📌 รวมรายชื่อลีกทั้งหมด (เพิ่ม เซเรียบี อิตาลี และลีกเอเชีย/บราซิลแล้ว)
+# 📌 รวมรายชื่อลีกทั้งหมด (เพิ่ม ยูฟ่า คอนเฟอเรนซ์ลีก และ ซาอุดีอาระเบีย โปรลีก แล้ว)
 LEAGUES = {
     "soccer_epl": ("พรีเมียร์ลีก อังกฤษ", "E0"),
     "soccer_england_championship": ("แชมเปียนชิพ อังกฤษ", "E1"),
@@ -50,6 +50,8 @@ LEAGUES = {
     "soccer_portugal_primeira_liga": ("โปรตุเกส พรีเมราลีกา", "P1"),
     "soccer_uefa_champs_league": ("ยูฟ่า แชมเปียนส์ลีก", None),
     "soccer_uefa_europa_league": ("ยูฟ่า ยูโรปาลีก", None),
+    "soccer_uefa_europa_conference_league": ("ยูฟ่า คอนเฟอเรนซ์ลีก", None),
+    "soccer_saudi_pro_league": ("ซาอุดีอาระเบีย โปรลีก", None),
     "soccer_usa_mls": ("เมเจอร์ลีก ซอคเกอร์ (MLS)", None),
     "soccer_thailand_thai_league": ("ไทยลีก", None),
     "soccer_japan_j_league": ("เจลีก ญี่ปุ่น", None),
