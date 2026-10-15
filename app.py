@@ -12,8 +12,7 @@ import requests
 import streamlit as st
 
 # ============================================================
-# VALUE BET PRO — ADVANCED HYBRID ENGINE
-# Streamlit + The Odds API + Football-Data.co.uk + SQLite
+# VALUE BET PRO — ADVANCED HYBRID ENGINE (ALL LEAGUES)
 # ============================================================
 
 st.set_page_config(
@@ -33,10 +32,10 @@ TH_TZ = timezone(timedelta(hours=7))
 UTC = timezone.utc
 TIMEOUT = 25
 
-# ใช้ไฟล์ DB เวอร์ชันใหม่ป้องกันปัญหา Schema Conflict
 DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro_v3.db"))
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
+# 📌 รวมรายชื่อลีกทั้งหมด (เพิ่ม เซเรียบี อิตาลี และลีกเอเชีย/บราซิลแล้ว)
 LEAGUES = {
     "soccer_epl": ("พรีเมียร์ลีก อังกฤษ", "E0"),
     "soccer_england_championship": ("แชมเปียนชิพ อังกฤษ", "E1"),
@@ -44,6 +43,7 @@ LEAGUES = {
     "soccer_england_league_two": ("ลีกทู อังกฤษ", "E3"),
     "soccer_spain_la_liga": ("ลาลีกา สเปน", "SP1"),
     "soccer_italy_serie_a": ("เซเรียอา อิตาลี", "I1"),
+    "soccer_italy_serie_b": ("เซเรียบี อิตาลี", "I2"),
     "soccer_germany_bundesliga": ("บุนเดสลีกา เยอรมนี", "D1"),
     "soccer_france_ligue_one": ("ลีกเอิง ฝรั่งเศส", "F1"),
     "soccer_netherlands_eredivisie": ("เอเรดิวิซี เนเธอร์แลนด์", "N1"),
@@ -51,6 +51,10 @@ LEAGUES = {
     "soccer_uefa_champs_league": ("ยูฟ่า แชมเปียนส์ลีก", None),
     "soccer_uefa_europa_league": ("ยูฟ่า ยูโรปาลีก", None),
     "soccer_usa_mls": ("เมเจอร์ลีก ซอคเกอร์ (MLS)", None),
+    "soccer_thailand_thai_league": ("ไทยลีก", None),
+    "soccer_japan_j_league": ("เจลีก ญี่ปุ่น", None),
+    "soccer_korea_k_league_1": ("เคลีก เกาหลีใต้", None),
+    "soccer_brazil_campeonato": ("บราซิล ซีรีเอ", None),
 }
 
 
@@ -307,8 +311,8 @@ def estimate_goals(df, home_api, away_api, kickoff):
 
     h_scored = float(h_home["FTHG"].mean())
     h_conceded = float(h_home["FTAG"].mean())
-    a_scored = float(a_away["FTAG"].mean())
-    a_conceded = float(a_away["FTAG"].mean())
+    a_scored = float(a_away["FTHG"].mean())
+    a_conceded = float(a_away["FTHG"].mean())
 
     home_attack = (h_scored + league_home * 3) / 4 / league_home
     away_defence = (a_conceded + league_home * 3) / 4 / league_home
@@ -404,7 +408,6 @@ def evaluate_market_poisson(matrix, market, side, point, odds):
 
 
 def evaluate_market_fallback(market, side, point, odds):
-    """Fallback Model: ใช้คำนวณทันทีถ้าไม่มีสถิติย้อนหลัง"""
     implied_prob = 1.0 / odds
     model_prob = min(max(implied_prob * 1.03, 0.48), 0.65) if market == "spreads" else min(max(implied_prob * 1.02, 0.48), 0.62)
     ev_pct = ((model_prob * odds) - 1.0) * 100
@@ -460,7 +463,6 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         odds = float(outcome.get("price", 0))
                         line = float(outcome.get("point", 0))
 
-                        # ล็อกราคาหลักมาตรฐาน 1.80 - 2.05
                         if not (min_odds <= odds <= max_odds):
                             continue
 
@@ -733,7 +735,6 @@ with tab_history:
                 res_row = candidates.iloc[-1]
                 hg, ag = int(res_row["FTHG"]), int(res_row["FTAG"])
                 
-                # ตรวจผลการเดิมพัน
                 settlement = "ตรวจผลแล้ว"
                 update_pick_result(row["id"], f"{hg}-{ag}", settlement)
                 checked += 1
@@ -741,7 +742,6 @@ with tab_history:
             st.success(f"อัปเดตผลได้ {checked} รายการ!")
             st.rerun()
 
-    # Backup SQLite
     if DB_FILE.exists():
         st.download_button(
             "⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite (backup.db)",
