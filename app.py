@@ -18,7 +18,7 @@ import streamlit as st
 # ============================================================
 st.set_page_config(page_title="Value Bet Pro", page_icon="⚽", layout="wide")
 st.title("⚽ Value Bet Pro — xG Edition")
-st.caption("ราคาไหล + xG/xGA + ฟอร์มย้อนหลัง | แยก EV ออกจากสัญญาณฟอร์มอย่างชัดเจน")
+st.caption("ราคาไหล + xG/xGA + ฟอร์มย้อนหลัง + H2H ประกอบ | H2H ไม่เปลี่ยน EV")
 
 API_BASE = "https://api.the-odds-api.com/v4"
 TH_TZ = timezone(timedelta(hours=7))
@@ -106,7 +106,8 @@ def init_db():
             model_status TEXT DEFAULT 'unknown', profit_units REAL, outcome_binary INTEGER,
             home_context_xg REAL, home_context_xga REAL, away_context_xg REAL, away_context_xga REAL,
             home_context_matches INTEGER, away_context_matches INTEGER, context_status TEXT,
-            form_rate REAL, form_sample INTEGER, form_signal TEXT, form_summary TEXT, form_method TEXT
+            form_rate REAL, form_sample INTEGER, form_signal TEXT, form_summary TEXT, form_method TEXT,
+            h2h_summary TEXT, h2h_detail TEXT, h2h_sample INTEGER
         )""")
         con.execute("""CREATE TABLE IF NOT EXISTS odds_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT, match_name TEXT,
@@ -139,6 +140,9 @@ def init_db():
             "form_signal": "TEXT",
             "form_summary": "TEXT",
             "form_method": "TEXT",
+            "h2h_summary": "TEXT",
+            "h2h_detail": "TEXT",
+            "h2h_sample": "INTEGER",
         }
         for name, decl in migrations.items():
             if name not in existing:
@@ -162,7 +166,7 @@ def save_picks(rows, snapshot_rows=None):
         "ev_pct", "p_win", "p_partial", "p_loss", "score", "model_status", "home_context_xg",
         "home_context_xga", "away_context_xg", "away_context_xga", "home_context_matches",
         "away_context_matches", "context_status", "form_rate", "form_sample", "form_signal",
-        "form_summary", "form_method"
+        "form_summary", "form_method", "h2h_summary", "h2h_detail", "h2h_sample"
     ]
     saved = 0
     with db() as con:
@@ -266,6 +270,67 @@ def fetch_history(csv_code):
         return pd.DataFrame()
     result = pd.concat(frames, ignore_index=True).sort_values("Date_dt")
     return result.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last").reset_index(drop=True)
+
+
+def get_h2h_history(score_history, home_api, away_api, kickoff, limit=5):
+    """Display-only H2H from the selected league's Football-Data results.
+    Never feeds H2H into xG, Poisson, EV, or recommendation ranking.
+    Only completed matches strictly before the fixture date are considered.
+    """
+    unavailable = {
+        "h2h_summary": "ไม่มีข้อมูล H2H จากแหล่งข้อมูลลีกนี้",
+        "h2h_detail": "",
+        "h2h_sample": 0,
+    }
+    if score_history is None or score_history.empty:
+        return unavailable
+    required = {"Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
+    if not required.issubset(score_history.columns):
+        return unavailable
+    try:
+        candidates = set(score_history["HomeTeam"].dropna().astype(str)) | set(score_history["AwayTeam"].dropna().astype(str))
+        mapped_home = map_team(home_api, list(candidates))
+        mapped_away = map_team(away_api, list(candidates))
+        if not mapped_home or not mapped_away or mapped_home == mapped_away:
+            return unavailable
+        cutoff = pd.Timestamp(kickoff.date())
+        hist = score_history.copy()
+        hist = hist[hist["Date_dt"] < cutoff]
+        meetings = hist[
+            ((hist["HomeTeam"] == mapped_home) & (hist["AwayTeam"] == mapped_away)) |
+            ((hist["HomeTeam"] == mapped_away) & (hist["AwayTeam"] == mapped_home))
+        ].copy().sort_values("Date_dt", ascending=False).head(limit)
+        if meetings.empty:
+            return {"h2h_summary": "ไม่พบ H2H ในข้อมูลย้อนหลัง", "h2h_detail": "", "h2h_sample": 0}
+        home_wins = draws = away_wins = total_goals = 0
+        details = []
+        for _, row in meetings.iterrows():
+            hg, ag = int(row["FTHG"]), int(row["FTAG"])
+            historical_home = str(row["HomeTeam"])
+            if historical_home == mapped_home:
+                fixture_hg, fixture_ag = hg, ag
+                venue = "เหย้า"
+            else:
+                fixture_hg, fixture_ag = ag, hg
+                venue = "เยือน"
+            total_goals += hg + ag
+            if fixture_hg > fixture_ag:
+                home_wins += 1
+                result_text = "ทีมเหย้าของคู่นี้ชนะ"
+            elif fixture_hg < fixture_ag:
+                away_wins += 1
+                result_text = "ทีมเยือนของคู่นี้ชนะ"
+            else:
+                draws += 1
+                result_text = "เสมอ"
+            date_text = pd.Timestamp(row["Date_dt"]).strftime("%d/%m/%Y")
+            details.append(f"{date_text} | {row['HomeTeam']} {hg}-{ag} {row['AwayTeam']} | มุมมองทีมปัจจุบัน: {result_text} (ทีมเหย้าปัจจุบันเล่นเป็น {venue} ในเกมนั้น)")
+        n = len(meetings)
+        avg_goals = total_goals / n
+        summary = f"{n} นัด: ทีมเหย้าชนะ {home_wins} | เสมอ {draws} | ทีมเยือนชนะ {away_wins} | ประตูรวมเฉลี่ย {avg_goals:.2f}/นัด"
+        return {"h2h_summary": summary, "h2h_detail": "\n".join(details), "h2h_sample": n}
+    except Exception:
+        return unavailable
 
 
 @st.cache_data(ttl=21600, show_spinner=False)
@@ -634,6 +699,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
             continue
         home, away = match.get("home_team", ""), match.get("away_team", "")
         kickoff_th = kickoff.astimezone(TH_TZ)
+        h2h = get_h2h_history(score_history, home, away, kickoff, limit=5)
         metrics = estimate_goals(history, home, away, kickoff) if not history.empty else None
         context = estimate_domestic_context(domestic_context, home, away, kickoff) if sport_key in EUROPEAN_CUPS else {}
         # EV is intentionally disabled for cups unless genuine cup-specific xG is connected.
@@ -716,6 +782,9 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         "form_signal": form_res["form_signal"],
                         "form_summary": form_res["form_summary"],
                         "form_method": form_res["form_method"],
+                        "h2h_summary": h2h["h2h_summary"],
+                        "h2h_detail": h2h["h2h_detail"],
+                        "h2h_sample": h2h["h2h_sample"],
                     })
     return rows, snapshot_rows, remaining, used
 
@@ -827,8 +896,21 @@ with tab_scan:
         view = view.sort_values(["score", "ev_pct"], ascending=False)
         st.metric("ตัวเลือกที่ผ่าน EV และยังไม่เริ่มแข่ง", len(view))
         if not view.empty:
-            cols = ["kickoff_th", "league", "match", "selection", "odds", "xg_home_avg", "xga_home_avg", "xg_away_avg", "xga_away_avg", "ev_pct", "p_win", "bookmaker", "model_status"]
-            st.dataframe(view[cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"ตัวเลือก", "odds":"ค่าน้ำ", "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย", "xga_away_avg":"เยือน xGA เฉลี่ย", "ev_pct":"EV (%)", "p_win":"ชนะเต็ม (%)", "bookmaker":"เจ้ามือ", "model_status":"แหล่งประเมิน"}), use_container_width=True, hide_index=True)
+            cols = ["kickoff_th", "league", "match", "selection", "odds", "xg_home_avg", "xga_home_avg", "xg_away_avg", "xga_away_avg", "ev_pct", "p_win", "h2h_summary", "bookmaker", "model_status"]
+            st.dataframe(view[cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"ตัวเลือก", "odds":"ค่าน้ำ", "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย", "xga_away_avg":"เยือน xGA เฉลี่ย", "ev_pct":"EV (%)", "p_win":"ชนะเต็ม (%)", "h2h_summary":"H2H 5 นัดล่าสุด (ข้อมูลประกอบเท่านั้น)", "bookmaker":"เจ้ามือ", "model_status":"แหล่งประเมิน"}), use_container_width=True, hide_index=True)
+            with st.expander("ดูรายละเอียด H2H ของคู่ที่แสดง"):
+                h2h_view = view.drop_duplicates(subset=["event_id"])
+                if h2h_view.empty:
+                    st.info("ไม่มีรายละเอียด H2H")
+                else:
+                    for _, hrow in h2h_view.iterrows():
+                        st.markdown(f"**{hrow.get('match', '')}** — {hrow.get('h2h_summary') or 'ไม่มีข้อมูล H2H'}")
+                        detail = hrow.get("h2h_detail")
+                        if isinstance(detail, str) and detail.strip():
+                            st.text(detail)
+                        else:
+                            st.caption("ไม่มีรายการ H2H ที่ตรงกันในแหล่งข้อมูลย้อนหลังของลีกนี้")
+            st.caption("H2H ใช้แสดงข้อมูลประกอบเท่านั้น ไม่ถูกนำไปคำนวณ Poisson, EV หรือจัดอันดับตัวเลือก")
         else:
             st.info("ยังไม่มีตัวเลือกที่ผ่านเกณฑ์จากแบบจำลองที่มีข้อมูลเพียงพอ")
         unsupported = upcoming[upcoming["ev_pct"].isna()]
