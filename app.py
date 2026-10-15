@@ -18,7 +18,7 @@ import streamlit as st
 # ============================================================
 st.set_page_config(page_title="Value Bet Pro", page_icon="⚽", layout="wide")
 st.title("⚽ Value Bet Pro — xG Edition")
-st.caption("ราคาไหล + สถิติย้อนหลัง + xG/xGA | ไม่มี EV หากไม่มีข้อมูลจริงเพียงพอ")
+st.caption("ราคาไหล + xG/xGA + ฟอร์มย้อนหลัง | แยก EV ออกจากสัญญาณฟอร์มอย่างชัดเจน")
 
 API_BASE = "https://api.the-odds-api.com/v4"
 TH_TZ = timezone(timedelta(hours=7))
@@ -105,7 +105,8 @@ def init_db():
             status TEXT DEFAULT 'รอตรวจผล', final_score TEXT DEFAULT '', settlement TEXT DEFAULT '',
             model_status TEXT DEFAULT 'unknown', profit_units REAL, outcome_binary INTEGER,
             home_context_xg REAL, home_context_xga REAL, away_context_xg REAL, away_context_xga REAL,
-            home_context_matches INTEGER, away_context_matches INTEGER, context_status TEXT
+            home_context_matches INTEGER, away_context_matches INTEGER, context_status TEXT,
+            form_rate REAL, form_sample INTEGER, form_signal TEXT, form_summary TEXT, form_method TEXT
         )""")
         con.execute("""CREATE TABLE IF NOT EXISTS odds_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT, match_name TEXT,
@@ -133,6 +134,11 @@ def init_db():
             "home_context_matches": "INTEGER",
             "away_context_matches": "INTEGER",
             "context_status": "TEXT",
+            "form_rate": "REAL",
+            "form_sample": "INTEGER",
+            "form_signal": "TEXT",
+            "form_summary": "TEXT",
+            "form_method": "TEXT",
         }
         for name, decl in migrations.items():
             if name not in existing:
@@ -157,8 +163,9 @@ def save_picks(rows):
                 xg_home_avg,xga_home_avg,xg_away_avg,xga_away_avg,
                 ev_pct,p_win,p_partial,p_loss,score,model_status,
                 home_context_xg,home_context_xga,away_context_xg,away_context_xga,
-                home_context_matches,away_context_matches,context_status
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                home_context_matches,away_context_matches,context_status,
+                form_rate,form_sample,form_signal,form_summary,form_method
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
                 r.get("event_id"), r.get("kickoff_utc"), r.get("kickoff_th"), r.get("league"),
                 r.get("home_team"), r.get("away_team"), r.get("match"), r.get("market"), r.get("side"),
                 r.get("point"), r.get("odds"), r.get("selection"), r.get("bookmaker"), now_text,
@@ -169,7 +176,9 @@ def save_picks(rows):
                 r.get("home_context_xg"), r.get("home_context_xga"),
                 r.get("away_context_xg"), r.get("away_context_xga"),
                 r.get("home_context_matches", 0), r.get("away_context_matches", 0),
-                r.get("context_status", "")
+                r.get("context_status", ""), r.get("form_rate"), r.get("form_sample", 0),
+                r.get("form_signal", "ข้อมูลย้อนหลังไม่พอ"), r.get("form_summary", ""),
+                r.get("form_method", "")
             ))
             # Store every scan as a timestamped observation. Repeated same-price snapshots are useful
             # for seeing that a market was checked, but scan frequency should be controlled by API quota.
@@ -324,8 +333,10 @@ def estimate_domestic_context(df, home_api, away_api, kickoff):
     }
     if df is None or df.empty:
         return empty
-    cutoff = pd.Timestamp(kickoff.astimezone(UTC).replace(tzinfo=None))
-    hist = df[df["Date_dt"] < cutoff].copy()
+    # Football-Data/Understat dates may be date-only; exclude the entire kickoff day
+    # so a later match on the same date cannot leak into a pre-match estimate.
+    cutoff_day = pd.Timestamp(kickoff.astimezone(UTC).date())
+    hist = df[df["Date_dt"].dt.normalize() < cutoff_day].copy()
     if hist.empty:
         return empty
     teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
@@ -375,8 +386,10 @@ def estimate_goals(df, home_api, away_api, kickoff):
     """Estimate expected goals from actual historical xG/xGA only; no goals-only fallback."""
     if df is None or df.empty:
         return None
-    cutoff = pd.Timestamp(kickoff.astimezone(UTC).replace(tzinfo=None))
-    hist = df[df["Date_dt"] < cutoff].copy()
+    # Exclude the entire kickoff date because source match timestamps may be date-only
+    # or may not reliably encode local kickoff times.
+    cutoff_day = pd.Timestamp(kickoff.astimezone(UTC).date())
+    hist = df[df["Date_dt"].dt.normalize() < cutoff_day].copy()
     if hist.empty or not {"xG_home", "xG_away"}.issubset(hist.columns):
         return None
     teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
@@ -417,6 +430,96 @@ def estimate_goals(df, home_api, away_api, kickoff):
         "xg_away_avg": round(float(a_away["xG_away"].mean()), 3),
         "xga_away_avg": round(float(a_away["xG_home"].mean()), 3),
     }
+
+# -------------------- FORM-BASED FALLBACK (NEVER EV) --------------------
+def evaluate_historical_line(goals_for, goals_against, market, side, point):
+    """Score a historical result against today's line as a rough fit indicator.
+    This is NOT historical handicap performance because past prices/lines are unavailable.
+    Returns +1 for profit, 0 for push, -1 for loss, including Asian quarter-line splits.
+    """
+    net = 0.0
+    for line, weight in split_line(point):
+        if market == "spreads":
+            diff = goals_for - goals_against
+            adjusted = diff + line
+        else:
+            total = goals_for + goals_against
+            adjusted = total - line if side == "over" else line - total
+        outcome = settle_leg(adjusted)
+        if outcome == "win":
+            net += weight
+        elif outcome == "loss":
+            net -= weight
+    if net > 1e-9:
+        return 1
+    if net < -1e-9:
+        return -1
+    return 0
+
+
+def estimate_form_signal(df, home_api, away_api, kickoff, market, side, point):
+    """Fallback from historical scores only. Never returns EV or model win probability.
+    Uses up to 5 previous home matches for home side and 5 previous away matches for away side.
+    Excludes the kickoff date entirely to reduce date-only historical data leakage.
+    """
+    result = {
+        "form_rate": None, "form_sample": 0,
+        "form_signal": "ข้อมูลย้อนหลังไม่พอ",
+        "form_summary": "ไม่มีผลย้อนหลังที่จับคู่ทีมได้เพียงพอ",
+        "form_method": "Football-Data scores only; not EV",
+    }
+    if df is None or df.empty or not {"Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}.issubset(df.columns):
+        return result
+    try:
+        kickoff_day = pd.Timestamp(kickoff.astimezone(UTC).date())
+        hist = df[df["Date_dt"].dt.normalize() < kickoff_day].copy()
+    except Exception:
+        return result
+    if hist.empty:
+        return result
+    teams = sorted(set(hist["HomeTeam"].dropna().astype(str)) | set(hist["AwayTeam"].dropna().astype(str)))
+    home = map_team(home_api, teams)
+    away = map_team(away_api, teams)
+    if not home or not away or home == away:
+        result["form_summary"] = "จับคู่ชื่อทีมกับฐานผลย้อนหลังไม่ได้"
+        return result
+    hist = hist.sort_values("Date_dt")
+    home_games = hist[hist["HomeTeam"] == home].tail(5).copy()
+    away_games = hist[hist["AwayTeam"] == away].tail(5).copy()
+    if market == "spreads":
+        if side == "home":
+            samples = [(float(r.FTHG), float(r.FTAG)) for r in home_games.itertuples()]
+        else:
+            # Reverse score order so the selected away team is the team being assessed.
+            samples = [(float(r.FTAG), float(r.FTHG)) for r in away_games.itertuples()]
+    else:
+        # Each historical match appears only once; these are venue-specific samples.
+        samples = [(float(r.FTHG), float(r.FTAG)) for r in home_games.itertuples()]
+        samples += [(float(r.FTHG), float(r.FTAG)) for r in away_games.itertuples()]
+    if not samples:
+        result["form_summary"] = "ไม่มีเกมเหย้า/เยือนย้อนหลังสำหรับทีมนี้"
+        return result
+    outcomes = [evaluate_historical_line(hg, ag, market, side, float(point)) for hg, ag in samples]
+    decisive = [x for x in outcomes if x != 0]
+    n = len(samples)
+    result["form_sample"] = n
+    if not decisive:
+        result["form_summary"] = f"ตัวอย่าง {n} นัด แต่ผลเทียบเส้นนี้เป็นคืนทุนทั้งหมด"
+        return result
+    rate = sum(1 for x in decisive if x > 0) / len(decisive) * 100.0
+    result["form_rate"] = round(rate, 1)
+    if n < 4 or len(decisive) < 3:
+        signal = "ข้อมูลน้อย — ใช้ประกอบเท่านั้น"
+    elif rate >= 60:
+        signal = "ฟอร์มย้อนหลังสนับสนุน"
+    elif rate <= 40:
+        signal = "ฟอร์มย้อนหลังสวนทาง"
+    else:
+        signal = "ฟอร์มย้อนหลังกลาง ๆ"
+    result["form_signal"] = signal
+    result["form_summary"] = f"ผลย้อนหลัง {n} นัด; เทียบเส้นปัจจุบันแล้วได้ผลบวก {rate:.1f}% ของ {len(decisive)} นัดที่ไม่คืนทุน — ไม่ใช่สถิติการกินราคาในอดีต"
+    return result
+
 
 # -------------------- POISSON / ASIAN SETTLEMENT --------------------
 def poisson_probs(lam, max_goals=12):
@@ -497,6 +600,7 @@ def selection_spread(team, side, line):
 def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
     matches, remaining, used = fetch_odds(sport_key, regions, api_key)
     history = fetch_understat_history(sport_key)
+    score_history = fetch_history(csv_code) if csv_code else pd.DataFrame()
     # For UEFA cups, collect domestic-league xG only as clearly labeled context.
     # Never feed domestic league data into the cup probability/EV model.
     domestic_context = fetch_understat_all_history() if sport_key in EUROPEAN_CUPS else pd.DataFrame()
@@ -552,6 +656,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                             continue
                         market_label = "Over/Under"
                     eval_res = evaluate_market_poisson(matrix, m_key, side, line, odds) if matrix else None
+                    form_res = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line)
                     rows.append({
                         "event_id": match.get("id", ""),
                         "kickoff_utc": kickoff.isoformat(),
@@ -580,6 +685,11 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         "p_partial": eval_res["p_partial"] if eval_res else None,
                         "p_loss": eval_res["p_loss"] if eval_res else None,
                         "score": eval_res["score"] if eval_res else None,
+                        "form_rate": form_res["form_rate"],
+                        "form_sample": form_res["form_sample"],
+                        "form_signal": form_res["form_signal"],
+                        "form_summary": form_res["form_summary"],
+                        "form_method": form_res["form_method"],
                     })
     return rows, remaining, used
 
@@ -595,7 +705,7 @@ def settle_pick(row, home_goals, away_goals):
     elif market == "Over/Under":
         adjusted_base = home_goals + away_goals
     else:
-        return None, None
+        return None
     outcomes = []
     net_profit = 0.0
     for line, weight in split_line(point):
@@ -696,9 +806,12 @@ with tab_scan:
         if not unsupported.empty:
             with st.expander(f"ดูราคาแต่ไม่มี EV เพราะข้อมูลย้อนหลังไม่พอ ({len(unsupported)} รายการ)"):
                 show_cols = ["kickoff_th","league","match","selection","odds","bookmaker","model_status"]
+                form_cols = ["form_signal", "form_rate", "form_sample", "form_summary"]
+                show_cols += [c for c in form_cols if c in unsupported.columns]
                 context_cols = ["home_context_xg", "home_context_xga", "away_context_xg", "away_context_xga", "context_status"]
                 show_cols += [c for c in context_cols if c in unsupported.columns and unsupported[c].notna().any()]
-                st.dataframe(unsupported[show_cols], use_container_width=True, hide_index=True)
+                st.dataframe(unsupported[show_cols].rename(columns={"form_signal":"สัญญาณฟอร์ม", "form_rate":"ผลบวกเทียบเส้น (%)", "form_sample":"จำนวนเกมย้อนหลัง", "form_summary":"คำอธิบายสถิติ"}), use_container_width=True, hide_index=True)
+                st.caption("สัญญาณฟอร์มคำนวณจากสกอร์เก่าเทียบกับเส้นปัจจุบันเท่านั้น ไม่ใช่ EV และไม่ใช่สถิติการกินราคาในอดีต จึงไม่ถูกนำไปจัดบิล EV")
 
 with tab_slips:
     st.subheader("🎟️ คัดตัวเลือกสำหรับพิจารณา — ไม่ใช่การรับประกันบิลชนะ")
@@ -828,11 +941,13 @@ with tab_history:
 with tab_help:
     st.subheader("ℹ️ วิธีใช้และข้อจำกัด")
     st.markdown("""
-- **ไม่มี fallback EV ปลอม:** ถ้าประวัติไม่พอ ระบบจะแสดงราคาแต่เว้น EV และไม่ใช้จัดบิล
+- **แยก EV กับฟอร์ม:** EV คำนวณเฉพาะเมื่อมี xG/xGA จริงจาก Understat และข้อมูลเพียงพอเท่านั้น; สถิติฟอร์มจากผลสกอร์เป็นตัวชี้ประกอบแยกต่างหาก ไม่ถูกแปลงเป็น EV และไม่ใช้จัดบิล EV
+- **ฟอร์มย้อนหลัง:** ใช้ไม่เกิน 5 เกมเหย้าล่าสุดของทีมเหย้าและ 5 เกมเยือนล่าสุดของทีมเยือนจาก Football-Data; ตัดเกมวันที่แข่งเดียวกันออกเพื่อลดการรั่วไหลของผลอนาคต การเทียบกับเส้นปัจจุบันเป็นเพียง heuristic เพราะไม่มีราคา/แฮนดิแคปย้อนหลังของทุกเกม
 - **แบบจำลอง:** ใช้ xG/xGA จริงจากหน้า Understat สำหรับลีกที่รองรับเท่านั้น และใช้ Poisson ประเมินสกอร์ ไม่ใช่คำรับประกันผลกำไร
 - **ความครอบคลุม xG:** โค้ดตั้งค่า Understat สำหรับพรีเมียร์ลีก, ลาลีกา, บุนเดสลีกา, เซเรียอา, ลีกเอิง และรัสเซีย หากเว็บปิดกั้น/เปลี่ยนรูปแบบ หรือไม่มีข้อมูลก่อนเตะ ระบบจะเว้น EV
 - **UCL / Europa League / Conference League:** ดึงราคาได้ทั้งสามรายการ แสดง xG ลีกในประเทศของทีมที่จับคู่ข้อมูลได้เพื่อประกอบการดูฟอร์มเท่านั้น และไม่ใช้ข้อมูลลีกในประเทศคำนวณ EV ของถ้วยยุโรป
-- **ลีกอื่น:** ยังดึงราคาได้ แต่จะไม่แสดง EV จนกว่าจะเชื่อมแหล่ง xG ที่เชื่อถือได้สำหรับลีกนั้น ห้ามตีความว่าไม่มี EV แปลว่าไม่มี value
+- **ลีกอื่น:** ยังดึงราคาได้ และหากมีผลย้อนหลัง Football-Data จะเห็นสัญญาณฟอร์มได้ แต่จะไม่แสดง EV จนกว่าจะมี xG ที่เชื่อถือได้สำหรับลีกนั้น ห้ามตีความว่าไม่มี EV แปลว่าไม่มี value
+- **StatsBomb Open Data:** ไม่ใช้เป็นแหล่ง EV สดแบบครอบคลุม เพราะข้อมูลฟรีเป็นบางรายการแข่งขัน/บางฤดูกาลและไม่สม่ำเสมอ ไม่ควรนำข้อมูลเก่ามาอ้างเป็น xG ปัจจุบัน
 - **ประวัติราคา:** Snapshot เริ่มเก็บตั้งแต่วันที่ใช้รุ่นนี้ ต้องสแกนหลายครั้งจึงจะมีข้อมูลเปรียบเทียบราคาแรกกับราคาล่าสุด และยังยืนยันราคาไหลหลอกไม่ได้
 - **โควตา The Odds API:** เลือกสแกนเฉพาะลีกที่สนใจ; แต่ละลีกใช้คำขอราคา 1 ครั้ง โดยขอ 2 ตลาดในภูมิภาคเดียว (ต้นทุนโดยทั่วไป 2 credits ต่อลีกที่มีข้อมูล) ตรวจตัวเลขคงเหลือจาก response header
 - **ข้อมูลบน Streamlit Cloud:** SQLite ในพื้นที่แอปอาจไม่ถาวรหลังรีสตาร์ตหรือ redeploy ควรดาวน์โหลดสำรองเป็นระยะ
