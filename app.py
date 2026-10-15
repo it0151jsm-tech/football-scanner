@@ -150,46 +150,63 @@ def init_db():
 init_db()
 
 
-def save_picks(rows):
-    if not rows:
-        return 0
+def save_picks(rows, snapshot_rows=None):
+    """Save the latest pending recommendation per event/market/side/bookmaker.
+    Store all observed prices separately, regardless of the user's odds filter.
+    """
     now_text = datetime.now(TH_TZ).isoformat(timespec="seconds")
-    count = 0
+    pick_columns = [
+        "event_id", "kickoff_utc", "kickoff_th", "league", "home_team", "away_team", "match",
+        "market", "side", "point", "odds", "selection", "bookmaker", "scanned_at", "lambda_home",
+        "lambda_away", "history_matches", "xg_home_avg", "xga_home_avg", "xg_away_avg", "xga_away_avg",
+        "ev_pct", "p_win", "p_partial", "p_loss", "score", "model_status", "home_context_xg",
+        "home_context_xga", "away_context_xg", "away_context_xga", "home_context_matches",
+        "away_context_matches", "context_status", "form_rate", "form_sample", "form_signal",
+        "form_summary", "form_method"
+    ]
+    saved = 0
     with db() as con:
-        for r in rows:
-            con.execute("""INSERT INTO picks (
-                event_id,kickoff_utc,kickoff_th,league,home_team,away_team,match,market,side,point,
-                odds,selection,bookmaker,scanned_at,lambda_home,lambda_away,history_matches,
-                xg_home_avg,xga_home_avg,xg_away_avg,xga_away_avg,
-                ev_pct,p_win,p_partial,p_loss,score,model_status,
-                home_context_xg,home_context_xga,away_context_xg,away_context_xga,
-                home_context_matches,away_context_matches,context_status,
-                form_rate,form_sample,form_signal,form_summary,form_method
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
-                r.get("event_id"), r.get("kickoff_utc"), r.get("kickoff_th"), r.get("league"),
-                r.get("home_team"), r.get("away_team"), r.get("match"), r.get("market"), r.get("side"),
-                r.get("point"), r.get("odds"), r.get("selection"), r.get("bookmaker"), now_text,
-                r.get("lambda_home"), r.get("lambda_away"), r.get("history_matches"),
-                r.get("xg_home_avg"), r.get("xga_home_avg"), r.get("xg_away_avg"), r.get("xga_away_avg"),
-                r.get("ev_pct"), r.get("p_win"), r.get("p_partial"), r.get("p_loss"),
-                r.get("score"), r.get("model_status", "ข้อมูลย้อนหลังไม่พอ"),
-                r.get("home_context_xg"), r.get("home_context_xga"),
-                r.get("away_context_xg"), r.get("away_context_xga"),
-                r.get("home_context_matches", 0), r.get("away_context_matches", 0),
-                r.get("context_status", ""), r.get("form_rate"), r.get("form_sample", 0),
-                r.get("form_signal", "ข้อมูลย้อนหลังไม่พอ"), r.get("form_summary", ""),
-                r.get("form_method", "")
-            ))
-            # Store every scan as a timestamped observation. Repeated same-price snapshots are useful
-            # for seeing that a market was checked, but scan frequency should be controlled by API quota.
+        for r in rows or []:
+            values = {col: r.get(col) for col in pick_columns}
+            values["scanned_at"] = now_text
+            values["model_status"] = values.get("model_status") or "ข้อมูลย้อนหลังไม่พอ"
+            values["form_signal"] = values.get("form_signal") or "ข้อมูลย้อนหลังไม่พอ"
+            # For recommendations (not actual placed bets), update the latest pending quote
+            # instead of counting every rescan as a separate bet. Keep settled records unchanged.
+            existing = con.execute("""SELECT id FROM picks
+                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND status!='ตรวจแล้ว'
+                ORDER BY id DESC LIMIT 1""",
+                (values["event_id"], values["market"], values["side"], values["bookmaker"])).fetchone()
+            if existing:
+                update_cols = [c for c in pick_columns if c != "event_id"]
+                sql = "UPDATE picks SET " + ",".join(f"{c}=?" for c in update_cols) + " WHERE id=?"
+                con.execute(sql, [values[c] for c in update_cols] + [existing["id"]])
+            else:
+                cols_sql = ",".join(pick_columns)
+                marks = ",".join("?" for _ in pick_columns)
+                con.execute(f"INSERT INTO picks ({cols_sql}) VALUES ({marks})", [values[c] for c in pick_columns])
+            saved += 1
+        # Price history is deliberately independent of the odds range used to select bets.
+        inserted_snapshots = 0
+        recent_cutoff = (datetime.now(TH_TZ) - timedelta(minutes=10)).isoformat(timespec="seconds")
+        for r in snapshot_rows or []:
+            # Avoid presenting repeated clicks on the same cached API response as new observations.
+            duplicate = con.execute("""SELECT 1 FROM odds_snapshots
+                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
+                AND captured_at>=? LIMIT 1""", (
+                r.get("event_id"), r.get("market"), r.get("side"), r.get("bookmaker"),
+                r.get("point"), r.get("odds"), recent_cutoff
+            )).fetchone()
+            if duplicate:
+                continue
             con.execute("""INSERT INTO odds_snapshots
                 (event_id,match_name,market,side,point,odds,bookmaker,captured_at)
                 VALUES (?,?,?,?,?,?,?,?)""", (
-                r.get("event_id"), r.get("match"), r.get("market"), r.get("side"),
+                r.get("event_id"), r.get("match_name"), r.get("market"), r.get("side"),
                 r.get("point"), r.get("odds"), r.get("bookmaker"), now_text
             ))
-            count += 1
-    return count
+            inserted_snapshots += 1
+    return saved, inserted_snapshots
 
 
 def load_picks(limit=5000):
@@ -607,6 +624,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     now = datetime.now(UTC)
     target = now + timedelta(hours=hours_limit)
     rows = []
+    snapshot_rows = []
     for match in matches:
         try:
             kickoff = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00")).astimezone(UTC)
@@ -634,8 +652,6 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         line = float(outcome.get("point", 0))
                     except (TypeError, ValueError):
                         continue
-                    if not (min_odds <= odds <= max_odds):
-                        continue
                     name = outcome.get("name")
                     if m_key == "spreads":
                         if name == home:
@@ -655,6 +671,16 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         else:
                             continue
                         market_label = "Over/Under"
+                    # Capture every available quote before applying the candidate odds filter.
+                    # This keeps price history from being censored by min/max odds settings.
+                    snapshot_rows.append({
+                        "event_id": match.get("id", ""),
+                        "match_name": f"{home} vs {away}",
+                        "market": market_label, "side": side, "point": line,
+                        "odds": odds, "bookmaker": book_name,
+                    })
+                    if not (min_odds <= odds <= max_odds):
+                        continue
                     eval_res = evaluate_market_poisson(matrix, m_key, side, line, odds) if matrix else None
                     form_res = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line)
                     rows.append({
@@ -691,7 +717,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         "form_summary": form_res["form_summary"],
                         "form_method": form_res["form_method"],
                     })
-    return rows, remaining, used
+    return rows, snapshot_rows, remaining, used
 
 # -------------------- RESULT SETTLEMENT --------------------
 def settle_pick(row, home_goals, away_goals):
@@ -763,25 +789,26 @@ with tab_scan:
         elif min_odds > max_odds:
             st.error("ค่าน้ำต่ำสุดต้องไม่มากกว่าค่าน้ำสูงสุด")
         else:
-            all_rows, errors, quota_info = [], [], []
+            all_rows, all_snapshots, errors, quota_info = [], [], [], []
             progress = st.progress(0)
             for i, key in enumerate(selected_leagues):
                 league_name, csv_code = LEAGUES[key]
                 try:
-                    rows, remaining, used = scan_league(key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key)
+                    rows, snapshots, remaining, used = scan_league(key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key)
                     all_rows.extend(rows)
+                    all_snapshots.extend(snapshots)
                     quota_info.append(f"{league_name}: ใช้ไป {used}, เหลือ {remaining}")
                 except Exception as exc:
                     errors.append(f"{league_name}: {exc}")
                 progress.progress((i + 1) / len(selected_leagues))
             progress.empty()
-            if all_rows:
-                count = save_picks(all_rows)
-                st.success(f"บันทึก {count} รายการแล้ว")
+            if all_rows or all_snapshots:
+                count, snapshot_count = save_picks(all_rows, all_snapshots)
+                st.success(f"อัปเดตคำแนะนำ {count} รายการ และบันทึก snapshot ราคา {snapshot_count} รายการ")
                 reliable = sum(1 for r in all_rows if r.get("ev_pct") is not None)
-                st.info(f"มีข้อมูลพอคำนวณ EV: {reliable}/{len(all_rows)} รายการ — รายการที่ข้อมูลไม่พอจะไม่ถูกใช้จัดบิล")
+                st.info(f"มีข้อมูลพอคำนวณ EV: {reliable}/{len(all_rows)} รายการ — ราคาไหลเก็บแยกจากตัวกรองค่าน้ำแล้ว")
             else:
-                st.info("ไม่พบคู่ในช่วงเวลาหรือค่าน้ำที่เลือก")
+                st.info("ไม่พบคู่ในช่วงเวลาที่เลือก")
             for info in quota_info:
                 st.caption("ℹ️ " + info)
             for err in errors:
@@ -793,9 +820,11 @@ with tab_scan:
         df["kickoff_parsed"] = pd.to_datetime(df["kickoff_utc"], errors="coerce", utc=True)
         now_ts = pd.Timestamp.now(tz="UTC")
         df["ev_pct"] = pd.to_numeric(df["ev_pct"], errors="coerce")
+        df = df.sort_values("id", ascending=False).drop_duplicates(
+            subset=["event_id", "market", "side", "bookmaker"], keep="first")
         upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
         view = upcoming[upcoming["ev_pct"].notna() & (upcoming["ev_pct"] >= min_ev_pct)].copy()
-        view = view.sort_values(["score", "ev_pct"], ascending=False).drop_duplicates(subset=["event_id", "market", "side", "point", "bookmaker"])
+        view = view.sort_values(["score", "ev_pct"], ascending=False)
         st.metric("ตัวเลือกที่ผ่าน EV และยังไม่เริ่มแข่ง", len(view))
         if not view.empty:
             cols = ["kickoff_th", "league", "match", "selection", "odds", "xg_home_avg", "xga_home_avg", "xg_away_avg", "xga_away_avg", "ev_pct", "p_win", "bookmaker", "model_status"]
@@ -823,6 +852,8 @@ with tab_slips:
         for col in ("ev_pct", "odds", "p_win", "score"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
         now_ts = pd.Timestamp.now(tz="UTC")
+        df = df.sort_values("id", ascending=False).drop_duplicates(
+            subset=["event_id", "market", "side", "bookmaker"], keep="first")
         candidates = df[(df["kickoff_parsed"] >= now_ts) & df["ev_pct"].notna() & df["p_win"].notna() & (df["ev_pct"] >= min_ev_pct) & (df["status"] == "รอตรวจผล")].copy()
         candidates = candidates.sort_values("score", ascending=False).drop_duplicates(subset=["event_id"], keep="first").reset_index(drop=True)
         st.write(f"มี {len(candidates)} คู่ที่มีแบบจำลองและยังไม่เริ่มแข่ง (เลือกสูงสุด 1 ตัวเลือกต่อคู่)")
@@ -844,8 +875,10 @@ with tab_slips:
 with tab_history:
     st.subheader("📈 ประวัติราคาและตรวจผล")
     with db() as con:
-        keys = pd.read_sql_query("""SELECT DISTINCT event_id, match_name, market, side, bookmaker
-            FROM odds_snapshots ORDER BY event_id DESC LIMIT 500""", con)
+        keys = pd.read_sql_query("""SELECT event_id, MAX(match_name) AS match_name, market, side, bookmaker,
+            MAX(captured_at) AS last_seen FROM odds_snapshots
+            GROUP BY event_id, market, side, bookmaker
+            ORDER BY last_seen DESC LIMIT 500""", con)
         movement_rows = []
         for _, keyrow in keys.iterrows():
             rows = con.execute("""SELECT point, odds, captured_at FROM odds_snapshots
@@ -860,12 +893,14 @@ with tab_history:
                 latest_point = float(latest["point"] or 0)
             except (TypeError, ValueError):
                 continue
-            odds_delta = round(latest_odds - first_odds, 3)
             point_changed = abs(latest_point - first_point) > 1e-9
-            trend = "ราคาเพิ่ม" if odds_delta > 0 else ("ราคาลด" if odds_delta < 0 else "ราคาน้ำคงที่")
+            # Odds are comparable only if the handicap/total line stayed the same.
+            odds_delta = round(latest_odds - first_odds, 3) if not point_changed else None
             if point_changed:
-                trend += " / แต้มต่อเปลี่ยน"
-            movement_rows.append({"คู่แข่งขัน":keyrow["match_name"], "ตลาด":keyrow["market"], "ฝั่ง":keyrow["side"], "เจ้ามือ":keyrow["bookmaker"], "ราคาแรก":first_odds, "ราคาล่าสุด":latest_odds, "เปลี่ยนแปลงน้ำ":odds_delta, "แต้มแรก":first_point, "แต้มล่าสุด":latest_point, "จำนวน snapshot":len(rows), "ตรวจครั้งแรก":first["captured_at"], "ตรวจล่าสุด":latest["captured_at"], "สัญญาณ":trend})
+                trend = "แต้มต่อ/สูงต่ำเปลี่ยน — เทียบน้ำตรง ๆ ไม่ได้"
+            else:
+                trend = "ราคาเพิ่ม" if odds_delta > 0 else ("ราคาลด" if odds_delta < 0 else "ราคาน้ำคงที่")
+            movement_rows.append({"คู่แข่งขัน":keyrow["match_name"], "ตลาด":keyrow["market"], "ฝั่ง":keyrow["side"], "เจ้ามือ":keyrow["bookmaker"], "ราคาแรกที่ระบบพบ":first_odds, "ราคาล่าสุด":latest_odds, "เปลี่ยนแปลงน้ำ (เมื่อเส้นเดิม)":odds_delta, "แต้มแรก":first_point, "แต้มล่าสุด":latest_point, "จำนวน snapshot":len(rows), "ตรวจครั้งแรก":first["captured_at"], "ตรวจล่าสุด":latest["captured_at"], "สัญญาณ":trend})
     if movement_rows:
         st.dataframe(pd.DataFrame(movement_rows), use_container_width=True, hide_index=True)
         st.caption("การเปลี่ยนแปลงราคาเป็นเพียงสัญญาณตลาด ไม่สามารถยืนยันได้ว่าเป็นราคาไหลหลอก")
@@ -930,10 +965,10 @@ with tab_history:
             n = len(settled)
             roi = total_profit / n * 100 if n else 0
             a, b, c = st.columns(3)
-            a.metric("จำนวนเดิมพันที่ตรวจผลแล้ว", n)
+            a.metric("จำนวนคำแนะนำที่ตรวจผลแล้ว", n)
             b.metric("กำไร/ขาดทุนสุทธิ (หน่วยเดิมพัน)", f"{total_profit:+.2f}")
             c.metric("ROI ต่อเดิมพันที่ตรวจแล้ว", f"{roi:+.2f}%")
-            st.caption("ROI นี้นับหนึ่งหน่วยเดิมพันต่อรายการ และใช้เฉพาะรายการที่มีการชำระผลได้ ไม่รวมค่าคอมมิชชันหรือความแตกต่างของเงินเดิมพัน")
+            st.caption("สถิตินี้เป็นผลของคำแนะนำที่บันทึกไว้ ไม่ใช่ backtest อิสระที่สมบูรณ์ และไม่ใช่ผลเดิมพันเงินจริง; หนึ่งหน่วยต่อรายการ ไม่รวมค่าคอมมิชชัน")
     st.divider()
     if DB_FILE.exists():
         st.download_button("⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite", data=DB_FILE.read_bytes(), file_name=DB_FILE.name, mime="application/octet-stream")
@@ -948,9 +983,10 @@ with tab_help:
 - **UCL / Europa League / Conference League:** ดึงราคาได้ทั้งสามรายการ แสดง xG ลีกในประเทศของทีมที่จับคู่ข้อมูลได้เพื่อประกอบการดูฟอร์มเท่านั้น และไม่ใช้ข้อมูลลีกในประเทศคำนวณ EV ของถ้วยยุโรป
 - **ลีกอื่น:** ยังดึงราคาได้ และหากมีผลย้อนหลัง Football-Data จะเห็นสัญญาณฟอร์มได้ แต่จะไม่แสดง EV จนกว่าจะมี xG ที่เชื่อถือได้สำหรับลีกนั้น ห้ามตีความว่าไม่มี EV แปลว่าไม่มี value
 - **StatsBomb Open Data:** ไม่ใช้เป็นแหล่ง EV สดแบบครอบคลุม เพราะข้อมูลฟรีเป็นบางรายการแข่งขัน/บางฤดูกาลและไม่สม่ำเสมอ ไม่ควรนำข้อมูลเก่ามาอ้างเป็น xG ปัจจุบัน
-- **ประวัติราคา:** Snapshot เริ่มเก็บตั้งแต่วันที่ใช้รุ่นนี้ ต้องสแกนหลายครั้งจึงจะมีข้อมูลเปรียบเทียบราคาแรกกับราคาล่าสุด และยังยืนยันราคาไหลหลอกไม่ได้
+- **ประวัติราคา:** เก็บราคาในช่วงเวลาที่สแกนโดยไม่ใช้ตัวกรองค่าน้ำของหน้าคัดคู่; “ราคาแรกที่ระบบพบ” ไม่ใช่ราคาเปิดตลาดจริง ต้องสแกนหลายครั้ง และเมื่อเส้นเปลี่ยนจะไม่เปรียบเทียบค่าน้ำราวกับเป็นเส้นเดียวกัน
 - **โควตา The Odds API:** เลือกสแกนเฉพาะลีกที่สนใจ; แต่ละลีกใช้คำขอราคา 1 ครั้ง โดยขอ 2 ตลาดในภูมิภาคเดียว (ต้นทุนโดยทั่วไป 2 credits ต่อลีกที่มีข้อมูล) ตรวจตัวเลขคงเหลือจาก response header
 - **ข้อมูลบน Streamlit Cloud:** SQLite ในพื้นที่แอปอาจไม่ถาวรหลังรีสตาร์ตหรือ redeploy ควรดาวน์โหลดสำรองเป็นระยะ
+- **ผลตรวจย้อนหลัง:** คำแนะนำที่ยังไม่เริ่มแข่งจะอัปเดตเป็นค่าล่าสุดเพื่อลดการนับซ้ำจากการสแกนหลายรอบ; จึงไม่ควรตีความตัวเลขนี้เป็น backtest แบบล็อกราคาเดิมพันจริง
 - **ความเสี่ยง:** EV เป็นค่าประมาณตามแบบจำลอง ไม่ใช่คำรับประกันผลกำไร
 """)
 
