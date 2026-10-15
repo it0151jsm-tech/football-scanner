@@ -2,6 +2,7 @@ import os
 import re
 import math
 import json
+import codecs
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -12,30 +13,22 @@ import requests
 import streamlit as st
 
 # ============================================================
-# VALUE BET PRO — ADVANCED HYBRID ENGINE (ALL LEAGUES)
+# VALUE BET PRO — safer baseline
+# Streamlit + The Odds API + SQLite
 # ============================================================
-
-st.set_page_config(
-    page_title="Value Bet Pro",
-    page_icon="⚽",
-    layout="wide",
-)
-
-st.title("⚽ Value Bet Pro (Advanced Edition)")
-st.caption(
-    "ระบบวิเคราะห์ราคาฟุตบอลด้วยแบบจำลอง Poisson + Market Implied Odds | "
-    "คัดเฉพาะราคาหลักมาตรฐาน 1.80 - 2.05 | จัดบิลสเต็ป VIP 5, 9, 13, 20 คู่"
-)
+st.set_page_config(page_title="Value Bet Pro", page_icon="⚽", layout="wide")
+st.title("⚽ Value Bet Pro — xG Edition")
+st.caption("ราคาไหล + สถิติย้อนหลัง + xG/xGA | ไม่มี EV หากไม่มีข้อมูลจริงเพียงพอ")
 
 API_BASE = "https://api.the-odds-api.com/v4"
 TH_TZ = timezone(timedelta(hours=7))
 UTC = timezone.utc
 TIMEOUT = 25
-
-DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro_v3.db"))
+DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro_v4.db"))
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-# 📌 รวมรายชื่อลีกทั้งหมด (เพิ่ม ยูฟ่า คอนเฟอเรนซ์ลีก และ ซาอุดีอาระเบีย โปรลีก แล้ว)
+# CSV codes are only set where a matching Football-Data competition code is known.
+# Do not reuse a code across unrelated leagues.
 LEAGUES = {
     "soccer_epl": ("พรีเมียร์ลีก อังกฤษ", "E0"),
     "soccer_england_championship": ("แชมเปียนชิพ อังกฤษ", "E1"),
@@ -45,9 +38,12 @@ LEAGUES = {
     "soccer_italy_serie_a": ("เซเรียอา อิตาลี", "I1"),
     "soccer_italy_serie_b": ("เซเรียบี อิตาลี", "I2"),
     "soccer_germany_bundesliga": ("บุนเดสลีกา เยอรมนี", "D1"),
+    "soccer_germany_bundesliga2": ("บุนเดสลีกา 2 เยอรมนี", "D2"),
+    "soccer_germany_3liga": ("ลีก 3 เยอรมนี", None),
     "soccer_france_ligue_one": ("ลีกเอิง ฝรั่งเศส", "F1"),
     "soccer_netherlands_eredivisie": ("เอเรดิวิซี เนเธอร์แลนด์", "N1"),
     "soccer_portugal_primeira_liga": ("โปรตุเกส พรีเมราลีกา", "P1"),
+    "soccer_norway_eliteserien": ("นอร์เวย์ เอลิเตเซเรียน", None),
     "soccer_uefa_champs_league": ("ยูฟ่า แชมเปียนส์ลีก", None),
     "soccer_uefa_europa_league": ("ยูฟ่า ยูโรปาลีก", None),
     "soccer_uefa_europa_conference_league": ("ยูฟ่า คอนเฟอเรนซ์ลีก", None),
@@ -57,29 +53,39 @@ LEAGUES = {
     "soccer_japan_j_league": ("เจลีก ญี่ปุ่น", None),
     "soccer_korea_k_league_1": ("เคลีก เกาหลีใต้", None),
     "soccer_brazil_campeonato": ("บราซิล ซีรีเอ", None),
+    "soccer_brazil_serie_b": ("บราซิล ซีรีบี", None),
 }
 
+# Understat public league pages provide historical match xG for selected competitions.
+# Unsupported leagues intentionally return no xG; the model must not invent it.
+UNDERSTAT_LEAGUES = {
+    "soccer_epl": "EPL",
+    "soccer_spain_la_liga": "La_liga",
+    "soccer_germany_bundesliga": "Bundesliga",
+    "soccer_italy_serie_a": "Serie_A",
+    "soccer_france_ligue_one": "Ligue_1",
+    "soccer_russia_premier_league": "RFPL",
+}
+UNDERSTAT_SEASONS = (2026, 2025, 2024, 2023, 2022)
+
+EUROPEAN_CUPS = {
+    "soccer_uefa_champs_league",
+    "soccer_uefa_europa_league",
+    "soccer_uefa_europa_conference_league",
+}
 
 # -------------------- API KEY --------------------
-
 def get_api_key():
     try:
         key = st.secrets.get("THE_ODDS_API_KEY", "")
     except Exception:
         key = ""
-    
     if not key:
         key = os.getenv("THE_ODDS_API_KEY", "")
-
     session_key = st.session_state.get("runtime_api_key", "")
-    if session_key:
-        key = session_key
+    return str(session_key or key).strip()
 
-    return str(key).strip()
-
-
-# -------------------- SQLITE DATABASE --------------------
-
+# -------------------- DATABASE / MIGRATIONS --------------------
 def db():
     con = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
     con.row_factory = sqlite3.Row
@@ -88,63 +94,52 @@ def db():
 
 def init_db():
     with db() as con:
-        con.execute("""
-        CREATE TABLE IF NOT EXISTS picks (
+        con.execute("""CREATE TABLE IF NOT EXISTS picks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id TEXT,
-            kickoff_utc TEXT,
-            kickoff_th TEXT,
-            league TEXT,
-            home_team TEXT,
-            away_team TEXT,
-            match TEXT,
-            market TEXT,
-            side TEXT,
-            point REAL,
-            odds REAL,
-            selection TEXT,
-            bookmaker TEXT,
-            scanned_at TEXT,
-            lambda_home REAL,
-            lambda_away REAL,
-            history_matches INTEGER,
-            ev_pct REAL,
-            p_win REAL,
-            p_partial REAL,
-            p_loss REAL,
-            score REAL,
-            status TEXT DEFAULT 'รอตรวจผล',
-            final_score TEXT DEFAULT '',
-            settlement TEXT DEFAULT ''
-        )
-        """)
-        con.execute("""
-        CREATE TABLE IF NOT EXISTS odds_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id TEXT,
-            match_name TEXT,
-            market TEXT,
-            side TEXT,
-            point REAL,
-            odds REAL,
-            bookmaker TEXT,
-            captured_at TEXT
-        )
-        """)
-        con.execute("""
-        CREATE TABLE IF NOT EXISTS slips (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_at TEXT,
-            slip_size INTEGER,
-            selections_json TEXT,
-            combined_odds REAL,
-            estimated_probability REAL,
+            event_id TEXT, kickoff_utc TEXT, kickoff_th TEXT, league TEXT,
+            home_team TEXT, away_team TEXT, match TEXT, market TEXT, side TEXT,
+            point REAL, odds REAL, selection TEXT, bookmaker TEXT, scanned_at TEXT,
+            lambda_home REAL, lambda_away REAL, history_matches INTEGER,
+            xg_home_avg REAL, xga_home_avg REAL, xg_away_avg REAL, xga_away_avg REAL,
+            ev_pct REAL, p_win REAL, p_partial REAL, p_loss REAL, score REAL,
+            status TEXT DEFAULT 'รอตรวจผล', final_score TEXT DEFAULT '', settlement TEXT DEFAULT '',
+            model_status TEXT DEFAULT 'unknown', profit_units REAL, outcome_binary INTEGER,
+            home_context_xg REAL, home_context_xga REAL, away_context_xg REAL, away_context_xga REAL,
+            home_context_matches INTEGER, away_context_matches INTEGER, context_status TEXT
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS odds_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT, match_name TEXT,
+            market TEXT, side TEXT, point REAL, odds REAL, bookmaker TEXT, captured_at TEXT
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS slips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, slip_size INTEGER,
+            selections_json TEXT, combined_odds REAL, estimated_probability REAL,
             status TEXT DEFAULT 'รอตรวจผล'
-        )
-        """)
+        )""")
+        # Upgrade an existing v3 database without deleting the user's data.
+        existing = {r[1] for r in con.execute("PRAGMA table_info(picks)").fetchall()}
+        migrations = {
+            "model_status": "TEXT DEFAULT 'unknown'",
+            "profit_units": "REAL",
+            "outcome_binary": "INTEGER",
+            "xg_home_avg": "REAL",
+            "xga_home_avg": "REAL",
+            "xg_away_avg": "REAL",
+            "xga_away_avg": "REAL",
+            "home_context_xg": "REAL",
+            "home_context_xga": "REAL",
+            "away_context_xg": "REAL",
+            "away_context_xga": "REAL",
+            "home_context_matches": "INTEGER",
+            "away_context_matches": "INTEGER",
+            "context_status": "TEXT",
+        }
+        for name, decl in migrations.items():
+            if name not in existing:
+                con.execute(f"ALTER TABLE picks ADD COLUMN {name} {decl}")
         con.execute("CREATE INDEX IF NOT EXISTS idx_picks_event ON picks(event_id)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_event ON odds_snapshots(event_id, captured_at)")
-
+        con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON odds_snapshots(event_id, market, side, bookmaker, captured_at)")
 
 init_db()
 
@@ -152,187 +147,278 @@ init_db()
 def save_picks(rows):
     if not rows:
         return 0
-
     now_text = datetime.now(TH_TZ).isoformat(timespec="seconds")
     count = 0
-
     with db() as con:
         for r in rows:
-            con.execute("""
-            INSERT INTO picks (
-                event_id, kickoff_utc, kickoff_th, league,
-                home_team, away_team, match, market, side, point,
-                odds, selection, bookmaker, scanned_at, lambda_home,
-                lambda_away, history_matches, ev_pct,
-                p_win, p_partial, p_loss, score
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                r["event_id"], r["kickoff_utc"], r["kickoff_th"],
-                r["league"], r["home_team"], r["away_team"], r["match"],
-                r["market"], r["side"], r["point"], r["odds"], r["selection"],
-                r["bookmaker"], now_text, r.get("lambda_home", 0.0),
-                r.get("lambda_away", 0.0), r.get("history_matches", 0),
-                r["ev_pct"], r["p_win"], r["p_partial"],
-                r["p_loss"], r.get("score", 0.0)
+            con.execute("""INSERT INTO picks (
+                event_id,kickoff_utc,kickoff_th,league,home_team,away_team,match,market,side,point,
+                odds,selection,bookmaker,scanned_at,lambda_home,lambda_away,history_matches,
+                xg_home_avg,xga_home_avg,xg_away_avg,xga_away_avg,
+                ev_pct,p_win,p_partial,p_loss,score,model_status,
+                home_context_xg,home_context_xga,away_context_xg,away_context_xga,
+                home_context_matches,away_context_matches,context_status
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                r.get("event_id"), r.get("kickoff_utc"), r.get("kickoff_th"), r.get("league"),
+                r.get("home_team"), r.get("away_team"), r.get("match"), r.get("market"), r.get("side"),
+                r.get("point"), r.get("odds"), r.get("selection"), r.get("bookmaker"), now_text,
+                r.get("lambda_home"), r.get("lambda_away"), r.get("history_matches"),
+                r.get("xg_home_avg"), r.get("xga_home_avg"), r.get("xg_away_avg"), r.get("xga_away_avg"),
+                r.get("ev_pct"), r.get("p_win"), r.get("p_partial"), r.get("p_loss"),
+                r.get("score"), r.get("model_status", "ข้อมูลย้อนหลังไม่พอ"),
+                r.get("home_context_xg"), r.get("home_context_xga"),
+                r.get("away_context_xg"), r.get("away_context_xga"),
+                r.get("home_context_matches", 0), r.get("away_context_matches", 0),
+                r.get("context_status", "")
             ))
-
-            con.execute("""
-            INSERT INTO odds_snapshots (
-                event_id, match_name, market, side, point,
-                odds, bookmaker, captured_at
-            ) VALUES (?,?,?,?,?,?,?,?)
-            """, (
-                r["event_id"], r["match"], r["market"],
-                r["side"], r["point"], r["odds"],
-                r["bookmaker"], now_text
+            # Store every scan as a timestamped observation. Repeated same-price snapshots are useful
+            # for seeing that a market was checked, but scan frequency should be controlled by API quota.
+            con.execute("""INSERT INTO odds_snapshots
+                (event_id,match_name,market,side,point,odds,bookmaker,captured_at)
+                VALUES (?,?,?,?,?,?,?,?)""", (
+                r.get("event_id"), r.get("match"), r.get("market"), r.get("side"),
+                r.get("point"), r.get("odds"), r.get("bookmaker"), now_text
             ))
             count += 1
-
     return count
 
 
 def load_picks(limit=5000):
     with db() as con:
-        df = pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC LIMIT ?", con, params=(limit,))
-    return df
+        return pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC LIMIT ?", con, params=(limit,))
 
 
-def update_pick_result(pick_id, score, settlement):
+def update_pick_result(pick_id, score, settlement, profit_units, outcome_binary=None):
     with db() as con:
-        con.execute("""
-        UPDATE picks
-        SET final_score=?, settlement=?, status='ตรวจแล้ว'
-        WHERE id=?
-        """, (score, settlement, int(pick_id)))
+        con.execute("""UPDATE picks SET final_score=?, settlement=?, status='ตรวจแล้ว',
+            profit_units=?, outcome_binary=? WHERE id=?""",
+            (score, settlement, profit_units, outcome_binary, int(pick_id)))
 
-
-# -------------------- FETCH API --------------------
-
+# -------------------- ODDS API --------------------
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_odds(sport_key, regions, api_key):
     url = f"{API_BASE}/sports/{sport_key}/odds/"
-    params = {
-        "apiKey": api_key,
-        "regions": regions,
-        "markets": "spreads,totals",
-        "oddsFormat": "decimal",
-    }
-
+    params = {"apiKey": api_key, "regions": regions, "markets": "spreads,totals", "oddsFormat": "decimal"}
     try:
         response = requests.get(url, params=params, timeout=TIMEOUT)
     except requests.RequestException as exc:
         raise RuntimeError(f"เชื่อมต่อ API ไม่สำเร็จ: {exc}") from exc
-
     if response.status_code == 401:
         raise RuntimeError("API Key ไม่ถูกต้องหรือไม่มีสิทธิ์ใช้งาน")
     if response.status_code == 429:
         raise RuntimeError("โควตา API หมดหรือเรียกถี่เกินไป")
     if response.status_code != 200:
         raise RuntimeError(f"API ตอบ HTTP {response.status_code}: {response.text[:200]}")
-
-    data = response.json()
-    remaining = response.headers.get("x-requests-remaining", "ไม่ระบุ")
-    used = response.headers.get("x-requests-used", "ไม่ระบุ")
-    return data, remaining, used
-
+    return response.json(), response.headers.get("x-requests-remaining", "ไม่ระบุ"), response.headers.get("x-requests-used", "ไม่ระบุ")
 
 # -------------------- HISTORICAL RESULTS --------------------
-
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_history(csv_code):
     if not csv_code:
         return pd.DataFrame()
-
     frames = []
+    # Current and recent seasons. Missing/unpublished CSVs are skipped safely.
     for season in ("2627", "2526", "2425", "2324"):
         url = f"https://www.football-data.co.uk/mmz4281/{season}/{csv_code}.csv"
         try:
-            df = pd.read_csv(url)
-            required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
-            if not required.issubset(df.columns):
+            response = requests.get(url, timeout=TIMEOUT)
+            if response.status_code != 200 or not response.content:
                 continue
-
-            df["Date_dt"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
-            df["FTHG"] = pd.to_numeric(df["FTHG"], errors="coerce")
-            df["FTAG"] = pd.to_numeric(df["FTAG"], errors="coerce")
-            df = df.dropna(subset=["Date_dt", "FTHG", "FTAG"])
-            frames.append(df)
+            from io import BytesIO
+            frame = pd.read_csv(BytesIO(response.content))
+            required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
+            if not required.issubset(frame.columns):
+                continue
+            frame["Date_dt"] = pd.to_datetime(frame["Date"], dayfirst=True, errors="coerce")
+            frame["FTHG"] = pd.to_numeric(frame["FTHG"], errors="coerce")
+            frame["FTAG"] = pd.to_numeric(frame["FTAG"], errors="coerce")
+            frame = frame.dropna(subset=["Date_dt", "FTHG", "FTAG", "HomeTeam", "AwayTeam"])
+            frames.append(frame)
         except Exception:
             continue
-
     if not frames:
         return pd.DataFrame()
-
-    result = pd.concat(frames, ignore_index=True)
-    result = result.sort_values("Date_dt")
+    result = pd.concat(frames, ignore_index=True).sort_values("Date_dt")
     return result.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last").reset_index(drop=True)
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_understat_history(sport_key):
+    """Fetch actual Understat match xG/xGA. Returns empty data on unsupported/blocked pages."""
+    league_code = UNDERSTAT_LEAGUES.get(sport_key)
+    if not league_code:
+        return pd.DataFrame()
+    frames = []
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+        "X-Requested-With": "XMLHttpRequest",
+    }
+    for season in UNDERSTAT_SEASONS:
+        url = f"https://understat.com/getLeagueData/{league_code}/{season}"
+        try:
+            response = requests.get(url, headers={**headers, "Referer": f"https://understat.com/league/{league_code}/{season}"}, timeout=TIMEOUT)
+            if response.status_code != 200 or not response.content:
+                continue
+            payload = response.json()
+            # Understat's league data endpoint returns match-level rows under `dates`.
+            dates = payload.get("dates", []) if isinstance(payload, dict) else []
+            rows = []
+            for item in dates:
+                if not item.get("isResult", True):
+                    continue
+                home_obj, away_obj = item.get("h") or {}, item.get("a") or {}
+                try:
+                    dt = pd.to_datetime(item.get("datetime"), utc=True, errors="coerce")
+                    hg, ag = float(item.get("goals", {}).get("h")), float(item.get("goals", {}).get("a"))
+                    xgh, xga = float(item.get("xG", {}).get("h")), float(item.get("xG", {}).get("a"))
+                except (TypeError, ValueError):
+                    continue
+                if pd.isna(dt) or not home_obj.get("title") or not away_obj.get("title"):
+                    continue
+                if not all(math.isfinite(v) for v in (hg, ag, xgh, xga)):
+                    continue
+                rows.append({
+                    "Date_dt": dt.tz_convert(None),
+                    "HomeTeam": str(home_obj.get("title")),
+                    "AwayTeam": str(away_obj.get("title")),
+                    "FTHG": hg, "FTAG": ag, "xG_home": xgh, "xG_away": xga,
+                })
+            if rows:
+                season_frame = pd.DataFrame(rows)
+                season_frame["source_league"] = league_code
+                frames.append(season_frame)
+        except Exception:
+            # A blocked or changed upstream page means no model, not synthetic values.
+            continue
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    out = out.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last")
+    return out.sort_values("Date_dt").reset_index(drop=True)
+
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_understat_all_history():
+    """Collect only real Understat data for supported domestic leagues, for context display."""
+    frames = []
+    for sport_key in UNDERSTAT_LEAGUES:
+        frame = fetch_understat_history(sport_key)
+        if frame is not None and not frame.empty:
+            frame = frame.copy()
+            if "source_league" not in frame.columns:
+                frame["source_league"] = UNDERSTAT_LEAGUES[sport_key]
+            frames.append(frame)
+    if not frames:
+        return pd.DataFrame()
+    out = pd.concat(frames, ignore_index=True)
+    return out.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam", "source_league"]).sort_values("Date_dt").reset_index(drop=True)
+
+
+def estimate_domestic_context(df, home_api, away_api, kickoff):
+    """Recent domestic-league xG form for cup matches. Context only; never used to price cup EV."""
+    empty = {
+        "home_context_xg": None, "home_context_xga": None,
+        "away_context_xg": None, "away_context_xga": None,
+        "home_context_matches": 0, "away_context_matches": 0,
+        "context_status": "ไม่มีสถิติลีกในประเทศที่จับคู่ทีมได้",
+    }
+    if df is None or df.empty:
+        return empty
+    cutoff = pd.Timestamp(kickoff.astimezone(UTC).replace(tzinfo=None))
+    hist = df[df["Date_dt"] < cutoff].copy()
+    if hist.empty:
+        return empty
+    teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
+    home = map_team(home_api, teams)
+    away = map_team(away_api, teams)
+    if not home or not away or home == away:
+        return empty
+
+    def team_sample(team):
+        home_rows = hist[hist["HomeTeam"] == team].assign(_xgf=lambda x: x["xG_home"], _xga=lambda x: x["xG_away"])
+        away_rows = hist[hist["AwayTeam"] == team].assign(_xgf=lambda x: x["xG_away"], _xga=lambda x: x["xG_home"])
+        sample = pd.concat([home_rows, away_rows], ignore_index=True).sort_values("Date_dt").tail(5)
+        sample = sample.dropna(subset=["_xgf", "_xga"])
+        return sample
+
+    hs, aw = team_sample(home), team_sample(away)
+    result = dict(empty)
+    result.update({
+        "home_context_xg": round(float(hs["_xgf"].mean()), 2) if len(hs) >= 3 else None,
+        "home_context_xga": round(float(hs["_xga"].mean()), 2) if len(hs) >= 3 else None,
+        "away_context_xg": round(float(aw["_xgf"].mean()), 2) if len(aw) >= 3 else None,
+        "away_context_xga": round(float(aw["_xga"].mean()), 2) if len(aw) >= 3 else None,
+        "home_context_matches": int(len(hs)),
+        "away_context_matches": int(len(aw)),
+    })
+    if len(hs) >= 3 or len(aw) >= 3:
+        result["context_status"] = "สถิติ xG ลีกในประเทศ 5 นัดล่าสุดโดยประมาณ — ใช้ประกอบเท่านั้น ไม่ใช่สถิติถ้วย"
+    return result
+
+
 def norm_name(name):
-    name = str(name or "").lower().replace("&", "and")
-    return re.sub(r"[^a-z0-9]", "", name)
+    return re.sub(r"[^a-z0-9]", "", str(name or "").lower().replace("&", "and"))
 
 
 def map_team(name, candidates):
     if not candidates:
         return None
-
     lookup = {norm_name(x): x for x in candidates}
     normalized = norm_name(name)
-
     if normalized in lookup:
         return lookup[normalized]
-
-    match = get_close_matches(normalized, list(lookup.keys()), n=1, cutoff=0.75)
+    match = get_close_matches(normalized, list(lookup.keys()), n=1, cutoff=0.82)
     return lookup[match[0]] if match else None
 
 
 def estimate_goals(df, home_api, away_api, kickoff):
+    """Estimate expected goals from actual historical xG/xGA only; no goals-only fallback."""
     if df is None or df.empty:
         return None
-
-    historical = df[df["Date_dt"] < pd.Timestamp(kickoff.date())].copy()
-    if historical.empty:
+    cutoff = pd.Timestamp(kickoff.astimezone(UTC).replace(tzinfo=None))
+    hist = df[df["Date_dt"] < cutoff].copy()
+    if hist.empty or not {"xG_home", "xG_away"}.issubset(hist.columns):
         return None
-
-    teams = sorted(set(historical["HomeTeam"].dropna()) | set(historical["AwayTeam"].dropna()))
+    teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
     home = map_team(home_api, teams)
     away = map_team(away_api, teams)
-
-    if not home or not away:
+    if not home or not away or home == away:
         return None
-
-    h_home = historical[historical["HomeTeam"] == home].tail(10)
-    a_away = historical[historical["AwayTeam"] == away].tail(10)
-
-    if len(h_home) < 4 or len(a_away) < 4:
+    h_home = hist[hist["HomeTeam"] == home].tail(10)
+    a_away = hist[hist["AwayTeam"] == away].tail(10)
+    if len(h_home) < 5 or len(a_away) < 5:
         return None
-
-    league_home = max(float(historical["FTHG"].mean()), 0.2)
-    league_away = max(float(historical["FTAG"].mean()), 0.2)
-
-    h_scored = float(h_home["FTHG"].mean())
-    h_conceded = float(h_home["FTAG"].mean())
-    a_scored = float(a_away["FTHG"].mean())
-    a_conceded = float(a_away["FTHG"].mean())
-
-    home_attack = (h_scored + league_home * 3) / 4 / league_home
-    away_defence = (a_conceded + league_home * 3) / 4 / league_home
-    away_attack = (a_scored + league_away * 3) / 4 / league_away
-    home_defence = (h_conceded + league_away * 3) / 4 / league_away
-
-    lam_home = league_home * (home_attack + away_defence) / 2
-    lam_away = league_away * (away_attack + home_defence) / 2
-
+    # Require xG values for all sampled matches; don't silently substitute goals.
+    h_home = h_home.dropna(subset=["xG_home", "xG_away"])
+    a_away = a_away.dropna(subset=["xG_home", "xG_away"])
+    if len(h_home) < 5 or len(a_away) < 5:
+        return None
+    league_home = float(hist["xG_home"].mean())
+    league_away = float(hist["xG_away"].mean())
+    if not all(math.isfinite(x) and x > 0 for x in (league_home, league_away)):
+        return None
+    prior_n = 4.0
+    h_xgf = (float(h_home["xG_home"].sum()) + league_home * prior_n) / (len(h_home) + prior_n)
+    h_xga = (float(h_home["xG_away"].sum()) + league_away * prior_n) / (len(h_home) + prior_n)
+    a_xgf = (float(a_away["xG_away"].sum()) + league_away * prior_n) / (len(a_away) + prior_n)
+    a_xga = (float(a_away["xG_home"].sum()) + league_home * prior_n) / (len(a_away) + prior_n)
+    lam_home = league_home * (h_xgf / league_home) * (a_xga / league_home)
+    lam_away = league_away * (a_xgf / league_away) * (h_xga / league_away)
+    if not all(math.isfinite(x) and x > 0 for x in (lam_home, lam_away)):
+        return None
+    used = pd.concat([h_home.assign(_team_sample="home"), a_away.assign(_team_sample="away")])
     return {
-        "home_lambda": min(max(lam_home, 0.15), 4.0),
-        "away_lambda": min(max(lam_away, 0.15), 4.0),
-        "history_matches": len(historical),
+        "home_lambda": min(max(lam_home, 0.10), 4.5),
+        "away_lambda": min(max(lam_away, 0.10), 4.5),
+        "history_matches": int(len(used.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"]))),
+        "league_matches": int(len(hist)),
+        "xg_home_avg": round(float(h_home["xG_home"].mean()), 3),
+        "xga_home_avg": round(float(h_home["xG_away"].mean()), 3),
+        "xg_away_avg": round(float(a_away["xG_away"].mean()), 3),
+        "xga_away_avg": round(float(a_away["xG_home"].mean()), 3),
     }
 
-
-# -------------------- POISSON & MARKET EVALUATION --------------------
-
+# -------------------- POISSON / ASIAN SETTLEMENT --------------------
 def poisson_probs(lam, max_goals=12):
     probs = [math.exp(-lam)]
     for k in range(1, max_goals + 1):
@@ -342,8 +428,7 @@ def poisson_probs(lam, max_goals=12):
 
 
 def score_matrix(lam_home, lam_away):
-    hp = poisson_probs(lam_home)
-    ap = poisson_probs(lam_away)
+    hp, ap = poisson_probs(lam_home), poisson_probs(lam_away)
     return [(h, a, hp[h] * ap[a]) for h in range(len(hp)) for a in range(len(ap))]
 
 
@@ -352,8 +437,7 @@ def split_line(line):
     if q % 2 == 0:
         return [(q / 4.0, 1.0)]
     lower = math.floor(q / 2) / 2.0
-    upper = lower + 0.5
-    return [(lower, 0.5), (upper, 0.5)]
+    return [(lower, 0.5), (lower + 0.5, 0.5)]
 
 
 def settle_leg(adjusted):
@@ -367,14 +451,11 @@ def settle_leg(adjusted):
 def evaluate_market_poisson(matrix, market, side, point, odds):
     if odds <= 1:
         return None
-
     ev = p_full_win = p_full_loss = p_other = 0.0
     legs = split_line(point)
-
     for home, away, prob in matrix:
         net = 0.0
         outcomes = []
-
         for line, weight in legs:
             if market == "spreads":
                 diff = home - away if side == "home" else away - home
@@ -383,383 +464,380 @@ def evaluate_market_poisson(matrix, market, side, point, odds):
                 goals = home + away
                 adjusted = goals - line if side == "over" else line - goals
                 outcome = settle_leg(adjusted)
-
             outcomes.append(outcome)
-
             if outcome == "win":
                 net += weight * (odds - 1.0)
             elif outcome == "loss":
                 net -= weight
-
         ev += prob * net
-
         if all(x == "win" for x in outcomes):
             p_full_win += prob
         elif all(x == "loss" for x in outcomes):
             p_full_loss += prob
         else:
             p_other += prob
-
     return {
         "ev_pct": round(ev * 100.0, 2),
-        "p_win": round(p_full_win * 100.0, 1),
-        "p_partial": round(p_other * 100.0, 1),
-        "p_loss": round(p_full_loss * 100.0, 1),
-        "score": round((p_full_win * 100.0) + (ev * 150.0), 2)
+        "p_win": round(p_full_win * 100.0, 2),
+        "p_partial": round(p_other * 100.0, 2),
+        "p_loss": round(p_full_loss * 100.0, 2),
+        "score": round((p_full_win * 100.0) + (ev * 100.0), 2),
     }
 
 
-def evaluate_market_fallback(market, side, point, odds):
-    implied_prob = 1.0 / odds
-    model_prob = min(max(implied_prob * 1.03, 0.48), 0.65) if market == "spreads" else min(max(implied_prob * 1.02, 0.48), 0.62)
-    ev_pct = ((model_prob * odds) - 1.0) * 100
-    
-    return {
-        "ev_pct": round(ev_pct, 2),
-        "p_win": round(model_prob * 100.0, 1),
-        "p_partial": 0.0,
-        "p_loss": round((1.0 - model_prob) * 100.0, 1),
-        "score": round((model_prob * 100.0) + (ev_pct * 1.5), 2)
-    }
+def selection_spread(team, side, line):
+    # The API point is signed for each outcome; preserve it for settlement math.
+    if abs(line) < 1e-9:
+        return f"วาง {team} (0)"
+    if line < 0:
+        return f"ต่อ {team} (-{abs(line):g})"
+    return f"รอง {team} (+{abs(line):g})"
 
-
-# -------------------- SCANNING ENGINE --------------------
-
+# -------------------- SCAN --------------------
 def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
     matches, remaining, used = fetch_odds(sport_key, regions, api_key)
-    history = fetch_history(csv_code) if csv_code else None
-
+    history = fetch_understat_history(sport_key)
+    # For UEFA cups, collect domestic-league xG only as clearly labeled context.
+    # Never feed domestic league data into the cup probability/EV model.
+    domestic_context = fetch_understat_all_history() if sport_key in EUROPEAN_CUPS else pd.DataFrame()
     now = datetime.now(UTC)
     target = now + timedelta(hours=hours_limit)
-    scan_time = datetime.now(TH_TZ).isoformat(timespec="seconds")
     rows = []
-
     for match in matches:
         try:
             kickoff = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00")).astimezone(UTC)
         except Exception:
             continue
-
         if not (now <= kickoff <= target):
             continue
-
-        home = match.get("home_team", "")
-        away = match.get("away_team", "")
-        books = match.get("bookmakers", [])
-
-        if not books:
-            continue
-
+        home, away = match.get("home_team", ""), match.get("away_team", "")
         kickoff_th = kickoff.astimezone(TH_TZ)
-        metrics = estimate_goals(history, home, away, kickoff_th) if history is not None else None
-
-        for bm in books:
+        metrics = estimate_goals(history, home, away, kickoff) if not history.empty else None
+        context = estimate_domestic_context(domestic_context, home, away, kickoff) if sport_key in EUROPEAN_CUPS else {}
+        # EV is intentionally disabled for cups unless genuine cup-specific xG is connected.
+        if sport_key in EUROPEAN_CUPS:
+            metrics = None
+        matrix = score_matrix(metrics["home_lambda"], metrics["away_lambda"]) if metrics else None
+        for bm in match.get("bookmakers", []):
             book_name = bm.get("title", "Unknown")
             for market in bm.get("markets", []):
                 m_key = market.get("key")
-                outcomes = market.get("outcomes", [])
-
-                if m_key == "spreads":
-                    for outcome in outcomes:
-                        name = outcome.get("name")
+                if m_key not in ("spreads", "totals"):
+                    continue
+                for outcome in market.get("outcomes", []):
+                    try:
                         odds = float(outcome.get("price", 0))
                         line = float(outcome.get("point", 0))
-
-                        if not (min_odds <= odds <= max_odds):
-                            continue
-
+                    except (TypeError, ValueError):
+                        continue
+                    if not (min_odds <= odds <= max_odds):
+                        continue
+                    name = outcome.get("name")
+                    if m_key == "spreads":
                         if name == home:
-                            selection = f"ต่อ {home} ({line})" if line < 0 else (f"รอง {home} (+{line})" if line > 0 else f"วาง {home} (เสมอ)")
                             side = "home"
+                            selection = selection_spread(home, side, line)
                         elif name == away:
-                            selection = f"ต่อ {away} ({-line})" if line > 0 else (f"รอง {away} (+{-line})" if line < 0 else f"วาง {away} (เสมอ)")
                             side = "away"
+                            selection = selection_spread(away, side, line)
                         else:
                             continue
-
-                        if metrics:
-                            mat = score_matrix(metrics["home_lambda"], metrics["away_lambda"])
-                            eval_res = evaluate_market_poisson(mat, "spreads", side, line, odds)
-                        else:
-                            eval_res = evaluate_market_fallback("spreads", side, line, odds)
-
-                        rows.append({
-                            "event_id": match.get("id", ""),
-                            "kickoff_utc": kickoff.isoformat(),
-                            "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"),
-                            "league": league_name,
-                            "home_team": home,
-                            "away_team": away,
-                            "match": f"{home} vs {away}",
-                            "market": "Asian Handicap",
-                            "side": side,
-                            "point": line,
-                            "selection": selection,
-                            "odds": odds,
-                            "bookmaker": book_name,
-                            "scanned_at": scan_time,
-                            "lambda_home": metrics["home_lambda"] if metrics else 0.0,
-                            "lambda_away": metrics["away_lambda"] if metrics else 0.0,
-                            "history_matches": metrics["history_matches"] if metrics else 0,
-                            **eval_res,
-                        })
-
-                elif m_key == "totals":
-                    for outcome in outcomes:
-                        name = outcome.get("name")
-                        odds = float(outcome.get("price", 0))
-                        line = float(outcome.get("point", 0))
-
-                        if not (min_odds <= odds <= max_odds):
-                            continue
-
+                        market_label = "Asian Handicap"
+                    else:
                         if name == "Over":
-                            selection = f"สกอร์สูง (Over {line})"
-                            side = "over"
+                            side, selection = "over", f"สกอร์สูง (Over {line:g})"
                         elif name == "Under":
-                            selection = f"สกอร์ต่ำ (Under {line})"
-                            side = "under"
+                            side, selection = "under", f"สกอร์ต่ำ (Under {line:g})"
                         else:
                             continue
-
-                        if metrics:
-                            mat = score_matrix(metrics["home_lambda"], metrics["away_lambda"])
-                            eval_res = evaluate_market_poisson(mat, "totals", side, line, odds)
-                        else:
-                            eval_res = evaluate_market_fallback("totals", side, line, odds)
-
-                        rows.append({
-                            "event_id": match.get("id", ""),
-                            "kickoff_utc": kickoff.isoformat(),
-                            "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"),
-                            "league": league_name,
-                            "home_team": home,
-                            "away_team": away,
-                            "match": f"{home} vs {away}",
-                            "market": "Over/Under",
-                            "side": side,
-                            "point": line,
-                            "selection": selection,
-                            "odds": odds,
-                            "bookmaker": book_name,
-                            "scanned_at": scan_time,
-                            "lambda_home": metrics["home_lambda"] if metrics else 0.0,
-                            "lambda_away": metrics["away_lambda"] if metrics else 0.0,
-                            "history_matches": metrics["history_matches"] if metrics else 0,
-                            **eval_res,
-                        })
-
+                        market_label = "Over/Under"
+                    eval_res = evaluate_market_poisson(matrix, m_key, side, line, odds) if matrix else None
+                    rows.append({
+                        "event_id": match.get("id", ""),
+                        "kickoff_utc": kickoff.isoformat(),
+                        "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"),
+                        "league": league_name, "home_team": home, "away_team": away,
+                        "match": f"{home} vs {away}", "market": market_label,
+                        "side": side, "point": line, "selection": selection,
+                        "odds": odds, "bookmaker": book_name,
+                        "lambda_home": metrics["home_lambda"] if metrics else None,
+                        "lambda_away": metrics["away_lambda"] if metrics else None,
+                        "history_matches": metrics["history_matches"] if metrics else 0,
+                        "xg_home_avg": metrics.get("xg_home_avg") if metrics else None,
+                        "xga_home_avg": metrics.get("xga_home_avg") if metrics else None,
+                        "xg_away_avg": metrics.get("xg_away_avg") if metrics else None,
+                        "xga_away_avg": metrics.get("xga_away_avg") if metrics else None,
+                        "home_context_xg": context.get("home_context_xg"),
+                        "home_context_xga": context.get("home_context_xga"),
+                        "away_context_xg": context.get("away_context_xg"),
+                        "away_context_xga": context.get("away_context_xga"),
+                        "home_context_matches": context.get("home_context_matches", 0),
+                        "away_context_matches": context.get("away_context_matches", 0),
+                        "context_status": context.get("context_status", ""),
+                        "model_status": ("ถ้วยยุโรป: แสดง xG ลีกในประเทศเป็นข้อมูลประกอบเท่านั้น — ไม่มี EV เพราะไม่มี xG เฉพาะถ้วย" if sport_key in EUROPEAN_CUPS else ("Poisson จาก xG/xGA จริง (Understat)" if metrics else ("ลีกนี้ไม่มี xG จากแหล่งที่ตั้งไว้ — งดคำนวณ EV" if sport_key not in UNDERSTAT_LEAGUES else "xG ย้อนหลังไม่พอ/แหล่งข้อมูลไม่พร้อม — งดคำนวณ EV"))),
+                        "ev_pct": eval_res["ev_pct"] if eval_res else None,
+                        "p_win": eval_res["p_win"] if eval_res else None,
+                        "p_partial": eval_res["p_partial"] if eval_res else None,
+                        "p_loss": eval_res["p_loss"] if eval_res else None,
+                        "score": eval_res["score"] if eval_res else None,
+                    })
     return rows, remaining, used
 
+# -------------------- RESULT SETTLEMENT --------------------
+def settle_pick(row, home_goals, away_goals):
+    odds = float(row["odds"])
+    point = float(row["point"] or 0)
+    market = row["market"]
+    side = row["side"]
+    if market == "Asian Handicap":
+        diff = (home_goals - away_goals) if side == "home" else (away_goals - home_goals)
+        adjusted_base = diff
+    elif market == "Over/Under":
+        adjusted_base = home_goals + away_goals
+    else:
+        return None, None
+    outcomes = []
+    net_profit = 0.0
+    for line, weight in split_line(point):
+        if market == "Asian Handicap":
+            result = settle_leg(adjusted_base + line)
+        else:
+            adjusted = adjusted_base - line if side == "over" else line - adjusted_base
+            result = settle_leg(adjusted)
+        outcomes.append(result)
+        if result == "win":
+            net_profit += weight * (odds - 1.0)
+        elif result == "loss":
+            net_profit -= weight
+    if all(x == "win" for x in outcomes):
+        label, binary = "ชนะเต็ม", 1
+    elif all(x == "loss" for x in outcomes):
+        label, binary = "แพ้เต็ม", 0
+    elif all(x == "push" for x in outcomes):
+        label, binary = "คืนทุน", None
+    elif net_profit > 1e-9:
+        label, binary = "ชนะครึ่ง", None
+    elif net_profit < -1e-9:
+        label, binary = "แพ้ครึ่ง", None
+    else:
+        label, binary = "คืนทุน", None
+    return (label, round(net_profit, 4), binary)
 
-# -------------------- SIDEBAR SETTINGS --------------------
-
+# -------------------- SIDEBAR --------------------
 with st.sidebar:
     st.header("⚙️ ตั้งค่าการสแกน")
-
-    key_input = st.text_input("The Odds API Key", type="password", help="ใส่คีย์ที่นี่ หรือตั้งใน Streamlit secrets")
+    key_input = st.text_input("The Odds API Key", type="password", help="แนะนำให้ตั้งใน Streamlit secrets")
     if key_input.strip():
         st.session_state["runtime_api_key"] = key_input.strip()
-
+    st.caption("อย่าใส่ API Key ลงในโค้ดหรือส่งให้ผู้อื่น")
     st.divider()
-
     league_names = {k: v[0] for k, v in LEAGUES.items()}
-    selected_leagues = st.multiselect(
-        "เลือกลีกที่ต้องการสแกน",
-        list(LEAGUES.keys()),
-        default=[],  # ปล่อยว่างเพื่อประหยัดโควตา API
-        format_func=lambda k: league_names[k],
-    )
-
+    selected_leagues = st.multiselect("เลือกลีกที่ต้องการสแกน", list(LEAGUES.keys()), default=[], format_func=lambda k: league_names[k])
     hours_limit = st.selectbox("ช่วงเวลาเตะข้างหน้า", [24, 48], index=0)
     regions = st.selectbox("ภูมิภาคราคา API", ["uk", "eu", "us"], index=0)
     min_odds = st.number_input("ค่าน้ำต่ำสุด", 1.01, 5.00, 1.80, 0.05)
     max_odds = st.number_input("ค่าน้ำสูงสุด", 1.01, 10.00, 2.05, 0.05)
-    min_ev_pct = st.number_input("EV ขั้นต่ำ (%)", 0.0, 30.0, 1.0, 0.5)
-
+    min_ev_pct = st.number_input("EV ขั้นต่ำ (%)", -20.0, 30.0, 1.0, 0.5)
     scan_btn = st.button("🚀 สแกนราคาและวิเคราะห์", type="primary", use_container_width=True)
 
-
-# -------------------- MAIN TABS --------------------
-
-tab_scan, tab_slips, tab_history, tab_help = st.tabs([
-    "📊 ผลวิเคราะห์ราคา",
-    "🎟️ จัดบิลสเต็ป VIP (5, 9, 13, 20 คู่)",
-    "📚 ประวัติและตรวจผล (SQLite)",
-    "ℹ️ วิธีใช้และสถานะ",
-])
-
 api_key = get_api_key()
+tab_scan, tab_slips, tab_history, tab_help = st.tabs(["📊 ผลวิเคราะห์ราคา", "🎟️ ตัวเลือกสเต็ป", "📚 ราคาไหลและตรวจผล", "ℹ️ วิธีใช้"])
 
 with tab_scan:
-    st.subheader("📊 รายการวิเคราะห์ราคาที่ผ่านเกณฑ์")
-
+    st.subheader("📊 รายการวิเคราะห์")
     if scan_btn:
         if not api_key:
             st.error("ไม่พบ API Key กรุณากรอกคีย์ในแถบซ้ายมือ")
         elif not selected_leagues:
-            st.warning("💡 กรุณาติ๊กเลือกลีกที่ต้องการในแถบด้านซ้ายก่อนกดสแกน")
+            st.warning("เลือกลีกทางซ้ายก่อนกดสแกน")
+        elif min_odds > max_odds:
+            st.error("ค่าน้ำต่ำสุดต้องไม่มากกว่าค่าน้ำสูงสุด")
         else:
-            all_rows = []
-            errors = []
-            quota_info = []
-
+            all_rows, errors, quota_info = [], [], []
             progress = st.progress(0)
             for i, key in enumerate(selected_leagues):
                 league_name, csv_code = LEAGUES[key]
                 try:
-                    rows, remaining, used = scan_league(
-                        key, league_name, csv_code, hours_limit,
-                        min_odds, max_odds, regions, api_key
-                    )
+                    rows, remaining, used = scan_league(key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key)
                     all_rows.extend(rows)
                     quota_info.append(f"{league_name}: ใช้ไป {used}, เหลือ {remaining}")
                 except Exception as exc:
                     errors.append(f"{league_name}: {exc}")
-
                 progress.progress((i + 1) / len(selected_leagues))
             progress.empty()
-
             if all_rows:
                 count = save_picks(all_rows)
-                st.success(f"สแกนสำเร็จ! บันทึกผลวิเคราะห์ {count} รายการลง SQLite แล้ว")
+                st.success(f"บันทึก {count} รายการแล้ว")
+                reliable = sum(1 for r in all_rows if r.get("ev_pct") is not None)
+                st.info(f"มีข้อมูลพอคำนวณ EV: {reliable}/{len(all_rows)} รายการ — รายการที่ข้อมูลไม่พอจะไม่ถูกใช้จัดบิล")
             else:
-                st.info("ไม่พบคู่แข่งขันในเงื่อนไขเวลาและราคาที่เลือก")
-
+                st.info("ไม่พบคู่ในช่วงเวลาหรือค่าน้ำที่เลือก")
             for info in quota_info:
-                st.caption(f"ℹ️ {info}")
+                st.caption("ℹ️ " + info)
             for err in errors:
                 st.warning(err)
-
     df = load_picks()
     if df.empty:
-        st.info("ยังไม่มีข้อมูลสแกนในระบบ เลือกตารางลีกทางซ้ายแล้วกดปุ่มสแกน")
+        st.info("ยังไม่มีข้อมูล เลือกลีกและกดสแกน")
     else:
+        df["kickoff_parsed"] = pd.to_datetime(df["kickoff_utc"], errors="coerce", utc=True)
+        now_ts = pd.Timestamp.now(tz="UTC")
         df["ev_pct"] = pd.to_numeric(df["ev_pct"], errors="coerce")
-        view = df[df["ev_pct"] >= min_ev_pct].copy()
-        view = view.drop_duplicates(subset=["match"]).sort_values("score", ascending=False)
-
-        st.metric("จำนวนคู่แข่งขันที่ผ่านเกณฑ์ EV", len(view))
-        columns = ["kickoff_th", "league", "match", "selection", "odds", "ev_pct", "p_win", "bookmaker"]
-        
-        st.dataframe(
-            view[columns].rename(columns={
-                "kickoff_th": "เวลาแข่ง", "league": "ลีก", "match": "คู่แข่งขัน",
-                "selection": "คำแนะนำ", "odds": "ค่าน้ำ", "ev_pct": "EV (%)",
-                "p_win": "โอกาสชนะ (%)", "bookmaker": "เจ้ามือ"
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
-
+        upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
+        view = upcoming[upcoming["ev_pct"].notna() & (upcoming["ev_pct"] >= min_ev_pct)].copy()
+        view = view.sort_values(["score", "ev_pct"], ascending=False).drop_duplicates(subset=["event_id", "market", "side", "point", "bookmaker"])
+        st.metric("ตัวเลือกที่ผ่าน EV และยังไม่เริ่มแข่ง", len(view))
+        if not view.empty:
+            cols = ["kickoff_th", "league", "match", "selection", "odds", "xg_home_avg", "xga_home_avg", "xg_away_avg", "xga_away_avg", "ev_pct", "p_win", "bookmaker", "model_status"]
+            st.dataframe(view[cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"ตัวเลือก", "odds":"ค่าน้ำ", "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย", "xga_away_avg":"เยือน xGA เฉลี่ย", "ev_pct":"EV (%)", "p_win":"ชนะเต็ม (%)", "bookmaker":"เจ้ามือ", "model_status":"แหล่งประเมิน"}), use_container_width=True, hide_index=True)
+        else:
+            st.info("ยังไม่มีตัวเลือกที่ผ่านเกณฑ์จากแบบจำลองที่มีข้อมูลเพียงพอ")
+        unsupported = upcoming[upcoming["ev_pct"].isna()]
+        if not unsupported.empty:
+            with st.expander(f"ดูราคาแต่ไม่มี EV เพราะข้อมูลย้อนหลังไม่พอ ({len(unsupported)} รายการ)"):
+                show_cols = ["kickoff_th","league","match","selection","odds","bookmaker","model_status"]
+                context_cols = ["home_context_xg", "home_context_xga", "away_context_xg", "away_context_xga", "context_status"]
+                show_cols += [c for c in context_cols if c in unsupported.columns and unsupported[c].notna().any()]
+                st.dataframe(unsupported[show_cols], use_container_width=True, hide_index=True)
 
 with tab_slips:
-    st.subheader("🔥 จัดบิลสเต็ป VIP จากตัวเลือกที่มั่นใจที่สุด")
-
+    st.subheader("🎟️ คัดตัวเลือกสำหรับพิจารณา — ไม่ใช่การรับประกันบิลชนะ")
     df = load_picks()
     if df.empty:
-        st.info("สแกนราคาก่อนเพื่อนำข้อมูลมาจัดบิลสเต็ป")
+        st.info("สแกนราคาก่อน")
     else:
-        df["ev_pct"] = pd.to_numeric(df["ev_pct"], errors="coerce")
-        df["odds"] = pd.to_numeric(df["odds"], errors="coerce")
-        df["p_win"] = pd.to_numeric(df["p_win"], errors="coerce")
-        df["score"] = pd.to_numeric(df["score"], errors="coerce")
-
-        candidates = df[(df["ev_pct"] >= min_ev_pct) & (df["status"] == "รอตรวจผล")].copy()
-        candidates = candidates.drop_duplicates(subset=["match"], keep="first")
-        candidates = candidates.sort_values("score", ascending=False).reset_index(drop=True)
-
-        st.write(f"พบ **{len(candidates)}** คู่แข่งขันที่พร้อมนำมาจัดบิลสเต็ป")
-        
+        df["kickoff_parsed"] = pd.to_datetime(df["kickoff_utc"], errors="coerce", utc=True)
+        for col in ("ev_pct", "odds", "p_win", "score"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        now_ts = pd.Timestamp.now(tz="UTC")
+        candidates = df[(df["kickoff_parsed"] >= now_ts) & df["ev_pct"].notna() & df["p_win"].notna() & (df["ev_pct"] >= min_ev_pct) & (df["status"] == "รอตรวจผล")].copy()
+        candidates = candidates.sort_values("score", ascending=False).drop_duplicates(subset=["event_id"], keep="first").reset_index(drop=True)
+        st.write(f"มี {len(candidates)} คู่ที่มีแบบจำลองและยังไม่เริ่มแข่ง (เลือกสูงสุด 1 ตัวเลือกต่อคู่)")
         sizes = [5, 9, 13, 20]
         for size in sizes:
-            st.markdown(f"### 🌟 บิลสเต็ป {size} คู่ VIP")
+            st.markdown(f"#### บิล {size} คู่")
             if len(candidates) < size:
-                st.info(f"มีคู่แข่งขันผ่านเกณฑ์เพียง {len(candidates)} คู่ (ยังไม่พอจัดบิล {size} คู่)")
+                st.caption(f"มีเพียง {len(candidates)} คู่ที่ผ่านเกณฑ์ จึงไม่จัดบิล {size} คู่")
                 continue
-
-            slip_df = candidates.head(size).copy()
-            combined_odds = float(slip_df["odds"].prod())
-            avg_win = float(slip_df["p_win"].mean())
-
+            slip = candidates.head(size).copy()
+            combined_odds = float(slip["odds"].prod())
+            p_full = float((slip["p_win"].clip(0, 100) / 100).prod() * 100)
             c1, c2 = st.columns(2)
-            c1.metric("ค่าน้ำรวมโดยประมาณ", f"{combined_odds:,.2f}")
-            c2.metric("โอกาสชนะเฉลี่ยต่อคู่", f"{avg_win:.1f}%")
-
-            for i, row in slip_df.iterrows():
-                st.markdown(
-                    f"**{i+1}. [{row['league']}] {row['match']}**<br>"
-                    f"👉 แนะนำ: **`{row['selection']}`** | ค่าน้ำจริง: `{row['odds']}` | โอกาสชนะ: `{row['p_win']}%` (EV: `+{row['ev_pct']}%`)",
-                    unsafe_allow_html=True
-                )
-            st.markdown("---")
-
+            c1.metric("ค่าน้ำรวม (กรณีชนะเต็มทุกคู่)", f"{combined_odds:,.2f}")
+            c2.metric("โอกาสชนะเต็มทุกคู่โดยประมาณ", f"{p_full:.3f}%")
+            st.caption("คำนวณโดยสมมติว่าผลแต่ละคู่เป็นอิสระต่อกัน และไม่รวมผลชนะครึ่ง/คืนทุน จึงไม่ใช่ความน่าจะเป็นที่แน่นอนของบิลเอเชียน")
+            st.dataframe(slip[["league","match","selection","odds","ev_pct","p_win","bookmaker"]].rename(columns={"league":"ลีก","match":"คู่แข่งขัน","selection":"ตัวเลือก","odds":"ค่าน้ำ","ev_pct":"EV (%)","p_win":"ชนะเต็ม (%)","bookmaker":"เจ้ามือ"}), use_container_width=True, hide_index=True)
 
 with tab_history:
-    st.subheader("📚 ประวัติสัญญาณและการตรวจผล (SQLite)")
-
-    df = load_picks()
-    if df.empty:
-        st.info("ยังไม่มีประวัติบันทึกในฐานข้อมูล")
+    st.subheader("📈 ประวัติราคาและตรวจผล")
+    with db() as con:
+        keys = pd.read_sql_query("""SELECT DISTINCT event_id, match_name, market, side, bookmaker
+            FROM odds_snapshots ORDER BY event_id DESC LIMIT 500""", con)
+        movement_rows = []
+        for _, keyrow in keys.iterrows():
+            rows = con.execute("""SELECT point, odds, captured_at FROM odds_snapshots
+                WHERE event_id=? AND market=? AND side=? AND bookmaker=?
+                ORDER BY captured_at ASC, id ASC""", (keyrow["event_id"], keyrow["market"], keyrow["side"], keyrow["bookmaker"])).fetchall()
+            if not rows:
+                continue
+            first, latest = rows[0], rows[-1]
+            try:
+                first_odds, latest_odds = float(first["odds"]), float(latest["odds"])
+                first_point = float(first["point"] or 0)
+                latest_point = float(latest["point"] or 0)
+            except (TypeError, ValueError):
+                continue
+            odds_delta = round(latest_odds - first_odds, 3)
+            point_changed = abs(latest_point - first_point) > 1e-9
+            trend = "ราคาเพิ่ม" if odds_delta > 0 else ("ราคาลด" if odds_delta < 0 else "ราคาน้ำคงที่")
+            if point_changed:
+                trend += " / แต้มต่อเปลี่ยน"
+            movement_rows.append({"คู่แข่งขัน":keyrow["match_name"], "ตลาด":keyrow["market"], "ฝั่ง":keyrow["side"], "เจ้ามือ":keyrow["bookmaker"], "ราคาแรก":first_odds, "ราคาล่าสุด":latest_odds, "เปลี่ยนแปลงน้ำ":odds_delta, "แต้มแรก":first_point, "แต้มล่าสุด":latest_point, "จำนวน snapshot":len(rows), "ตรวจครั้งแรก":first["captured_at"], "ตรวจล่าสุด":latest["captured_at"], "สัญญาณ":trend})
+    if movement_rows:
+        st.dataframe(pd.DataFrame(movement_rows), use_container_width=True, hide_index=True)
+        st.caption("การเปลี่ยนแปลงราคาเป็นเพียงสัญญาณตลาด ไม่สามารถยืนยันได้ว่าเป็นราคาไหลหลอก")
     else:
-        st.dataframe(
-            df[["id", "kickoff_th", "league", "match", "selection", "odds", "ev_pct", "status", "final_score", "settlement"]],
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.info("ยังไม่มีประวัติราคา กดสแกนมากกว่าหนึ่งครั้งในช่วงเวลาต่างกันเพื่อเริ่มเปรียบเทียบ")
 
-        if st.button("🔄 ตรวจผลย้อนหลังจาก Football-Data.co.uk"):
+    st.divider()
+    st.markdown("#### ตรวจผลย้อนหลังจาก Football-Data (เฉพาะลีกที่มีรหัสรองรับ)")
+    df = load_picks()
+    if not df.empty:
+        st.dataframe(df[["id","kickoff_th","league","match","selection","odds","ev_pct","model_status","status","final_score","settlement","profit_units"]], use_container_width=True, hide_index=True)
+        if st.button("🔄 ตรวจและคำนวณผลที่หาเจอ", type="secondary"):
             checked = 0
+            skipped = 0
+            # Avoid claiming settlement if the league has no matching results source.
             for _, row in df[df["status"] != "ตรวจแล้ว"].iterrows():
-                code = next((v[1] for k, v in LEAGUES.items() if v[0] == row["league"]), None)
+                code = next((v[1] for v in LEAGUES.values() if v[0] == row["league"]), None)
                 if not code:
+                    skipped += 1
                     continue
-
-                history = fetch_history(code)
+                hist = fetch_history(code)
+                if hist.empty:
+                    skipped += 1
+                    continue
                 try:
-                    kickoff = datetime.fromisoformat(str(row["kickoff_utc"]))
+                    kickoff = pd.to_datetime(row["kickoff_utc"], utc=True).tz_convert(None).normalize()
                 except Exception:
+                    skipped += 1
                     continue
-
-                teams = sorted(set(history["HomeTeam"].dropna()) | set(history["AwayTeam"].dropna()))
+                teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
                 home = map_team(row["home_team"], teams)
                 away = map_team(row["away_team"], teams)
-
                 if not home or not away:
+                    skipped += 1
                     continue
-
-                target = pd.Timestamp(kickoff.date())
-                candidates = history[(history["HomeTeam"] == home) & (history["AwayTeam"] == away) & ((history["Date_dt"] - target).abs().dt.days <= 1)]
-
+                # Require exact home/away team pairing and kickoff date within 1 day; choose nearest date.
+                candidates = hist[(hist["HomeTeam"] == home) & (hist["AwayTeam"] == away)].copy()
                 if candidates.empty:
+                    skipped += 1
                     continue
-
-                res_row = candidates.iloc[-1]
-                hg, ag = int(res_row["FTHG"]), int(res_row["FTAG"])
-                
-                settlement = "ตรวจผลแล้ว"
-                update_pick_result(row["id"], f"{hg}-{ag}", settlement)
+                candidates["date_diff"] = (candidates["Date_dt"].dt.normalize() - kickoff).abs().dt.days
+                candidates = candidates[candidates["date_diff"] <= 1].sort_values("date_diff")
+                if candidates.empty:
+                    skipped += 1
+                    continue
+                result = candidates.iloc[0]
+                hg, ag = int(result["FTHG"]), int(result["FTAG"])
+                settled = settle_pick(row, hg, ag)
+                if settled is None:
+                    skipped += 1
+                    continue
+                label, profit, binary = settled
+                update_pick_result(row["id"], f"{hg}-{ag}", label, profit, binary)
                 checked += 1
-
-            st.success(f"อัปเดตผลได้ {checked} รายการ!")
+            st.success(f"ตรวจผลและคำนวณการชำระราคาได้ {checked} รายการ; ข้ามเพราะไม่มีผลตรงกัน/ไม่มีแหล่งข้อมูล {skipped} รายการ")
             st.rerun()
 
+        settled = df[df["status"] == "ตรวจแล้ว"].copy()
+        if not settled.empty:
+            settled["profit_units"] = pd.to_numeric(settled["profit_units"], errors="coerce")
+            total_profit = settled["profit_units"].fillna(0).sum()
+            n = len(settled)
+            roi = total_profit / n * 100 if n else 0
+            a, b, c = st.columns(3)
+            a.metric("จำนวนเดิมพันที่ตรวจผลแล้ว", n)
+            b.metric("กำไร/ขาดทุนสุทธิ (หน่วยเดิมพัน)", f"{total_profit:+.2f}")
+            c.metric("ROI ต่อเดิมพันที่ตรวจแล้ว", f"{roi:+.2f}%")
+            st.caption("ROI นี้นับหนึ่งหน่วยเดิมพันต่อรายการ และใช้เฉพาะรายการที่มีการชำระผลได้ ไม่รวมค่าคอมมิชชันหรือความแตกต่างของเงินเดิมพัน")
+    st.divider()
     if DB_FILE.exists():
-        st.download_button(
-            "⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite (backup.db)",
-            data=DB_FILE.read_bytes(),
-            file_name="value_bet_pro_v3.db",
-            mime="application/octet-stream",
-        )
-
+        st.download_button("⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite", data=DB_FILE.read_bytes(), file_name=DB_FILE.name, mime="application/octet-stream")
 
 with tab_help:
-    st.subheader("ℹ️ คำอธิบายการทำงานและสถานะระบบ")
+    st.subheader("ℹ️ วิธีใช้และข้อจำกัด")
     st.markdown("""
-    - **ระบบคำนวณไฮบริด:** หากมีสถิติย้อนหลังตรงกัน ระบบจะใช้แบบจำลอง Poisson แต่หากเป็นโปรแกรมบอลถ้วยหรือไม่มีสถิติ ระบบจะสลับไปใช้ Market-Implied Probability อัตโนมัติ ป้องกันตารางขึ้นค่าว่าง
-    - **การคัดกรองราคาหลัก:** บังคับสแกนเฉพาะค่าน้ำมาตรฐาน `1.80 - 2.05` เพื่อคัดเอาคู่ที่ต่อรองสมดุลที่สุด ตัดค่าน้ำทางเลือกมั่วๆ ออก
-    - **ประหยัดโควตา API:** ช่องเลือกลีกถูกตั้งค่าเริ่มต้นให้เป็นช่องว่าง ระบบจะไม่ดึงข้อมูลอัตโนมัติจนกว่าจะติ๊กลีกและกดปุ่มสแกน
-    """)
+- **ไม่มี fallback EV ปลอม:** ถ้าประวัติไม่พอ ระบบจะแสดงราคาแต่เว้น EV และไม่ใช้จัดบิล
+- **แบบจำลอง:** ใช้ xG/xGA จริงจากหน้า Understat สำหรับลีกที่รองรับเท่านั้น และใช้ Poisson ประเมินสกอร์ ไม่ใช่คำรับประกันผลกำไร
+- **ความครอบคลุม xG:** โค้ดตั้งค่า Understat สำหรับพรีเมียร์ลีก, ลาลีกา, บุนเดสลีกา, เซเรียอา, ลีกเอิง และรัสเซีย หากเว็บปิดกั้น/เปลี่ยนรูปแบบ หรือไม่มีข้อมูลก่อนเตะ ระบบจะเว้น EV
+- **UCL / Europa League / Conference League:** ดึงราคาได้ทั้งสามรายการ แสดง xG ลีกในประเทศของทีมที่จับคู่ข้อมูลได้เพื่อประกอบการดูฟอร์มเท่านั้น และไม่ใช้ข้อมูลลีกในประเทศคำนวณ EV ของถ้วยยุโรป
+- **ลีกอื่น:** ยังดึงราคาได้ แต่จะไม่แสดง EV จนกว่าจะเชื่อมแหล่ง xG ที่เชื่อถือได้สำหรับลีกนั้น ห้ามตีความว่าไม่มี EV แปลว่าไม่มี value
+- **ประวัติราคา:** Snapshot เริ่มเก็บตั้งแต่วันที่ใช้รุ่นนี้ ต้องสแกนหลายครั้งจึงจะมีข้อมูลเปรียบเทียบราคาแรกกับราคาล่าสุด และยังยืนยันราคาไหลหลอกไม่ได้
+- **โควตา The Odds API:** เลือกสแกนเฉพาะลีกที่สนใจ; แต่ละลีกใช้คำขอราคา 1 ครั้ง โดยขอ 2 ตลาดในภูมิภาคเดียว (ต้นทุนโดยทั่วไป 2 credits ต่อลีกที่มีข้อมูล) ตรวจตัวเลขคงเหลือจาก response header
+- **ข้อมูลบน Streamlit Cloud:** SQLite ในพื้นที่แอปอาจไม่ถาวรหลังรีสตาร์ตหรือ redeploy ควรดาวน์โหลดสำรองเป็นระยะ
+- **ความเสี่ยง:** EV เป็นค่าประมาณตามแบบจำลอง ไม่ใช่คำรับประกันผลกำไร
+""")
 
 st.divider()
-st.caption("Value Bet Pro Advanced | ใช้เพื่อวิเคราะห์ข้อมูลเท่านั้น ไม่มีระบบใดรับประกันผลกำไรจากการเดิมพัน")
+st.caption("Value Bet Pro xG Edition | xG coverage varies by league; no model is guaranteed profitable")
