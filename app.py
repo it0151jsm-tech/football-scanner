@@ -85,6 +85,18 @@ def get_api_key():
     session_key = st.session_state.get("runtime_api_key", "")
     return str(session_key or key).strip()
 
+
+def get_results_api_key():
+    """Optional free-tier key for football results; independent from The Odds API."""
+    try:
+        key = st.secrets.get("FOOTBALLDATA_IO_API_KEY", "")
+    except Exception:
+        key = ""
+    if not key:
+        key = os.getenv("FOOTBALLDATA_IO_API_KEY", "")
+    session_key = st.session_state.get("runtime_results_api_key", "")
+    return str(session_key or key).strip()
+
 # -------------------- DATABASE / MIGRATIONS --------------------
 def db():
     con = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
@@ -270,6 +282,139 @@ def fetch_history(csv_code):
         return pd.DataFrame()
     result = pd.concat(frames, ignore_index=True).sort_values("Date_dt")
     return result.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last").reset_index(drop=True)
+
+
+# -------------------- FREE-TIER RESULTS API (EUROPEAN CUPS) --------------------
+RESULTS_API_BASE = "https://footballdata.io/api/v1"
+EUROPEAN_CUP_LABELS = {
+    "soccer_uefa_europa_league": ("ยูฟ่า ยูโรปาลีก", ("europa league", "uefa europa league")),
+    "soccer_uefa_europa_conference_league": ("ยูฟ่า คอนเฟอเรนซ์ลีก", ("conference league", "uefa conference league", "uefa europa conference league")),
+}
+
+
+def _api_matches(payload):
+    """Normalize common API response envelopes to a list of match dictionaries."""
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data", payload)
+    if isinstance(data, dict):
+        for key in ("matches", "fixtures", "results"):
+            if isinstance(data.get(key), list):
+                return data[key]
+    if isinstance(data, list):
+        return data
+    for key in ("matches", "fixtures", "results"):
+        if isinstance(payload.get(key), list):
+            return payload[key]
+    return []
+
+
+def _api_team_name(team):
+    if isinstance(team, dict):
+        return str(team.get("team_name") or team.get("name") or team.get("display_name") or "").strip()
+    return str(team or "").strip()
+
+
+def _api_score(match, side):
+    score = match.get("score") or match.get("scores") or {}
+    if isinstance(score, dict):
+        value = score.get(side)
+        if value is None:
+            value = score.get("home" if side == "home" else "away")
+        if isinstance(value, dict):
+            value = value.get("total", value.get("goals", value.get("score")))
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                pass
+    key = "home_score" if side == "home" else "away_score"
+    value = match.get(key)
+    if value is None:
+        value = match.get("goals_home" if side == "home" else "goals_away")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_free_results_for_date(date_text, api_key):
+    """Fetch fixtures for one UTC date using the provider's free tier; cache to conserve quota."""
+    if not api_key:
+        return []
+    url = f"{RESULTS_API_BASE}/fixtures"
+    try:
+        response = requests.get(
+            url,
+            params={"date": date_text},
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=TIMEOUT,
+        )
+        if response.status_code == 401:
+            return [{"_error": "คีย์ FootballData.io ไม่ถูกต้อง"}]
+        if response.status_code == 429:
+            return [{"_error": "โควตา FootballData.io ฟรีหมดแล้วหรือเรียกถี่เกินไป"}]
+        if response.status_code != 200:
+            return [{"_error": f"FootballData.io ตอบ HTTP {response.status_code}"}]
+        return _api_matches(response.json())
+    except (requests.RequestException, ValueError) as exc:
+        return [{"_error": f"เชื่อมต่อแหล่งผลการแข่งขันไม่ได้: {exc}"}]
+
+
+def find_european_cup_result(row, api_key):
+    """Return a verified full-time score for Europa/Conference League, or None."""
+    if not api_key:
+        return None, "ยังไม่ได้ตั้งค่า FootballData.io API Key ฟรี"
+    try:
+        kickoff = pd.to_datetime(row.get("kickoff_utc"), utc=True)
+        if pd.isna(kickoff):
+            return None, "เวลาเตะไม่ถูกต้อง"
+    except Exception:
+        return None, "เวลาเตะไม่ถูกต้อง"
+
+    # Query kickoff date and adjacent UTC dates because fixtures can cross timezone/date boundaries.
+    dates = [(kickoff + pd.Timedelta(days=offset)).strftime("%Y-%m-%d") for offset in (-1, 0, 1)]
+    home_target, away_target = norm_name(row.get("home_team")), norm_name(row.get("away_team"))
+    league_text = str(row.get("league", "")).lower()
+    league_terms = ()
+    for label, terms in EUROPEAN_CUP_LABELS.values():
+        if label.lower() in league_text:
+            league_terms = terms
+            break
+    for date_text in dates:
+        matches = fetch_free_results_for_date(date_text, api_key)
+        if matches and isinstance(matches[0], dict) and matches[0].get("_error"):
+            return None, matches[0]["_error"]
+        for match in matches:
+            if not isinstance(match, dict):
+                continue
+            competition = match.get("league") or match.get("competition") or {}
+            if isinstance(competition, dict):
+                comp_name = str(competition.get("name") or competition.get("league_name") or "").lower()
+            else:
+                comp_name = str(competition).lower()
+            # Do not settle from a different competition if provider returns all matches for the date.
+            if league_terms:
+                # If competition metadata is missing, fail closed rather than risk settling a different tournament.
+                if not comp_name or not any(term in comp_name for term in league_terms):
+                    continue
+            home_obj = match.get("home_team") or match.get("homeTeam") or match.get("home")
+            away_obj = match.get("away_team") or match.get("awayTeam") or match.get("away")
+            home_name, away_name = _api_team_name(home_obj), _api_team_name(away_obj)
+            if not home_name or not away_name:
+                continue
+            if norm_name(home_name) != home_target or norm_name(away_name) != away_target:
+                continue
+            status = str(match.get("status") or match.get("match_status") or "").strip().lower()
+            # Only final statuses count; never settle live, postponed, cancelled, or abandoned matches.
+            if status not in {"complete", "completed", "finished", "ft", "full_time", "full-time", "after_extra_time", "aet"}:
+                continue
+            hg, ag = _api_score(match, "home"), _api_score(match, "away")
+            if hg is None or ag is None:
+                continue
+            return (hg, ag), None
+    return None, "ยังไม่พบผลเต็มเวลาที่ตรงทั้งรายการ ทีม และวันแข่ง"
 
 
 def get_h2h_history(score_history, home_api, away_api, kickoff, limit=5):
@@ -835,6 +980,14 @@ with st.sidebar:
     if key_input.strip():
         st.session_state["runtime_api_key"] = key_input.strip()
     st.caption("อย่าใส่ API Key ลงในโค้ดหรือส่งให้ผู้อื่น")
+    results_key_input = st.text_input(
+        "FootballData.io API Key (ฟรี — ใช้ตรวจผลถ้วยยุโรป)",
+        type="password",
+        help="สมัครแผน Free ได้โดยไม่ต้องใช้บัตรเครดิต แล้วใส่คีย์ที่นี่ หรือเก็บใน Streamlit secrets เป็น FOOTBALLDATA_IO_API_KEY",
+    )
+    if results_key_input.strip():
+        st.session_state["runtime_results_api_key"] = results_key_input.strip()
+    st.caption("ผลตรวจถ้วยยุโรปใช้โควตาฟรีแยกจาก The Odds API; ไม่จำเป็นต้องสมัครแผนรายเดือน")
     st.divider()
     league_names = {k: v[0] for k, v in LEAGUES.items()}
     selected_leagues = st.multiselect("เลือกลีกที่ต้องการสแกน", list(LEAGUES.keys()), default=[], format_func=lambda k: league_names[k])
@@ -990,54 +1143,68 @@ with tab_history:
         st.info("ยังไม่มีประวัติราคา กดสแกนมากกว่าหนึ่งครั้งในช่วงเวลาต่างกันเพื่อเริ่มเปรียบเทียบ")
 
     st.divider()
-    st.markdown("#### ตรวจผลย้อนหลังจาก Football-Data (เฉพาะลีกที่มีรหัสรองรับ)")
+    st.markdown("#### ตรวจผลย้อนหลัง — Football-Data สำหรับลีกในประเทศ และ FootballData.io สำหรับถ้วยยุโรป")
     df = load_picks()
     if not df.empty:
         st.dataframe(df[["id","kickoff_th","league","match","selection","odds","ev_pct","model_status","status","final_score","settlement","profit_units"]], use_container_width=True, hide_index=True)
         if st.button("🔄 ตรวจและคำนวณผลที่หาเจอ", type="secondary"):
             checked = 0
             skipped = 0
-            # Avoid claiming settlement if the league has no matching results source.
+            result_errors = []
+            results_api_key = get_results_api_key()
             for _, row in df[df["status"] != "ตรวจแล้ว"].iterrows():
-                code = next((v[1] for v in LEAGUES.values() if v[0] == row["league"]), None)
-                if not code:
+                league_key = next((k for k, v in LEAGUES.items() if v[0] == row["league"]), None)
+                if league_key in EUROPEAN_CUP_LABELS:
+                    score, error = find_european_cup_result(row, results_api_key)
+                    if error:
+                        skipped += 1
+                        if error not in result_errors:
+                            result_errors.append(error)
+                        continue
+                    hg, ag = score
+                else:
+                    code = next((v[1] for v in LEAGUES.values() if v[0] == row["league"]), None)
+                    if not code:
+                        skipped += 1
+                        continue
+                    hist = fetch_history(code)
+                    if hist.empty:
+                        skipped += 1
+                        continue
+                    try:
+                        kickoff = pd.to_datetime(row["kickoff_utc"], utc=True).tz_convert(None).normalize()
+                    except Exception:
+                        skipped += 1
+                        continue
+                    teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
+                    home = map_team(row["home_team"], teams)
+                    away = map_team(row["away_team"], teams)
+                    if not home or not away:
+                        skipped += 1
+                        continue
+                    candidates = hist[(hist["HomeTeam"] == home) & (hist["AwayTeam"] == away)].copy()
+                    if candidates.empty:
+                        skipped += 1
+                        continue
+                    candidates["date_diff"] = (candidates["Date_dt"].dt.normalize() - kickoff).abs().dt.days
+                    candidates = candidates[candidates["date_diff"] <= 1].sort_values("date_diff")
+                    if candidates.empty:
+                        skipped += 1
+                        continue
+                    result = candidates.iloc[0]
+                    hg, ag = int(result["FTHG"]), int(result["FTAG"])
+                settled_result = settle_pick(row, hg, ag)
+                if settled_result is None:
                     skipped += 1
                     continue
-                hist = fetch_history(code)
-                if hist.empty:
-                    skipped += 1
-                    continue
-                try:
-                    kickoff = pd.to_datetime(row["kickoff_utc"], utc=True).tz_convert(None).normalize()
-                except Exception:
-                    skipped += 1
-                    continue
-                teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
-                home = map_team(row["home_team"], teams)
-                away = map_team(row["away_team"], teams)
-                if not home or not away:
-                    skipped += 1
-                    continue
-                # Require exact home/away team pairing and kickoff date within 1 day; choose nearest date.
-                candidates = hist[(hist["HomeTeam"] == home) & (hist["AwayTeam"] == away)].copy()
-                if candidates.empty:
-                    skipped += 1
-                    continue
-                candidates["date_diff"] = (candidates["Date_dt"].dt.normalize() - kickoff).abs().dt.days
-                candidates = candidates[candidates["date_diff"] <= 1].sort_values("date_diff")
-                if candidates.empty:
-                    skipped += 1
-                    continue
-                result = candidates.iloc[0]
-                hg, ag = int(result["FTHG"]), int(result["FTAG"])
-                settled = settle_pick(row, hg, ag)
-                if settled is None:
-                    skipped += 1
-                    continue
-                label, profit, binary = settled
+                label, profit, binary = settled_result
                 update_pick_result(row["id"], f"{hg}-{ag}", label, profit, binary)
                 checked += 1
-            st.success(f"ตรวจผลและคำนวณการชำระราคาได้ {checked} รายการ; ข้ามเพราะไม่มีผลตรงกัน/ไม่มีแหล่งข้อมูล {skipped} รายการ")
+            if checked:
+                st.success(f"ตรวจผลและคำนวณการชำระราคาได้ {checked} รายการ")
+            if result_errors:
+                st.warning(" / ".join(result_errors[:3]))
+            st.info(f"ข้าม {skipped} รายการ เพราะยังไม่พบผลเต็มเวลาที่ตรงกัน หรือไม่มีแหล่งข้อมูลที่ใช้ได้")
             st.rerun()
 
         settled = df[df["status"] == "ตรวจแล้ว"].copy()
