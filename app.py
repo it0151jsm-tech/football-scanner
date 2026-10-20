@@ -1492,7 +1492,7 @@ with tab_history:
             with st.expander("กรอกผลด้วยตนเองสำหรับลีกที่ไม่มีแหล่งตรวจผล (รวมบิลเดิม)"):
                 event_ids = unsupported["event_id"].drop_duplicates().tolist()
                 event_id = st.selectbox("คู่แข่งขัน", event_ids,
-                    format_func=lambda eid: unsupported.loc[unsupported["event_id"] == eid, "match"].iloc[0])
+                    format_func=lambda eid: str(unsupported.loc[unsupported["event_id"] == eid, "match"].iloc[0] or eid))
                 hg = st.number_input("ประตูเจ้าบ้าน", min_value=0, step=1)
                 ag = st.number_input("ประตูทีมเยือน", min_value=0, step=1)
                 confirmed = st.checkbox("ยืนยันว่าเป็นผลจบการแข่งขันอย่างเป็นทางการ")
