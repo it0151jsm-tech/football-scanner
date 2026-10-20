@@ -72,3 +72,57 @@ class StreamlitSmokeTests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(f['load_slips']().iloc[0].profit_units, -.5)
         self.assertEqual(f['load_picks']().iloc[0].status, 'ตรวจแล้ว')
+
+    def test_mobile_cards_and_table_switch_do_not_call_odds_api(self):
+        import json
+        from unittest.mock import Mock
+        f = load_functions(self.path)
+        f['DB_FILE'] = self.db_path
+        f['init_db']()
+        form = dict(form_rate=80, form_sample=10)
+        a = f['system_a_analysis'](form, form, form, {'summary': 'ฟอร์มเหย้า'},
+                                   {'summary': 'ฟอร์มเยือน'}, {}, {'home': None, 'away': None}, {})
+        b = f['system_b_analysis'](None, None, None, [(2.5, 1)], 2.5)
+        f['save_picks']([dict(event_id='future', market='Over/Under', side='over',
+                             league=f['LEAGUES']['soccer_epl'][0], bookmaker='Book',
+                             kickoff_utc=(datetime.now(timezone.utc)+timedelta(hours=5)).isoformat(),
+                             kickoff_th='เวลาไทยทดสอบ', home_team='A', away_team='B', match='A vs B',
+                             point=2.5, odds=2, selection='สูง (Over 2.5)', confidence_score=80,
+                             analysis_a_json=json.dumps(a), analysis_b_json=json.dumps(b))])
+        # Every HTTP request is forbidden on initial render and all view reruns.
+        with patch('requests.get', side_effect=AssertionError('view must not request API')) as get:
+            app = self.app()
+            self.assertEqual(len(app.exception), 0)
+            self.assertEqual(app.radio[0].value, 'การ์ดมือถือ')
+            self.assertTrue(any('ระบบ A:' in item.value for item in app.tabs[0].markdown))
+            self.assertTrue(any('ยังประเมินความคุ้มค่าราคาไม่ได้' in item.value for item in app.tabs[0].markdown))
+            self.assertFalse(any('ตัวเลือกเด่น' in item.value for item in app.tabs[0].markdown))
+            app.radio[0].set_value('ตารางเดิม').run()
+            self.assertEqual(len(app.exception), 0)
+            self.assertGreater(len(app.dataframe), 0)
+            app.radio[0].set_value('การ์ดมือถือ').run()
+            self.assertEqual(len(app.exception), 0)
+            self.assertEqual(len(app.tabs), 4)
+            get.assert_not_called()
+
+    def test_new_analysis_migration_preserves_finalized_bills_on_render(self):
+        import json
+        f = load_functions(self.path)
+        f['DB_FILE'] = self.db_path
+        f['init_db']()
+        with f['db']() as con:
+            # Simulate a database from the PR #1 schema, before Phase 1 columns.
+            con.execute('ALTER TABLE picks DROP COLUMN analysis_a_json')
+            con.execute('ALTER TABLE picks DROP COLUMN analysis_b_json')
+            con.execute('''INSERT INTO slips(selections_json,status,profit_units,final_summary)
+                           VALUES (?,?,?,?)''', (json.dumps([{'pick_id': 500}]), 'แพ้บิล', -1, 'keep finalized'))
+            before = [tuple(r) for r in con.execute('SELECT * FROM slips')]
+        with patch('requests.get', side_effect=AssertionError('render must be offline')) as get:
+            app = self.app()
+            self.assertEqual(len(app.exception), 0)
+            self.assertEqual(len(app.tabs), 4)
+            get.assert_not_called()
+        with f['db']() as con:
+            self.assertEqual(before, [tuple(r) for r in con.execute('SELECT * FROM slips')])
+            columns = {r[1] for r in con.execute('PRAGMA table_info(picks)')}
+            self.assertTrue({'analysis_a_json', 'analysis_b_json'} <= columns)

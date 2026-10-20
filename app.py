@@ -19,7 +19,7 @@ import streamlit as st
 # ============================================================
 st.set_page_config(page_title="Value Bet Pro", page_icon="⚽", layout="wide")
 st.title("⚽ Value Bet Pro — xG Edition")
-st.caption("วิเคราะห์ทุกคู่จากฟอร์มย้อนหลัง + xG/xGA | แยกอันดับสูง–ต่ำและต่อ–รอง | EV เป็นข้อมูลประกอบ")
+st.caption("ระบบ C: อ่านหลักฐาน A และ Poisson/EV ของ B แยกกัน | ฟอร์ม + xG จริง | รองรับการ์ดมือถือ")
 
 API_BASE = "https://api.the-odds-api.com/v4"
 TH_TZ = timezone(timedelta(hours=7))
@@ -172,6 +172,8 @@ def init_db():
             "odds_in_range": "INTEGER DEFAULT 1",
             "home_form_summary": "TEXT",
             "away_form_summary": "TEXT",
+            "analysis_a_json": "TEXT",
+            "analysis_b_json": "TEXT",
         }
         for name, decl in migrations.items():
             if name not in existing:
@@ -231,7 +233,7 @@ def save_picks(rows, snapshot_rows=None):
         "away_context_matches", "context_status", "form_rate", "form_sample", "form_signal",
         "form_summary", "form_method", "h2h_summary", "h2h_detail", "h2h_sample", "form_rate_10", "form_rate_season",
         "confidence_score", "recommendation", "analysis_reason", "odds_in_range",
-        "home_form_summary", "away_form_summary"
+        "home_form_summary", "away_form_summary", "analysis_a_json", "analysis_b_json"
     ]
     saved = 0
     with db() as con:
@@ -863,39 +865,12 @@ def blended_form_rate(rate5, rate10, rate_season, n5=0, n10=0, nseason=0):
     return sum(v*w for v,w in pairs) / sum(w for _,w in pairs)
 
 
-def confidence_from_evidence(model_win, form_blend, form_n, rate5=None, rate10=None):
-    """Ranking score only; not a true probability and not an EV replacement."""
-    if model_win is not None and form_blend is not None:
-        score = 0.55 * float(model_win) + 0.45 * float(form_blend)
-        if rate5 is not None and rate10 is not None:
-            score -= min(12.0, abs(float(rate5) - float(rate10)) * 0.18)
-        label_source = "xG model + form"
-    elif model_win is not None:
-        score = min(68.0, float(model_win))
-        label_source = "xG model only"
-    elif form_blend is not None:
-        score = min(65.0, float(form_blend))
-        label_source = "form only; xG unavailable"
-    else:
-        return None, "ข้อมูลไม่พอ", "ไม่มีข้อมูลพอสร้างคะแนนความมั่นใจ"
-    if form_n < 5:
-        score = min(score, 52.0)
-    score = max(0.0, min(100.0, score))
-    if score >= 70:
-        label = "สูง"
-    elif score >= 60:
-        label = "ปานกลางค่อนสูง"
-    elif score >= 50:
-        label = "ปานกลาง/ระวัง"
-    else:
-        label = "ต่ำ"
-    return round(score, 1), label, label_source
-
-
 def choose_recommendation(score, ev_pct, odds_in_range, has_data=True):
     if score is None or not has_data:
         return "ข้อมูลไม่พอ — ยังไม่แนะนำ"
-    if score >= 65:
+    if ev_pct is None or not math.isfinite(float(ev_pct)):
+        result = "ฟอร์มสนับสนุน — ยังประเมินความคุ้มค่าราคาไม่ได้" if score >= 55 else "หลักฐานฟอร์มยังไม่พอ — ยังประเมินความคุ้มค่าราคาไม่ได้"
+    elif score >= 65 and ev_pct > 0:
         result = "ตัวเลือกเด่น — พิจารณา"
     elif score >= 55:
         result = "พิจารณาอย่างระวัง"
@@ -983,6 +958,206 @@ def selection_spread(team, side, line):
         return f"ต่อ {team} (-{abs(line):g})"
     return f"รอง {team} (+{abs(line):g})"
 
+def opponent_quality(df, team_api, kickoff, venue):
+    """Opponent PPG before each sampled game; descriptive, not a win probability."""
+    empty = {"mean_ppg": None, "sample": 0, "status": "ข้อมูลคุณภาพคู่แข่งไม่พอ"}
+    if df is None or df.empty:
+        return empty
+    cutoff = pd.Timestamp(kickoff.astimezone(UTC).date())
+    hist = df[df["Date_dt"].dt.normalize() < cutoff].sort_values("Date_dt")
+    names = sorted(set(hist["HomeTeam"]) | set(hist["AwayTeam"]))
+    team = map_team(team_api, names)
+    if not team:
+        return empty
+    column = "HomeTeam" if venue == "home" else "AwayTeam"
+    other = "AwayTeam" if venue == "home" else "HomeTeam"
+    games = hist[hist[column] == team].tail(10)
+    strengths = []
+    for _, game in games.iterrows():
+        opponent = game[other]
+        prior = hist[(hist["Date_dt"].dt.normalize() < game["Date_dt"].normalize()) &
+                     ((hist["HomeTeam"] == opponent) | (hist["AwayTeam"] == opponent))].tail(10)
+        if len(prior) < 3:
+            continue
+        points = []
+        for _, result in prior.iterrows():
+            gf, ga = (result["FTHG"], result["FTAG"]) if result["HomeTeam"] == opponent else (result["FTAG"], result["FTHG"])
+            points.append(3 if gf > ga else 1 if gf == ga else 0)
+        strengths.append(sum(points) / len(points))
+    if not strengths:
+        return empty
+    return {"mean_ppg": round(sum(strengths) / len(strengths), 3), "sample": len(strengths),
+            "status": "PPG คู่แข่งก่อนเกม จากไม่เกิน 10 นัด; ข้อมูลประกอบ ไม่ใช่การจัดอันดับที่ปรับเทียบแล้ว"}
+
+
+def actual_xg_evidence(df, home_api, away_api, kickoff):
+    """System A reads observed xG directly, independently of Poisson lambdas."""
+    result = {}
+    if df is None or df.empty or not {"xG_home", "xG_away"}.issubset(df.columns):
+        return {"status": "ไม่มี xG จริงที่รองรับ", "home": None, "away": None}
+    cutoff = pd.Timestamp(kickoff.astimezone(UTC).date())
+    hist = df[df["Date_dt"].dt.normalize() < cutoff].sort_values("Date_dt")
+    names = sorted(set(hist["HomeTeam"]) | set(hist["AwayTeam"]))
+    for side, api, venue, gf, ga in [("home", home_api, "HomeTeam", "xG_home", "xG_away"),
+                                    ("away", away_api, "AwayTeam", "xG_away", "xG_home")]:
+        team = map_team(api, names)
+        sample = hist[hist[venue] == team].tail(10).dropna(subset=[gf, ga])
+        if sample.empty or (cutoff - sample["Date_dt"].max().normalize()).days > MAX_XG_AGE_DAYS:
+            result[side] = None
+        else:
+            result[side] = {"xg": round(float(sample[gf].mean()), 3), "xga": round(float(sample[ga].mean()), 3), "sample": len(sample)}
+    result["status"] = "ค่า xG/xGA จริงตามสนาม; ไม่มีการสร้าง xG ทดแทน" if any(result.values()) else "xG เก่า/จับคู่ไม่ได้"
+    return result
+
+
+def first_observed_quotes(event_ids):
+    """One local SQLite read per scan. Never requests bookmaker opening odds."""
+    event_ids = list(dict.fromkeys(event_ids))
+    if not event_ids:
+        return {}
+    # A bounded IN clause also works on SQLite builds with a 999-variable limit.
+    out = {}
+    with db() as con:
+        for start in range(0, len(event_ids), 500):
+            batch = event_ids[start:start + 500]
+            marks = ",".join("?" for _ in batch)
+            rows = con.execute(f"""SELECT * FROM odds_snapshots WHERE id IN (
+                SELECT MIN(id) FROM odds_snapshots WHERE event_id IN ({marks})
+                GROUP BY event_id,market,side,bookmaker)""", batch).fetchall()
+            for row in rows:
+                out[(row["event_id"], row["market"], row["side"], row["bookmaker"])] = dict(row)
+    return out
+
+
+def price_evidence(first, point, odds, observed_at):
+    if first is None:
+        first = {"point": point, "odds": odds, "captured_at": observed_at}
+    same_line = abs(float(first["point"]) - point) < 1e-9
+    return {"label": "First Observed Price", "first_odds": float(first["odds"]),
+            "first_point": float(first["point"]), "first_at": first["captured_at"],
+            "current_odds": odds, "current_point": point, "current_at": observed_at,
+            "odds_delta": round(odds - float(first["odds"]), 3) if same_line else None,
+            "status": "เส้นเดิม: เทียบค่าน้ำได้" if same_line else "เส้นเปลี่ยน: ห้ามเทียบค่าน้ำตรง ๆ",
+            "opening_odds_available": False}
+
+
+def system_a_analysis(form5, form10, form_all, home_profile, away_profile, opponents, xg, price):
+    """Evidence ranking only. Receives no Poisson probability or EV."""
+    score = blended_form_rate(form5.get("form_rate"), form10.get("form_rate"), form_all.get("form_rate"),
+                              form5.get("form_sample", 0), form10.get("form_sample", 0), form_all.get("form_sample", 0))
+    if score is not None:
+        if form5.get("form_rate") is not None and form10.get("form_rate") is not None:
+            score -= min(12, abs(form5["form_rate"] - form10["form_rate"]) * .18)
+        if max(form5.get("form_sample", 0), form10.get("form_sample", 0)) < 5:
+            score = min(52, score)
+        score = round(max(0, min(100, score)), 1)
+    return {"score": score, "result": "ข้อมูลหลักฐานไม่พอ" if score is None else
+            ("หลักฐานฟอร์มสนับสนุน" if score >= 55 else "หลักฐานฟอร์มยังไม่สนับสนุน"),
+            "form5": form5, "form10": form10, "form_all": form_all,
+            "home_form": home_profile, "away_form": away_profile,
+            "opponents": opponents, "xg": xg, "price": price,
+            "method": "คะแนนจากฟอร์มเทียบเส้น 5/10/ทั้งหมดและความสอดคล้อง; ประตูได้เสีย คุณภาพคู่แข่ง xG และราคาเป็นหลักฐานประกอบ ไม่บวกคะแนนสมมติ",
+            "status": "คะแนนหลักฐาน ไม่ใช่ความน่าจะเป็น และไม่ยืนยันความคุ้มค่าราคา"}
+
+
+def system_b_analysis(metrics, matrix, evaluation, lines, ou_line):
+    """Model probabilities are calculated solely from the existing xG Poisson model."""
+    if metrics is None or matrix is None or evaluation is None:
+        return {"available": False, "status": "ไม่มี Poisson/EV: xG ไม่รองรับ เก่า ไม่พอ หรือราคาใช้ไม่ได้", "calibrated": False}
+    hda = {"home": 0., "draw": 0., "away": 0.}
+    over = under = 0.
+    for h, a, probability in matrix:
+        hda["home" if h > a else "away" if h < a else "draw"] += probability * 100
+        if all(h + a > line for line, _ in lines):
+            over += probability * 100
+        if all(h + a < line for line, _ in lines):
+            under += probability * 100
+    return {"available": True, "expected_goals": [metrics["home_lambda"], metrics["away_lambda"]],
+            "hda": {k: round(v, 2) for k, v in hda.items()}, "selection": evaluation,
+            "ou_line": ou_line, "ou": {"over_full": round(over, 2), "under_full": round(under, 2),
+                   "partial_or_push": round(max(0, 100 - over - under), 2)},
+            "calibrated": False, "status": "Poisson จาก xG จริง; ยังไม่ผ่าน Calibration; สมมติประตูสองทีมเป็นอิสระ"}
+
+
+def saved_analysis(raw):
+    if not isinstance(raw, str):
+        return {}
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def display_number(value, digits=1, suffix=""):
+    if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return "ไม่มีข้อมูล"
+    return f"{value:.{digits}f}{suffix}"
+
+
+def mobile_card_lines(row):
+    """Plain text rows wrap on narrow screens; no horizontal data grid is required."""
+    a, b = saved_analysis(row.get("analysis_a_json")), saved_analysis(row.get("analysis_b_json"))
+    text = [str(row.get("match") or "ไม่ทราบคู่"),
+            f"{row.get('league', '')} | {row.get('kickoff_th', '')} (ไทย)",
+            f"{row.get('selection', '')} @ {display_number(row.get('odds'), 2)} | {row.get('bookmaker', '')}"]
+    if not a and not b:
+        return text + ["ข้อมูลเดิม/ยังไม่มีราคา: สแกนเมื่อพร้อมเพื่อสร้างผล A/B ไม่สร้างเปอร์เซ็นต์ทดแทน", str(row.get("model_status") or "ไม่มีข้อมูล")]
+    text += [f"ระบบ A: {a.get('result', 'ข้อมูลไม่พอ')} | คะแนนหลักฐาน {display_number(a.get('score'))}/100",
+             str(a.get("status", ""))]
+    for side, label in [("home", "เหย้า"), ("away", "เยือน")]:
+        text.append(f"ฟอร์ม{label}: {a.get(side + '_form', {}).get('summary', 'ไม่มีข้อมูล')}")
+        opponent = a.get("opponents", {}).get(side, {})
+        text.append(f"คู่แข่งที่{label}พบ: PPG {display_number(opponent.get('mean_ppg'), 2)} | ตัวอย่าง {opponent.get('sample', 0)} นัด")
+        xg = a.get("xg", {}).get(side) or {}
+        text.append(f"xG/xGA จริง{label}: {display_number(xg.get('xg'), 2)} / {display_number(xg.get('xga'), 2)} | {xg.get('sample', 0)} นัด")
+    text.append(f"ฟอร์มเทียบเส้น (อัตราในอดีต ไม่ใช่โอกาสชนะ): 5 นัด {display_number(a.get('form5', {}).get('form_rate'), suffix='%')} | 10 นัด {display_number(a.get('form10', {}).get('form_rate'), suffix='%')}")
+    price = a.get("price") or {}
+    if price:
+        text += [f"First Observed Price: {display_number(price.get('first_odds'), 2)} เส้น {display_number(price.get('first_point'), 2)} ({price.get('first_at', '')})",
+                 f"ราคาปัจจุบัน ณ เวลาสแกน: {display_number(price.get('current_odds'), 2)} เส้น {display_number(price.get('current_point'), 2)} ({price.get('current_at', '')})",
+                 f"ราคาไหล: {price.get('status', '')} | เปลี่ยนค่าน้ำ {display_number(price.get('odds_delta'), 3)} — ไม่มีข้อมูลราคาเปิดจริง"]
+    text.append(f"ระบบ B: {b.get('status', 'ไม่มีข้อมูล')}")
+    if b.get("available"):
+        goals, hda, ou, selection = b["expected_goals"], b["hda"], b["ou"], b["selection"]
+        text += [f"ประตูคาดการณ์ (λ ไม่ใช่สกอร์ฟันธง): เหย้า {goals[0]:.2f} / เยือน {goals[1]:.2f}",
+                 f"โอกาสจากโมเดล: เหย้าชนะ {hda['home']:.2f}% | เสมอ {hda['draw']:.2f}% | เยือนชนะ {hda['away']:.2f}%",
+                 f"ตัวเลือกนี้: ชนะเต็ม {selection['p_win']:.2f}% | ผลครึ่ง/คืนทุน {selection['p_partial']:.2f}% | แพ้เต็ม {selection['p_loss']:.2f}% | EV {selection['ev_pct']:+.2f}%"]
+        ou_note = "เส้นตลาดนี้" if row.get("market") == "Over/Under" else "เส้นอ้างอิงโมเดล ไม่ใช่ราคาที่เสนอ"
+        text.append(f"สูง/ต่ำ {b['ou_line']} ({ou_note}): สูงชนะเต็ม {ou['over_full']:.2f}% | ต่ำชนะเต็ม {ou['under_full']:.2f}% | ผลครึ่ง/คืนทุน {ou['partial_or_push']:.2f}%")
+    else:
+        text.append("ประตูคาดการณ์ / โอกาสชนะ–เสมอ–แพ้ / โอกาสสูง–ต่ำ / EV: ไม่มีข้อมูลโมเดลที่พร้อมใช้")
+    ev = b.get("selection", {}).get("ev_pct") if b.get("available") else None
+    text += ["ระบบ C (อ่าน A/B ร่วมกัน): " + choose_recommendation(a.get("score"), ev, bool(row.get("odds_in_range", 1))),
+             "สถานะข้อมูล: " + str(row.get("model_status") or "ไม่มีข้อมูล"),
+             "ยังไม่ผ่าน Calibration; First Observed Price ไม่ใช่ราคาเปิดจริง"]
+    return text
+
+
+def render_mobile_cards(rows):
+    for _, row in rows.iterrows():
+        with st.container(border=True):
+            for index, line in enumerate(mobile_card_lines(row)):
+                if index == 0:
+                    st.subheader(line)
+                else:
+                    st.write(line)
+
+
+def analysis_display_rows(df):
+    """Do not relabel legacy blended scores as independent System A evidence."""
+    view = df.copy()
+    a = [saved_analysis(raw) for raw in view["analysis_a_json"]]
+    b = [saved_analysis(raw) for raw in view["analysis_b_json"]]
+    view["confidence_score"] = [item.get("score") for item in a]
+    view["system_a_result"] = [item.get("result", "ข้อมูลเดิม: สแกนเพื่อสร้าง A/B") for item in a]
+    view["system_b_status"] = [item.get("status", "ยังไม่มีผล B ที่บันทึกไว้") for item in b]
+    view["recommendation"] = [choose_recommendation(ai.get("score"),
+        bi.get("selection", {}).get("ev_pct") if bi.get("available") else None,
+        bool(row.get("odds_in_range", 1))) for ai, bi, (_, row) in zip(a, b, view.iterrows())]
+    return view
+
+
 # -------------------- SCAN --------------------
 def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
     matches, remaining, used = fetch_odds(sport_key, regions, api_key)
@@ -992,6 +1167,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     now = datetime.now(UTC)
     target = now + timedelta(hours=hours_limit)
     rows, snapshot_rows = [], []
+    first_prices = first_observed_quotes([m.get("id", "") for m in matches])
     for match in matches:
         try:
             kickoff = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00")).astimezone(UTC)
@@ -1009,6 +1185,11 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
         matrix = score_matrix(metrics["home_lambda"], metrics["away_lambda"]) if metrics else None
         home_profile = team_form_profile(score_history, home, kickoff, venue="home")
         away_profile = team_form_profile(score_history, away, kickoff, venue="away")
+        opponents = {"home": opponent_quality(score_history, home, kickoff, "home"),
+                     "away": opponent_quality(score_history, away, kickoff, "away")}
+        xg_evidence = actual_xg_evidence(domestic_context if sport_key in EUROPEAN_CUPS else history, home, away, kickoff)
+        if sport_key in EUROPEAN_CUPS:
+            xg_evidence["status"] += " — ลีกในประเทศเพื่อประกอบถ้วยเท่านั้น"
         rows_before_match = len(rows)
         for bm in match.get("bookmakers", []):
             book_name = bm.get("title", "Unknown")
@@ -1019,8 +1200,10 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                 for outcome in market.get("outcomes", []):
                     try:
                         odds = float(outcome.get("price", 0))
-                        line = float(outcome.get("point", 0))
+                        line = float(outcome.get("point"))
                     except (TypeError, ValueError):
+                        continue
+                    if not math.isfinite(odds) or odds <= 1 or not math.isfinite(line):
                         continue
                     name = outcome.get("name")
                     if m_key == "spreads":
@@ -1047,14 +1230,16 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     form5 = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=5)
                     form10 = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=10)
                     formseason = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=None)
-                    blend = blended_form_rate(form5.get("form_rate"), form10.get("form_rate"), formseason.get("form_rate"),
-                        form5.get("form_sample", 0), form10.get("form_sample", 0), formseason.get("form_sample", 0))
-                    model_win = eval_res.get("p_win") if eval_res else None
-                    form_n = max(form5.get("form_sample", 0), form10.get("form_sample", 0))
-                    confidence, confidence_label, source_label = confidence_from_evidence(
-                        model_win, blend, form_n, form5.get("form_rate"), form10.get("form_rate"))
+                    price = price_evidence(first_prices.get((match.get("id", ""), market_label, side, book_name)),
+                                           line, odds, now.astimezone(TH_TZ).isoformat(timespec="seconds"))
+                    analysis_a = system_a_analysis(form5, form10, formseason, home_profile, away_profile,
+                                                   opponents, xg_evidence, price)
+                    ou_line = line if m_key == "totals" else 2.5
+                    analysis_b = system_b_analysis(metrics, matrix, eval_res, split_line(ou_line), ou_line)
+                    confidence = analysis_a["score"]
+                    confidence_label, source_label = analysis_a["result"], "ระบบ A: หลักฐานเท่านั้น"
                     ev_pct = eval_res.get("ev_pct") if eval_res else None
-                    recommendation = choose_recommendation(confidence, ev_pct, odds_in_range, blend is not None or model_win is not None)
+                    recommendation = choose_recommendation(confidence, ev_pct, odds_in_range, confidence is not None)
                     reason_parts = []
                     if metrics:
                         reason_parts.append(f"xG คาดการณ์ {metrics['home_lambda']:.2f}-{metrics['away_lambda']:.2f}")
@@ -1090,6 +1275,8 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         "p_loss": eval_res.get("p_loss") if eval_res else None,
                         "score": confidence, "confidence_score": confidence, "confidence_label": confidence_label,
                         "recommendation": recommendation, "analysis_reason": " | ".join(reason_parts),
+                        "analysis_a_json": json.dumps(analysis_a, ensure_ascii=False, allow_nan=False),
+                        "analysis_b_json": json.dumps(analysis_b, ensure_ascii=False, allow_nan=False),
                         "odds_in_range": int(odds_in_range),
                         "form_rate": form5.get("form_rate"), "form_rate_10": form10.get("form_rate"),
                         "form_rate_season": formseason.get("form_rate"), "form_sample": form5.get("form_sample", 0),
@@ -1112,7 +1299,11 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                 "form_sample": 0, "form_signal": "ข้อมูลย้อนหลังไม่พอ", "form_summary": "",
                 "form_method": "ไม่มีราคา", "home_form_summary": home_profile.get("summary", ""),
                 "away_form_summary": away_profile.get("summary", ""), "h2h_summary": h2h["h2h_summary"],
-                "h2h_detail": h2h["h2h_detail"], "h2h_sample": h2h["h2h_sample"]})
+                "h2h_detail": h2h["h2h_detail"], "h2h_sample": h2h["h2h_sample"],
+                "analysis_a_json": json.dumps(system_a_analysis({}, {}, {}, home_profile, away_profile,
+                    opponents, xg_evidence, {}), ensure_ascii=False, allow_nan=False),
+                "analysis_b_json": json.dumps({"available": False, "calibrated": False,
+                    "status": "ยังไม่มีราคาตลาดสำหรับคำนวณ EV"}, ensure_ascii=False)})
     return rows, snapshot_rows, remaining, used
 
 # -------------------- RESULT SETTLEMENT --------------------
@@ -1172,7 +1363,7 @@ with st.sidebar:
     regions = st.selectbox("ภูมิภาคราคา API", ["uk", "eu", "us"], index=0)
     min_odds = st.number_input("ค่าน้ำต่ำสุด (ใช้แจ้งเตือน ไม่ซ่อนคู่)", 1.01, 5.00, 1.80, 0.05)
     max_odds = st.number_input("ค่าน้ำสูงสุด (ใช้แจ้งเตือน ไม่ซ่อนคู่)", 1.01, 10.00, 2.05, 0.05)
-    min_confidence = st.slider("คะแนนขั้นต่ำสำหรับจัดอันดับบิล", 0, 100, 55, 1)
+    min_confidence = st.slider("คะแนนหลักฐานขั้นต่ำสำหรับจัดอันดับบิล", 0, 100, 55, 1)
     scan_btn = st.button("🚀 สแกนราคาและวิเคราะห์", type="primary", use_container_width=True)
 
 api_key = get_api_key()
@@ -1180,6 +1371,8 @@ tab_scan, tab_slips, tab_history, tab_help = st.tabs(["📊 ผลวิเค�
 
 with tab_scan:
     st.subheader("📊 วิเคราะห์ทุกคู่ที่ดึงข้อมูลได้")
+    analysis_view = st.radio("มุมมองผลวิเคราะห์", ["การ์ดมือถือ", "ตารางเดิม"], horizontal=True)
+    st.caption("ระบบ A = คะแนนหลักฐาน | ระบบ B = Poisson/EV | ระบบ C = อ่านผลร่วมกัน; ยังไม่ผ่าน Calibration")
     if scan_btn:
         if not api_key:
             st.error("ไม่พบ API Key กรุณากรอกคีย์ในแถบซ้ายมือ")
@@ -1214,7 +1407,7 @@ with tab_scan:
             for err in errors:
                 st.warning(err)
 
-    df = load_picks()
+    df = analysis_display_rows(load_picks())
     if df.empty:
         st.info("ยังไม่มีข้อมูล เลือกลีกและกดสแกน")
     else:
@@ -1257,18 +1450,23 @@ with tab_scan:
                 ["kickoff_sort", "confidence_score", "ev_pct"],
                 ascending=[True, False, False], na_position="last"
             )
-            cols = ["kickoff_th", "league", "match", "selection", "odds", "confidence_score", "recommendation",
+            cols = ["kickoff_th", "league", "match", "selection", "odds", "confidence_score", "system_a_result", "system_b_status", "recommendation",
                     "ev_pct", "p_win", "form_rate", "form_rate_10", "form_rate_season", "xg_home_avg", "xga_home_avg",
                     "xg_away_avg", "xga_away_avg", "bookmaker", "model_status"]
             cols = [c for c in cols if c in market_view.columns]
-            st.dataframe(market_view[cols].rename(columns={
-                "kickoff_th":"เวลาแข่ง (ไทย)", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"คำแนะนำตลาด",
-                "odds":"ค่าน้ำดีที่สุด", "confidence_score":"คะแนนมั่นใจ/100", "recommendation":"คำแนะนำระบบ",
-                "ev_pct":"EV (%)", "p_win":"ชนะเต็มตามโมเดล (%)", "form_rate":"ฟอร์มเทียบเส้น 5 นัด (%)",
-                "form_rate_10":"ฟอร์มเทียบเส้น 10 นัด (%)", "form_rate_season":"ฟอร์มเทียบเส้นทั้งหมด (%)",
-                "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย",
-                "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือที่ให้ราคาดีสุด", "model_status":"สถานะข้อมูล"
-            }), use_container_width=True, hide_index=True)
+            if analysis_view == "การ์ดมือถือ":
+                render_mobile_cards(market_view)
+            else:
+                st.dataframe(market_view[cols].rename(columns={
+                    "kickoff_th":"เวลาแข่ง (ไทย)", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"คำแนะนำตลาด",
+                    "odds":"ค่าน้ำดีที่สุด", "confidence_score":"คะแนนหลักฐาน A/100", "system_a_result":"ระบบ A", "system_b_status":"ระบบ B", "recommendation":"ระบบ C อ่าน A/B ร่วมกัน",
+                    "ev_pct":"EV (%)", "p_win":"ชนะเต็มตามโมเดล (%)", "form_rate":"ฟอร์มเทียบเส้น 5 นัด (%)",
+                    "form_rate_10":"ฟอร์มเทียบเส้น 10 นัด (%)", "form_rate_season":"ฟอร์มเทียบเส้นทั้งหมด (%)",
+                    "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย",
+                    "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือที่ให้ราคาดีสุด", "model_status":"สถานะข้อมูล"
+                }), use_container_width=True, hide_index=True)
+        if analysis_view == "การ์ดมือถือ":
+            render_mobile_cards(best_market[best_market["market"] == "ยังไม่มีราคา"])
         with st.expander("ดูเหตุผลวิเคราะห์และฟอร์มทีมแบบละเอียด"):
             detail = best_market.copy() if not best_market.empty else pd.DataFrame()
             if detail.empty:
@@ -1287,12 +1485,12 @@ with tab_scan:
                 st.info("ไม่มีราคาให้แสดง")
             else:
                 alt_cols = [c for c in ["kickoff_th", "league", "match", "market", "selection", "point", "odds", "confidence_score", "ev_pct", "bookmaker", "odds_in_range"] if c in quoted.columns]
-                st.dataframe(quoted[alt_cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "point":"เส้น", "odds":"ค่าน้ำ", "confidence_score":"คะแนนมั่นใจ", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ", "odds_in_range":"อยู่ในช่วงค่าน้ำที่ตั้งไว้"}), use_container_width=True, hide_index=True)
-        st.caption("คะแนนความมั่นใจเป็นคะแนนจัดอันดับจากแบบจำลองและฟอร์มย้อนหลัง ไม่ใช่เปอร์เซ็นต์ชนะที่ผ่านการปรับเทียบแล้ว; EV เป็นข้อมูลประกอบและอาจคลาดเคลื่อนตามคุณภาพ xG")
+                st.dataframe(quoted[alt_cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "point":"เส้น", "odds":"ค่าน้ำ", "confidence_score":"คะแนนหลักฐาน A", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ", "odds_in_range":"อยู่ในช่วงค่าน้ำที่ตั้งไว้"}), use_container_width=True, hide_index=True)
+        st.caption("คะแนน A มาจากหลักฐานฟอร์ม ไม่ใช่ความน่าจะเป็น; เปอร์เซ็นต์ของ B มาจาก Poisson และยังไม่ผ่าน Calibration; EV อาจคลาดเคลื่อนตามคุณภาพ xG")
 
 with tab_slips:
     st.subheader("🎟️ จัดอันดับตัวเลือกตามความมั่นใจ — EV เป็นข้อมูลประกอบ")
-    df = load_picks()
+    df = analysis_display_rows(load_picks())
     if df.empty:
         st.info("สแกนราคาก่อน")
     else:
@@ -1311,7 +1509,7 @@ with tab_slips:
         if not candidates.empty:
             st.dataframe(candidates[["kickoff_th", "league", "match", "market", "selection", "odds", "confidence_score", "recommendation", "ev_pct", "p_win", "bookmaker"]].rename(columns={
                 "kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก",
-                "odds":"ค่าน้ำ", "confidence_score":"คะแนนมั่นใจ/100", "recommendation":"คำแนะนำระบบ", "ev_pct":"EV (%)",
+                "odds":"ค่าน้ำ", "confidence_score":"คะแนนหลักฐาน A/100", "recommendation":"คำแนะนำระบบ", "ev_pct":"EV (%)",
                 "p_win":"ชนะเต็มตามโมเดล (%)", "bookmaker":"เจ้ามือ"
             }), use_container_width=True, hide_index=True)
             st.caption("คำแนะนำที่ EV ติดลบยังคงแสดงตามคะแนน แต่ควรระวังเรื่องราคาไม่คุ้ม; คะแนนสูงไม่ได้หมายถึงกำไรแน่นอน")
@@ -1332,7 +1530,7 @@ with tab_slips:
                     c2.metric("โอกาสชนะเต็มโดยประมาณ", "คำนวณไม่ได้ครบทุกคู่")
                 st.dataframe(slip[["league", "match", "market", "selection", "odds", "confidence_score", "ev_pct", "bookmaker"]].rename(columns={
                     "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "odds":"ค่าน้ำ",
-                    "confidence_score":"คะแนนมั่นใจ/100", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ"
+                    "confidence_score":"คะแนนหลักฐาน A/100", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ"
                 }), use_container_width=True, hide_index=True)
                 save_key = f"save_slip_{size}_" + "_".join(str(int(x)) for x in slip["id"].tolist())
                 can_settle = all(has_result_source(name) for name in slip["league"])
@@ -1396,7 +1594,7 @@ with tab_history:
                 trend = "แต้มต่อ/สูงต่ำเปลี่ยน — เทียบน้ำตรง ๆ ไม่ได้"
             else:
                 trend = "ราคาเพิ่ม" if odds_delta > 0 else ("ราคาลด" if odds_delta < 0 else "ราคาน้ำคงที่")
-            movement_rows.append({"คู่แข่งขัน":keyrow["match_name"], "ตลาด":keyrow["market"], "ฝั่ง":keyrow["side"], "เจ้ามือ":keyrow["bookmaker"], "ราคาแรกที่ระบบพบ":first_odds, "ราคาล่าสุด":latest_odds, "เปลี่ยนแปลงน้ำ (เมื่อเส้นเดิม)":odds_delta, "แต้มแรก":first_point, "แต้มล่าสุด":latest_point, "จำนวน snapshot":len(rows), "ตรวจครั้งแรก":first["captured_at"], "ตรวจล่าสุด":latest["captured_at"], "สัญญาณ":trend})
+            movement_rows.append({"คู่แข่งขัน":keyrow["match_name"], "ตลาด":keyrow["market"], "ฝั่ง":keyrow["side"], "เจ้ามือ":keyrow["bookmaker"], "First Observed Price (ราคาแรกที่ระบบพบ)":first_odds, "ราคาล่าสุด":latest_odds, "เปลี่ยนแปลงน้ำ (เมื่อเส้นเดิม)":odds_delta, "แต้มแรก":first_point, "แต้มล่าสุด":latest_point, "จำนวน snapshot":len(rows), "ตรวจครั้งแรก":first["captured_at"], "ตรวจล่าสุด":latest["captured_at"], "สัญญาณ":trend})
     if movement_rows:
         st.dataframe(pd.DataFrame(movement_rows), use_container_width=True, hide_index=True)
         st.caption("การเปลี่ยนแปลงราคาเป็นเพียงสัญญาณตลาด ไม่สามารถยืนยันได้ว่าเป็นราคาไหลหลอก")
@@ -1533,7 +1731,10 @@ with tab_help:
     st.markdown("""
 - **แสดงทุกคู่:** ระบบไม่ตัดคู่ทิ้งเพราะ EV ติดลบหรือค่าน้ำอยู่นอกช่วง; ช่วงค่าน้ำใช้แจ้งเตือนเท่านั้น. คู่ที่ API ส่งมาแต่ไม่มีราคาในตลาดที่รองรับก็จะแสดงเป็นรอราคา
 - **ฟอร์มย้อนหลัง:** เปรียบเทียบเส้นปัจจุบันกับผลย้อนหลัง 5 นัด, 10 นัด และข้อมูลทั้งหมดที่มีจาก Football-Data; ดูค่าเฉลี่ยยิง/เสียแยกเหย้า–เยือน. การเทียบเส้นปัจจุบันเป็นเพียงตัวชี้แนวโน้ม ไม่ใช่ประวัติการกินราคาจริง เพราะไม่มีราคาเก่าครบทุกนัด
-- **คะแนนความมั่นใจ:** คะแนนจัดอันดับจากโอกาสชนะเต็มตามโมเดลและแนวโน้มฟอร์มย้อนหลัง; เมื่อตัวเลขขัดแย้งกันจะลดคะแนน. คะแนนนี้ยังไม่ใช่เปอร์เซ็นต์ชนะที่ผ่านการ calibration และไม่ได้รับประกันกำไร
+- **ระบบ A:** คะแนนหลักฐานจากฟอร์มเทียบเส้น 5/10/ทั้งหมดและความสอดคล้อง ไม่ใช่โอกาสชนะ; ดูประตูได้เสียตามสนาม คุณภาพคู่แข่งจาก PPG ก่อนเกม xG/xGA จริง และ First Observed Price เป็นหลักฐานประกอบ ไม่มี xG ก็ยังดูฟอร์มได้
+- **ระบบ B:** Poisson จาก xG จริงคำนวณประตูคาดการณ์ โอกาสเหย้าชนะ/เสมอ/เยือนชนะ ผลเต็ม/ครึ่ง/คืนทุนของ AH/OU และ EV. ยังไม่ผ่าน Calibration และไม่มีข้อมูลก็เว้นค่า ไม่สร้าง xG ทดแทน
+- **ระบบ C:** อ่าน A/B ร่วมกันโดยไม่ผสมคะแนนหลักฐานเป็นความน่าจะเป็น. ถ้า EV ไม่มีค่าหรือไม่เป็นบวก จะไม่ใช้คำว่าตัวเลือกเด่นจากฟอร์มอย่างเดียว. ราคาไหลและคุณภาพคู่แข่งเป็นข้อมูลประกอบ ยังไม่ปรับน้ำหนักเชิงสถิติ
+- **มือถือ:** เลือกการ์ดมือถือเพื่ออ่านผลหลักโดยไม่เลื่อนตารางแนวนอน หรือสลับตารางเดิมได้. การเปลี่ยนมุมมองอ่านข้อมูล SQLite ไม่เรียก Odds API. ข้อมูลเดิมต้องสแกนใหม่จึงได้ผล A/B แยกกัน
 - **ความครอบคลุม xG:** โค้ดตั้งค่า Understat สำหรับพรีเมียร์ลีก, ลาลีกา, บุนเดสลีกา, เซเรียอา, ลีกเอิง และรัสเซีย หากเว็บปิดกั้น/เปลี่ยนรูปแบบ หรือไม่มีข้อมูลก่อนเตะ ระบบจะเว้น EV
 - **UCL / Europa League / Conference League:** ดึงราคาได้ทั้งสามรายการ แสดง xG ลีกในประเทศของทีมที่จับคู่ข้อมูลได้เพื่อประกอบการดูฟอร์มเท่านั้น และไม่ใช้ข้อมูลลีกในประเทศคำนวณ EV ของถ้วยยุโรป
 - **ลีกอื่น:** ยังดึงราคาได้ และหากมีผลย้อนหลัง Football-Data จะเห็นสัญญาณฟอร์มได้ แต่จะไม่แสดง EV จนกว่าจะมี xG ที่เชื่อถือได้สำหรับลีกนั้น ห้ามตีความว่าไม่มี EV แปลว่าไม่มี value

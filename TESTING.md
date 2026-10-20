@@ -40,3 +40,10 @@ until the legacy data is repaired. Valid empty lists and blank/NULL payloads hav
 no recoverable references and do not stop scans. Streamlit smoke coverage checks
 the same four tab labels with damaged bills present and compares all original
 bill columns before and after rendering.
+
+Phase 1 adds tests in `tests/test_analysis.py` for independent A/B results,
+model-only percentages, missing and stale xG, unknown/nonpositive EV, actual
+opponent history, First Observed Price, and additive migrations retaining all
+old pick/snapshot/bill fields. Streamlit smoke tests switch mobile/table views
+while forbidding HTTP requests. See PHASE1.md for model limitations, mobile
+acceptance checks, and separate Streamlit Cloud test deployment instructions.
