@@ -1,0 +1,77 @@
+"""Real Chromium layout checks at iPhone widths; no app or network required."""
+import importlib.util
+import json
+import os
+import shutil
+import unittest
+from pathlib import Path
+
+from mobile_dashboard import DASHBOARD_CSS, dashboard_html, details_html
+from test_dashboard import complete_row
+
+
+@unittest.skipUnless(importlib.util.find_spec('playwright'), 'Install playwright for viewport tests')
+class DashboardBrowserTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from playwright.sync_api import sync_playwright
+        cls.runtime = sync_playwright().start()
+        options = {'headless': True, 'args': ['--no-sandbox']}
+        executable = shutil.which('chromium')
+        if executable:
+            options['executable_path'] = executable
+        try:
+            cls.browser = cls.runtime.chromium.launch(**options)
+        except Exception as exc:
+            cls.runtime.stop()
+            if os.environ.get('CI'):
+                raise
+            raise unittest.SkipTest('Local sandbox cannot launch Chromium; CI runs viewport tests') from exc
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.browser.close()
+        cls.runtime.stop()
+
+    def page_content(self, row, dark=False):
+        colors = '--background-color:#0e1117;--text-color:#fafafa' if dark else '--background-color:#ffffff;--text-color:#182332'
+        return ('<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+                + DASHBOARD_CSS + '<style>body{margin:0;padding:16px;font-family:Arial,sans-serif;' + colors +
+                ';background:var(--background-color)}</style></head><body>' + dashboard_html(row, 'ยังประเมินความคุ้มค่าราคาไม่ได้') +
+                '<details><summary>ดูรายละเอียดเพิ่มเติม</summary>' + details_html(row) + '</details></body></html>')
+
+    def test_complete_dashboard_fits_iphone_widths_in_light_and_dark(self):
+        for width in [320, 375, 390, 430]:
+            for dark in [False, True]:
+                with self.subTest(width=width, dark=dark):
+                    page = self.browser.new_page(viewport={'width': width, 'height': 844}, color_scheme='dark' if dark else 'light')
+                    try:
+                        page.set_content(self.page_content(complete_row(), dark))
+                        self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                        tiles = page.locator('.vbp-score-row + .vbp-grid2 .vbp-tile')
+                        self.assertEqual(tiles.count(), 2)
+                        self.assertEqual(tiles.nth(0).bounding_box()['y'], tiles.nth(1).bounding_box()['y'])
+                        self.assertFalse(page.locator('details').evaluate('(e)=>e.open'))
+                        if width == 375 and os.environ.get('DASHBOARD_SCREENSHOTS'):
+                            folder = Path(os.environ['DASHBOARD_SCREENSHOTS'])
+                            folder.mkdir(parents=True, exist_ok=True)
+                            page.screenshot(path=str(folder / ('iphone-dark.png' if dark else 'iphone-light.png')), full_page=True)
+                        page.locator('summary').click()
+                        self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                    finally:
+                        page.close()
+
+    def test_missing_model_and_long_escaped_api_text_do_not_overflow_or_execute(self):
+        row = complete_row()
+        row['match'] = '<img src=x onerror="window.PWNED=1">' + 'LONGTEAMNAME' * 35
+        row['selection'] = '\"><script>window.PWNED=1</script>'
+        row['analysis_b_json'] = json.dumps({'available': False})
+        page = self.browser.new_page(viewport={'width': 320, 'height': 844})
+        try:
+            page.set_content(self.page_content(row))
+            self.assertEqual(page.locator('[data-model="unavailable"]').count(), 1)
+            self.assertEqual(page.locator('img,script').count(), 0)
+            self.assertIsNone(page.evaluate('window.PWNED'))
+            self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+        finally:
+            page.close()

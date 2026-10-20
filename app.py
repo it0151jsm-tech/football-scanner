@@ -1135,13 +1135,19 @@ def mobile_card_lines(row):
 
 
 def render_mobile_cards(rows):
+    from mobile_dashboard import DASHBOARD_CSS, dashboard_html, details_html
+
+    if rows.empty:
+        return
+    st.markdown(DASHBOARD_CSS, unsafe_allow_html=True)
     for _, row in rows.iterrows():
-        with st.container(border=True):
-            for index, line in enumerate(mobile_card_lines(row)):
-                if index == 0:
-                    st.subheader(line)
-                else:
-                    st.write(line)
+        a, b = saved_analysis(row.get("analysis_a_json")), saved_analysis(row.get("analysis_b_json"))
+        ev = b.get("selection", {}).get("ev_pct") if b.get("available") else None
+        recommendation = choose_recommendation(a.get("score"), ev, bool(row.get("odds_in_range", 1)))
+        with st.container():
+            st.markdown(dashboard_html(row, recommendation), unsafe_allow_html=True)
+            with st.expander("ดูรายละเอียดเพิ่มเติม"):
+                st.markdown(details_html(row), unsafe_allow_html=True)
 
 
 def analysis_display_rows(df):

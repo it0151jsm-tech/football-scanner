@@ -47,3 +47,14 @@ opponent history, First Observed Price, and additive migrations retaining all
 old pick/snapshot/bill fields. Streamlit smoke tests switch mobile/table views
 while forbidding HTTP requests. See PHASE1.md for model limitations, mobile
 acceptance checks, and separate Streamlit Cloud test deployment instructions.
+
+The dashboard presentation module is tested independently of analysis. HTML tests
+cover complete/missing/partial saved model data, real versus reference OU lines,
+changed price lines, technical-detail placement, escaped API text and invalid
+numeric inputs. Chromium tests check widths 320/375/390/430 in light and dark
+themes, two-column form layout, expanded details, and hostile long team names.
+CI installs `requirements-test.txt` and Chromium, runs every test, and uploads
+`iphone-dashboard-previews` screenshots (test fixtures, not live matches).
+The local sandbox may skip Chromium/AppTest when browser launch or Streamlit is
+unavailable; these tests must pass in CI. Safari on an actual iPhone remains an
+acceptance check after updating the separate test app.

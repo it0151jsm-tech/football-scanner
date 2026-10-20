@@ -95,6 +95,9 @@ class StreamlitSmokeTests(unittest.TestCase):
             self.assertEqual(len(app.exception), 0)
             self.assertEqual(app.radio[0].value, 'การ์ดมือถือ')
             self.assertTrue(any('ระบบ A:' in item.value for item in app.tabs[0].markdown))
+            self.assertTrue(any('class="vbp-dashboard"' in item.value for item in app.tabs[0].markdown))
+            self.assertTrue(any('ข้อมูลโมเดลไม่เพียงพอ' in item.value for item in app.tabs[0].markdown))
+            self.assertTrue(any(item.label == 'ดูรายละเอียดเพิ่มเติม' for item in app.tabs[0].expander))
             self.assertTrue(any('ยังประเมินความคุ้มค่าราคาไม่ได้' in item.value for item in app.tabs[0].markdown))
             self.assertFalse(any('ตัวเลือกเด่น' in item.value for item in app.tabs[0].markdown))
             app.radio[0].set_value('ตารางเดิม').run()
@@ -126,3 +129,32 @@ class StreamlitSmokeTests(unittest.TestCase):
             self.assertEqual(before, [tuple(r) for r in con.execute('SELECT * FROM slips')])
             columns = {r[1] for r in con.execute('PRAGMA table_info(picks)')}
             self.assertTrue({'analysis_a_json', 'analysis_b_json'} <= columns)
+
+    def test_complete_dashboard_renders_saved_model_without_http_or_data_changes(self):
+        from test_dashboard import complete_row
+        f = load_functions(self.path)
+        f['DB_FILE'] = self.db_path
+        f['init_db']()
+        row = complete_row()
+        row.update(event_id='complete', side='over', kickoff_utc=(datetime.now(timezone.utc)+timedelta(hours=5)).isoformat())
+        f['save_picks']([row])
+        with f['db']() as con:
+            con.execute('''INSERT INTO slips(selections_json,status,profit_units,final_summary)
+                           VALUES (?,?,?,?)''', ('[{"pick_id":1}]', 'แพ้บิล', -1, 'original final result'))
+            before_picks = [tuple(r) for r in con.execute('SELECT * FROM picks')]
+            before_bills = [tuple(r) for r in con.execute('SELECT * FROM slips')]
+        with patch('requests.get', side_effect=AssertionError('presentation must stay offline')) as get:
+            app = self.app()
+            self.assertEqual(len(app.exception), 0)
+            self.assertEqual(len(app.tabs), 4)
+            cards = [item.value for item in app.tabs[0].markdown if 'class="vbp-dashboard"' in item.value]
+            self.assertEqual(len(cards), 1)
+            self.assertIn('data-model="available"', cards[0])
+            self.assertIn('class="vbp-bar"', cards[0])
+            self.assertIn('เส้นตลาดจริง', cards[0])
+            self.assertNotIn('FIRST-TIMESTAMP', cards[0])
+            self.assertTrue(any(item.label == 'ดูรายละเอียดเพิ่มเติม' for item in app.tabs[0].expander))
+            get.assert_not_called()
+        with f['db']() as con:
+            self.assertEqual(before_picks, [tuple(r) for r in con.execute('SELECT * FROM picks')])
+            self.assertEqual(before_bills, [tuple(r) for r in con.execute('SELECT * FROM slips')])

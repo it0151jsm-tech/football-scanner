@@ -41,7 +41,13 @@ as historical evidence; it is not a claim about current betting value.
 Cards are the default in the analysis tab. The original table is available via
 the view selector, and detailed history/alternative bookmaker tables remain in
 expanders or their existing tabs. Main card text wraps vertically using standard
-Streamlit elements; it does not require a horizontally scrolling data grid.
+scoped HTML/CSS dashboard components; it does not require a horizontally
+scrolling data grid. Light/dark theme colors, flexible two-column form tiles,
+large evidence/goal figures, a labeled H/D/A bar, OU tiles, side-by-side price
+comparison and a short C conclusion provide the primary hierarchy. PPG, full
+statistics, 10-match details, timestamps and technical notes are in the native
+Streamlit expander `ดูรายละเอียดเพิ่มเติม`. All external text is HTML-escaped;
+only validated finite numeric model probabilities enter bar-width CSS.
 
 Cards show fixture/time, venue form and goals, actual xG/xGA, opponent PPG,
 first/current price and line, A evidence, B expected goals and probabilities,
