@@ -4,6 +4,7 @@ import math
 import json
 import codecs
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
@@ -24,6 +25,7 @@ API_BASE = "https://api.the-odds-api.com/v4"
 TH_TZ = timezone(timedelta(hours=7))
 UTC = timezone.utc
 TIMEOUT = 25
+HISTORY_TIMEOUT = (3, 8)
 DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro_v4.db"))
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
@@ -31,15 +33,15 @@ DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 # Do not reuse a code across unrelated leagues.
 LEAGUES = {
     "soccer_epl": ("พรีเมียร์ลีก อังกฤษ", "E0"),
-    "soccer_england_championship": ("แชมเปียนชิพ อังกฤษ", "E1"),
-    "soccer_england_league_one": ("ลีกวัน อังกฤษ", "E2"),
-    "soccer_england_league_two": ("ลีกทู อังกฤษ", "E3"),
+    "soccer_efl_champ": ("แชมเปียนชิพ อังกฤษ", "E1"),
+    "soccer_england_league1": ("ลีกวัน อังกฤษ", "E2"),
+    "soccer_england_league2": ("ลีกทู อังกฤษ", "E3"),
     "soccer_spain_la_liga": ("ลาลีกา สเปน", "SP1"),
     "soccer_italy_serie_a": ("เซเรียอา อิตาลี", "I1"),
     "soccer_italy_serie_b": ("เซเรียบี อิตาลี", "I2"),
     "soccer_germany_bundesliga": ("บุนเดสลีกา เยอรมนี", "D1"),
     "soccer_germany_bundesliga2": ("บุนเดสลีกา 2 เยอรมนี", "D2"),
-    "soccer_germany_3liga": ("ลีก 3 เยอรมนี", None),
+    "soccer_germany_liga3": ("ลีก 3 เยอรมนี", None),
     "soccer_france_ligue_one": ("ลีกเอิง ฝรั่งเศส", "F1"),
     "soccer_netherlands_eredivisie": ("เอเรดิวิซี เนเธอร์แลนด์", "N1"),
     "soccer_portugal_primeira_liga": ("โปรตุเกส พรีเมราลีกา", "P1"),
@@ -47,13 +49,28 @@ LEAGUES = {
     "soccer_uefa_champs_league": ("ยูฟ่า แชมเปียนส์ลีก", None),
     "soccer_uefa_europa_league": ("ยูฟ่า ยูโรปาลีก", None),
     "soccer_uefa_europa_conference_league": ("ยูฟ่า คอนเฟอเรนซ์ลีก", None),
-    "soccer_saudi_pro_league": ("ซาอุดีอาระเบีย โปรลีก", None),
+    "soccer_saudi_arabia_pro_league": ("ซาอุดีอาระเบีย โปรลีก", None),
     "soccer_usa_mls": ("เมเจอร์ลีก ซอคเกอร์ (MLS)", None),
     "soccer_thailand_thai_league": ("ไทยลีก", None),
     "soccer_japan_j_league": ("เจลีก ญี่ปุ่น", None),
-    "soccer_korea_k_league_1": ("เคลีก เกาหลีใต้", None),
+    "soccer_korea_kleague1": ("เคลีก เกาหลีใต้", None),
     "soccer_brazil_campeonato": ("บราซิล ซีรีเอ", None),
     "soccer_brazil_serie_b": ("บราซิล ซีรีบี", None),
+    # Added leagues: API keys confirmed in The Odds API's published sport-key list.
+    "soccer_turkey_super_league": ("ตุรกี ซูเปอร์ลีก", "T1"),
+    "soccer_belgium_first_div": ("เบลเยียม โปรลีก", "B1"),
+    "soccer_denmark_superliga": ("เดนมาร์ก ซูเปอร์ลีกา", "DNK"),
+    "soccer_sweden_allsvenskan": ("สวีเดน ออลสเวนส์คาน", "SWE"),
+    "soccer_switzerland_superleague": ("สวิตเซอร์แลนด์ ซูเปอร์ลีก", "SWZ"),
+    "soccer_poland_ekstraklasa": ("โปแลนด์ เอ็กสตราคลาซา", "POL"),
+    "soccer_mexico_ligamx": ("เม็กซิโก ลีกา เอ็มเอ็กซ์", "MEX"),
+    "soccer_china_superleague": ("จีน ซูเปอร์ลีก", "CHN"),
+    "soccer_finland_veikkausliiga": ("ฟินแลนด์ เวกเคาส์ลีกา", "FIN"),
+    "soccer_australia_aleague": ("ออสเตรเลีย เอ-ลีก", "AUS"),
+    "soccer_spl": ("สกอตแลนด์ พรีเมียร์ชิป", "SC0"),
+    "soccer_austria_bundesliga": ("ออสเตรีย บุนเดสลีกา", "AUT"),
+    "soccer_greece_super_league": ("กรีซ ซูเปอร์ลีก", "G1"),
+    "soccer_france_ligue_two": ("ลีกเดอซ์ ฝรั่งเศส", "F2"),
 }
 
 # Understat public league pages provide historical match xG for selected competitions.
@@ -157,6 +174,14 @@ def init_db():
         for name, decl in migrations.items():
             if name not in existing:
                 con.execute(f"ALTER TABLE picks ADD COLUMN {name} {decl}")
+        slip_columns = {r[1] for r in con.execute("PRAGMA table_info(slips)").fetchall()}
+        slip_migrations = {
+            "profit_units": "REAL",
+            "final_summary": "TEXT DEFAULT ''",
+        }
+        for name, decl in slip_migrations.items():
+            if name not in slip_columns:
+                con.execute(f"ALTER TABLE slips ADD COLUMN {name} {decl}")
         con.execute("CREATE INDEX IF NOT EXISTS idx_picks_event ON picks(event_id)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_event ON odds_snapshots(event_id, captured_at)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON odds_snapshots(event_id, market, side, bookmaker, captured_at)")
@@ -225,6 +250,82 @@ def save_picks(rows, snapshot_rows=None):
     return saved, inserted_snapshots
 
 
+def save_slip_record(slip_df, combined_odds, estimated_probability):
+    """Persist an explicitly saved combination, including immutable pick IDs and odds."""
+    selections = []
+    for _, row in slip_df.iterrows():
+        selections.append({
+            "pick_id": int(row["id"]),
+            "league": str(row.get("league", "")),
+            "match": str(row.get("match", "")),
+            "market": str(row.get("market", "")),
+            "selection": str(row.get("selection", "")),
+            "odds": float(row["odds"]),
+        })
+    with db() as con:
+        cur = con.execute(
+            "INSERT INTO slips (created_at, slip_size, selections_json, combined_odds, estimated_probability, status) VALUES (?,?,?,?,?,?)",
+            (datetime.now(TH_TZ).isoformat(timespec="seconds"), len(selections),
+             json.dumps(selections, ensure_ascii=False), float(combined_odds),
+             estimated_probability, "รอตรวจผล")
+        )
+        return int(cur.lastrowid)
+
+
+def load_slips(limit=200):
+    with db() as con:
+        return pd.read_sql_query("SELECT * FROM slips ORDER BY id DESC LIMIT ?", con, params=(limit,))
+
+
+def refresh_slip_settlements():
+    """Settle saved slips only after every stored pick has a final result; repeated runs are idempotent."""
+    updated = 0
+    with db() as con:
+        slips = con.execute("SELECT id, selections_json FROM slips WHERE status='รอตรวจผล'").fetchall()
+        for slip in slips:
+            try:
+                selections = json.loads(slip["selections_json"] or "[]")
+                if not selections:
+                    continue
+                factors = []
+                labels = []
+                complete = True
+                for leg in selections:
+                    pick = con.execute("SELECT status, settlement FROM picks WHERE id=?", (int(leg["pick_id"]),)).fetchone()
+                    if not pick or pick["status"] != "ตรวจแล้ว":
+                        complete = False
+                        break
+                    label = str(pick["settlement"] or "")
+                    odds = float(leg["odds"])
+                    if label == "ชนะเต็ม": factor = odds
+                    elif label == "ชนะครึ่ง": factor = (odds + 1.0) / 2.0
+                    elif label == "คืนทุน": factor = 1.0
+                    elif label == "แพ้ครึ่ง": factor = 0.5
+                    elif label == "แพ้เต็ม": factor = 0.0
+                    else:
+                        complete = False
+                        break
+                    factors.append(factor)
+                    labels.append(label)
+                if not complete:
+                    continue
+                return_multiple = math.prod(factors)
+                profit = return_multiple - 1.0
+                if all(x == "ชนะเต็ม" for x in labels):
+                    status = "ชนะเต็มทุกคู่"
+                elif return_multiple <= 1e-12:
+                    status = "แพ้บิล"
+                else:
+                    status = "ตัดสินแล้ว (ผลผสม/คืนทุน)"
+                summary = f"ผลตอบแทนรวม {return_multiple:.4f} หน่วย; กำไร/ขาดทุน {profit:+.4f} หน่วย"
+                con.execute("UPDATE slips SET status=?, profit_units=?, final_summary=? WHERE id=?",
+                            (status, round(profit, 4), summary, int(slip["id"])))
+                updated += 1
+            except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                continue
+    return updated
+
+
 def load_picks(limit=5000):
     with db() as con:
         return pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC LIMIT ?", con, params=(limit,))
@@ -258,31 +359,35 @@ def fetch_odds(sport_key, regions, api_key):
 def fetch_history(csv_code):
     if not csv_code:
         return pd.DataFrame()
-    frames = []
-    # Current and recent seasons. Missing/unpublished CSVs are skipped safely.
-    for season in ("2627", "2526", "2425", "2324"):
+    seasons = ("2627", "2526", "2425", "2324")
+    def download_one(season):
         url = f"https://www.football-data.co.uk/mmz4281/{season}/{csv_code}.csv"
         try:
-            response = requests.get(url, timeout=TIMEOUT)
+            response = requests.get(url, timeout=HISTORY_TIMEOUT)
             if response.status_code != 200 or not response.content:
-                continue
+                return None
             from io import BytesIO
             frame = pd.read_csv(BytesIO(response.content))
             required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
             if not required.issubset(frame.columns):
-                continue
+                return None
             frame["Date_dt"] = pd.to_datetime(frame["Date"], dayfirst=True, errors="coerce")
             frame["FTHG"] = pd.to_numeric(frame["FTHG"], errors="coerce")
             frame["FTAG"] = pd.to_numeric(frame["FTAG"], errors="coerce")
-            frame = frame.dropna(subset=["Date_dt", "FTHG", "FTAG", "HomeTeam", "AwayTeam"])
-            frames.append(frame)
+            return frame.dropna(subset=["Date_dt", "FTHG", "FTAG", "HomeTeam", "AwayTeam"])
         except Exception:
-            continue
+            return None
+    frames = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(download_one, season) for season in seasons]
+        for future in as_completed(futures):
+            frame = future.result()
+            if frame is not None and not frame.empty:
+                frames.append(frame)
     if not frames:
         return pd.DataFrame()
     result = pd.concat(frames, ignore_index=True).sort_values("Date_dt")
     return result.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last").reset_index(drop=True)
-
 
 def get_h2h_history(score_history, home_api, away_api, kickoff, limit=5):
     """Display-only H2H from the selected league's Football-Data results.
@@ -1069,7 +1174,11 @@ with tab_scan:
                 st.info("ไม่มีราคาตลาดนี้ในคู่ที่ดึงมา")
                 continue
             market_view["confidence_score"] = pd.to_numeric(market_view["confidence_score"], errors="coerce")
-            market_view = market_view.sort_values("confidence_score", ascending=False, na_position="last")
+            market_view["kickoff_sort"] = pd.to_datetime(market_view["kickoff_utc"], errors="coerce", utc=True)
+            market_view = market_view.sort_values(
+                ["kickoff_sort", "confidence_score", "ev_pct"],
+                ascending=[True, False, False], na_position="last"
+            )
             cols = ["kickoff_th", "league", "match", "selection", "odds", "confidence_score", "recommendation",
                     "ev_pct", "p_win", "form_rate", "form_rate_10", "form_rate_season", "xg_home_avg", "xga_home_avg",
                     "xg_away_avg", "xga_away_avg", "bookmaker", "model_status"]
@@ -1147,8 +1256,33 @@ with tab_slips:
                     "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "odds":"ค่าน้ำ",
                     "confidence_score":"คะแนนมั่นใจ/100", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ"
                 }), use_container_width=True, hide_index=True)
+                save_key = f"save_slip_{size}_" + "_".join(str(int(x)) for x in slip["id"].tolist())
+                if st.button(f"💾 บันทึกบิล {size} คู่", key=save_key):
+                    probability = float((slip["p_win"].clip(0, 100) / 100).prod()) if slip["p_win"].notna().all() else None
+                    slip_id = save_slip_record(slip, combined_odds, probability)
+                    st.success(f"บันทึกบิลหมายเลข #{slip_id} แล้ว — จะตรวจผลเมื่อผลของทุกคู่พร้อม")
         else:
             st.info("ยังไม่มีตัวเลือกถึงคะแนนขั้นต่ำนี้ — แต่คู่ทั้งหมดดูได้ในเมนูวิเคราะห์")
+
+    saved_slips = load_slips()
+    st.divider()
+    st.markdown("#### 📋 บิลที่บันทึกไว้และสรุปผล")
+    if saved_slips.empty:
+        st.info("ยังไม่มีบิลที่บันทึกไว้ กดปุ่ม ‘บันทึกบิล’ ใต้ชุดที่ต้องการ")
+    else:
+        slip_cols = [c for c in ["id", "created_at", "slip_size", "combined_odds", "estimated_probability", "status", "profit_units", "final_summary"] if c in saved_slips.columns]
+        st.dataframe(saved_slips[slip_cols].rename(columns={
+            "id":"เลขที่บิล", "created_at":"เวลาบันทึก", "slip_size":"จำนวนคู่", "combined_odds":"ค่าน้ำรวมโดยประมาณ",
+            "estimated_probability":"โอกาสชนะเต็มโดยประมาณ (โมเดล)", "status":"สถานะ", "profit_units":"กำไร/ขาดทุน (หน่วย)", "final_summary":"สรุปผล"
+        }), use_container_width=True, hide_index=True)
+        with st.expander("ดูรายละเอียดคู่ในบิลที่บันทึก"):
+            for _, saved in saved_slips.iterrows():
+                st.markdown(f"**บิล #{int(saved['id'])} — {saved['status']}**")
+                try:
+                    legs = json.loads(saved["selections_json"] or "[]")
+                    st.dataframe(pd.DataFrame(legs).rename(columns={"pick_id":"รหัสคำแนะนำ", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "odds":"ค่าน้ำ"}), use_container_width=True, hide_index=True)
+                except (ValueError, TypeError):
+                    st.warning("อ่านรายละเอียดบิลนี้ไม่ได้")
 
 with tab_history:
     st.subheader("📈 ประวัติราคาและตรวจผล")
@@ -1186,55 +1320,91 @@ with tab_history:
         st.info("ยังไม่มีประวัติราคา กดสแกนมากกว่าหนึ่งครั้งในช่วงเวลาต่างกันเพื่อเริ่มเปรียบเทียบ")
 
     st.divider()
-    st.markdown("#### ตรวจผลย้อนหลังจาก Football-Data (เฉพาะลีกที่มีรหัสรองรับ)")
+    st.markdown("#### ตรวจผลย้อนหลังจาก Football-Data (เฉพาะลีกที่มีรหัสและไฟล์ผลย้อนหลังใช้งานได้)")
     df = load_picks()
     if not df.empty:
         st.dataframe(df[["id","kickoff_th","league","match","selection","odds","ev_pct","model_status","status","final_score","settlement","profit_units"]], use_container_width=True, hide_index=True)
         if st.button("🔄 ตรวจและคำนวณผลที่หาเจอ", type="secondary"):
+            pending = df[df["status"] != "ตรวจแล้ว"].copy()
             checked = 0
-            skipped = 0
-            # Avoid claiming settlement if the league has no matching results source.
-            for _, row in df[df["status"] != "ตรวจแล้ว"].iterrows():
-                code = next((v[1] for v in LEAGUES.values() if v[0] == row["league"]), None)
-                if not code:
-                    skipped += 1
-                    continue
-                hist = fetch_history(code)
-                if hist.empty:
-                    skipped += 1
-                    continue
-                try:
-                    kickoff = pd.to_datetime(row["kickoff_utc"], utc=True).tz_convert(None).normalize()
-                except Exception:
-                    skipped += 1
-                    continue
-                teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
-                home = map_team(row["home_team"], teams)
-                away = map_team(row["away_team"], teams)
-                if not home or not away:
-                    skipped += 1
-                    continue
-                # Require exact home/away team pairing and kickoff date within 1 day; choose nearest date.
-                candidates = hist[(hist["HomeTeam"] == home) & (hist["AwayTeam"] == away)].copy()
-                if candidates.empty:
-                    skipped += 1
-                    continue
-                candidates["date_diff"] = (candidates["Date_dt"].dt.normalize() - kickoff).abs().dt.days
-                candidates = candidates[candidates["date_diff"] <= 1].sort_values("date_diff")
-                if candidates.empty:
-                    skipped += 1
-                    continue
-                result = candidates.iloc[0]
-                hg, ag = int(result["FTHG"]), int(result["FTAG"])
-                settled = settle_pick(row, hg, ag)
-                if settled is None:
-                    skipped += 1
-                    continue
-                label, profit, binary = settled
-                update_pick_result(row["id"], f"{hg}-{ag}", label, profit, binary)
-                checked += 1
-            st.success(f"ตรวจผลและคำนวณการชำระราคาได้ {checked} รายการ; ข้ามเพราะไม่มีผลตรงกัน/ไม่มีแหล่งข้อมูล {skipped} รายการ")
-            st.rerun()
+            skipped_no_source = 0
+            skipped_no_history = 0
+            skipped_no_match = 0
+            skipped_bad_data = 0
+            errors = []
+            history_cache = {}
+            progress = st.progress(0)
+            status_box = st.empty()
+            total = len(pending)
+            try:
+                for index, (_, row) in enumerate(pending.iterrows(), start=1):
+                    status_box.info(f"กำลังตรวจผล {index}/{total}: {row.get('match', 'ไม่ทราบคู่')}")
+                    code = next((v[1] for v in LEAGUES.values() if v[0] == row["league"]), None)
+                    if not code:
+                        skipped_no_source += 1
+                        progress.progress(index / max(total, 1))
+                        continue
+                    if code not in history_cache:
+                        try:
+                            history_cache[code] = fetch_history(code)
+                        except Exception as exc:
+                            history_cache[code] = pd.DataFrame()
+                            errors.append(f"{row['league']}: ดาวน์โหลดผลย้อนหลังผิดพลาด ({type(exc).__name__})")
+                    hist = history_cache[code]
+                    if hist.empty:
+                        skipped_no_history += 1
+                        progress.progress(index / max(total, 1))
+                        continue
+                    try:
+                        kickoff = pd.to_datetime(row["kickoff_utc"], utc=True).tz_convert(None).normalize()
+                        teams = sorted(set(hist["HomeTeam"].dropna()) | set(hist["AwayTeam"].dropna()))
+                        home = map_team(row["home_team"], teams)
+                        away = map_team(row["away_team"], teams)
+                        if not home or not away:
+                            skipped_no_match += 1
+                            progress.progress(index / max(total, 1))
+                            continue
+                        candidates = hist[(hist["HomeTeam"] == home) & (hist["AwayTeam"] == away)].copy()
+                        if candidates.empty:
+                            skipped_no_match += 1
+                            progress.progress(index / max(total, 1))
+                            continue
+                        candidates["date_diff"] = (candidates["Date_dt"].dt.normalize() - kickoff).abs().dt.days
+                        candidates = candidates[candidates["date_diff"] <= 1].sort_values("date_diff")
+                        if candidates.empty:
+                            skipped_no_match += 1
+                            progress.progress(index / max(total, 1))
+                            continue
+                        result = candidates.iloc[0]
+                        hg, ag = int(result["FTHG"]), int(result["FTAG"])
+                        settled_result = settle_pick(row, hg, ag)
+                        if settled_result is None:
+                            skipped_bad_data += 1
+                        else:
+                            label, profit, binary = settled_result
+                            update_pick_result(row["id"], f"{hg}-{ag}", label, profit, binary)
+                            checked += 1
+                    except Exception as exc:
+                        skipped_bad_data += 1
+                        errors.append(f"{row.get('match', row['id'])}: {type(exc).__name__}")
+                    progress.progress(index / max(total, 1))
+            finally:
+                status_box.empty()
+            slips_updated = refresh_slip_settlements()
+            st.success(f"ตรวจผลสำเร็จ {checked} รายการ | ไม่มีแหล่งข้อมูล {skipped_no_source} | ไม่มีผลย้อนหลัง {skipped_no_history} | จับคู่ผลไม่พบ {skipped_no_match} | ข้อมูลผิดรูปแบบ/คำนวณไม่ได้ {skipped_bad_data} | อัปเดตสรุปบิล {slips_updated} บิล")
+            for message in errors[:10]:
+                st.warning(message)
+            if len(errors) > 10:
+                st.caption(f"มีข้อผิดพลาดเพิ่มเติมอีก {len(errors)-10} รายการ")
+            # Reload so the result table and summary reflect the changes immediately.
+            df = load_picks()
+
+        # Refresh pending slips as a safety net when the history tab is opened again.
+        try:
+            refresh_slip_settlements()
+        except Exception:
+            pass
+        df = load_picks()
 
         settled = df[df["status"] == "ตรวจแล้ว"].copy()
         if not settled.empty:
@@ -1262,7 +1432,7 @@ with tab_help:
 - **ลีกอื่น:** ยังดึงราคาได้ และหากมีผลย้อนหลัง Football-Data จะเห็นสัญญาณฟอร์มได้ แต่จะไม่แสดง EV จนกว่าจะมี xG ที่เชื่อถือได้สำหรับลีกนั้น ห้ามตีความว่าไม่มี EV แปลว่าไม่มี value
 - **StatsBomb Open Data:** ไม่ใช้เป็นแหล่ง EV สดแบบครอบคลุม เพราะข้อมูลฟรีเป็นบางรายการแข่งขัน/บางฤดูกาลและไม่สม่ำเสมอ ไม่ควรนำข้อมูลเก่ามาอ้างเป็น xG ปัจจุบัน
 - **ประวัติราคา:** เก็บราคาในช่วงเวลาที่สแกนโดยไม่ใช้ตัวกรองค่าน้ำของหน้าคัดคู่; “ราคาแรกที่ระบบพบ” ไม่ใช่ราคาเปิดตลาดจริง ต้องสแกนหลายครั้ง และเมื่อเส้นเปลี่ยนจะไม่เปรียบเทียบค่าน้ำราวกับเป็นเส้นเดียวกัน
-- **โควตา The Odds API:** เลือกสแกนเฉพาะลีกที่สนใจ; แต่ละลีกใช้คำขอราคา 1 ครั้ง โดยขอ 2 ตลาดในภูมิภาคเดียว (ต้นทุนโดยทั่วไป 2 credits ต่อลีกที่มีข้อมูล) ตรวจตัวเลขคงเหลือจาก response header
+- **โควตา The Odds API:** เลือกสแกนเฉพาะลีกที่สนใจ; แต่ละลีกใช้คำขอราคา 1 ครั้ง โดยขอ 2 ตลาดในภูมิภาคเดียว; ต้นทุนขึ้นกับการคิดเครดิตของแผนและตลาดที่ตอบกลับ ให้ยึด response headers เป็นหลัก
 - **ข้อมูลบน Streamlit Cloud:** SQLite ในพื้นที่แอปอาจไม่ถาวรหลังรีสตาร์ตหรือ redeploy ควรดาวน์โหลดสำรองเป็นระยะ
 - **ผลตรวจย้อนหลัง:** คำแนะนำที่ยังไม่เริ่มแข่งจะอัปเดตเป็นค่าล่าสุดเพื่อลดการนับซ้ำจากการสแกนหลายรอบ; จึงไม่ควรตีความตัวเลขนี้เป็น backtest แบบล็อกราคาเดิมพันจริง
 - **EV:** ใช้ประกอบการดูความคุ้มค่าของราคา ไม่ได้ใช้คัดคู่ตั้งแต่ต้น. EV ติดลบหมายถึงราคาที่ประเมินอาจไม่คุ้ม แม้ฟอร์มจะดูดี
