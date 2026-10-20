@@ -29,3 +29,14 @@ a confirmed final score in the history tab.
 
 Tests use temporary data only. Live API availability and prediction accuracy are
 outside this regression suite.
+
+Damaged legacy JSON, blank/NULL payloads, unexpected JSON shapes, missing IDs,
+invalid ID types, and mixed valid/invalid legs are covered by regression tests.
+Reading a damaged bill never rewrites its JSON or finalized result. Pending bills
+with unreadable references remain pending. When a nonempty damaged payload may
+hide references, scans append fresh quotes rather than overwrite existing picks;
+this conservatively retains history and can increase the number of pick rows
+until the legacy data is repaired. Valid empty lists and blank/NULL payloads have
+no recoverable references and do not stop scans. Streamlit smoke coverage checks
+the same four tab labels with damaged bills present and compares all original
+bill columns before and after rendering.

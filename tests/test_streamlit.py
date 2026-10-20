@@ -30,6 +30,28 @@ class StreamlitSmokeTests(unittest.TestCase):
         self.assertEqual(len(app.exception), 0)
         self.assertEqual(len(app.tabs), 4)
 
+    def test_damaged_legacy_bills_keep_four_tabs_and_original_results(self):
+        f = load_functions(self.path)
+        f['DB_FILE'] = self.db_path
+        f['init_db']()
+        f['save_picks']([dict(event_id='old', market='Asian Handicap', side='home',
+                             league=f['LEAGUES']['soccer_epl'][0], bookmaker='Book',
+                             point=-.25, odds=2, selection='ต่อ A (-0.25)', match='A vs B')])
+        with f['db']() as con:
+            for payload in [None, '', '  ', '{bad', 'null', '{}', '[{}]', '[null]', '[{"pick_id":1},{}]']:
+                for status in ['รอตรวจผล', 'แพ้บิล']:
+                    con.execute('''INSERT INTO slips(selections_json,status,profit_units,final_summary)
+                                   VALUES (?,?,?,?)''', (payload, status, -1, 'original result'))
+            before = [tuple(r) for r in con.execute('SELECT * FROM slips ORDER BY id')]
+        f['save_picks']([dict(event_id='new', market='Asian Handicap', side='home',
+                             bookmaker='Book', point=0, odds=2)])
+        app = self.app()
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual([tab.label for tab in app.tabs],
+                         ['📊 ผลวิเคราะห์ราคา', '🎟️ ตัวเลือกสเต็ป', '📚 ราคาไหลและตรวจผล', 'ℹ️ วิธีใช้'])
+        with f['db']() as con:
+            self.assertEqual(before, [tuple(r) for r in con.execute('SELECT * FROM slips ORDER BY id')])
+
     def test_legacy_unsupported_bill_can_be_manually_settled(self):
         import json
         f = load_functions(self.path)

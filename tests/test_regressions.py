@@ -145,6 +145,60 @@ class Regressions(unittest.TestCase):
         self.assertEqual(self.f['refresh_slip_settlements'](), 0)
         self.assertEqual(self.f['load_slips']().iloc[0].status, 'รอตรวจผล')
 
+    def test_damaged_legacy_json_never_blocks_scans_or_rewrites_bills(self):
+        payloads = [None, '', '   ', '[]', '{broken', 'null', '{}', '7', '"text"',
+                    '[{}]', '[null]', '[4]', '[[]]', '[{"pick_id":null}]',
+                    '[{"pick_id":true}]', '[{"pick_id":1.5}]',
+                    '[{"pick_id":"bad"}]', '[{"pick_id":0}]',
+                    '[{"pick_id":-1}]', '[{"pick_id":9223372036854775808}]',
+                    '[{"pick_id":1},{}]', b'\xff']
+        for index, payload in enumerate(payloads):
+            with self.subTest(payload=payload):
+                self.f['DB_FILE'] = Path(self.tmp.name) / f'damaged-{index}.db'
+                self.f['init_db']()
+                self.f['save_picks']([self.row])
+                with self.f['db']() as con:
+                    for status in ['รอตรวจผล', 'แพ้บิล']:
+                        con.execute('''INSERT INTO slips
+                            (selections_json,status,profit_units,final_summary)
+                            VALUES (?,?,?,?)''', (payload, status, -1 if status == 'แพ้บิล' else None, 'original summary'))
+                    before = [tuple(r) for r in con.execute('SELECT * FROM slips ORDER BY id')]
+                changed = dict(self.row, point=.25, odds=1.9)
+                snapshot = dict(event_id='event', market='Asian Handicap', side='home',
+                                bookmaker='Book', point=.25, odds=1.9)
+                self.assertEqual(self.f['save_picks']([changed], [snapshot]), (1, 1))
+                # Every existing bill, including finalized bills, stays byte-for-byte intact.
+                self.assertEqual(self.f['refresh_slip_settlements'](), 0)
+                with self.f['db']() as con:
+                    after = [tuple(r) for r in con.execute('SELECT * FROM slips ORDER BY id')]
+                    self.assertEqual(before, after)
+                    self.assertEqual(con.execute('SELECT count(*) FROM odds_snapshots').fetchone()[0], 1)
+                    if payload not in [None, '', '   ', '[]']:
+                        self.assertEqual(con.execute('SELECT point FROM picks WHERE id=1').fetchone()[0], -.25)
+
+    def test_legacy_string_ids_still_lock_picks(self):
+        self.f['save_picks']([self.row])
+        with self.f['db']() as con:
+            con.execute('INSERT INTO slips(selections_json) VALUES (?)', ('[{"pick_id":" 1 "}]',))
+        self.f['save_picks']([dict(self.row, point=.25)])
+        picks = self.f['load_picks']()
+        self.assertEqual(len(picks), 2)
+        self.assertEqual(picks.loc[picks.id == 1, 'point'].iloc[0], -.25)
+
+    def test_valid_pending_bill_settles_beside_damaged_and_finalized_bills(self):
+        self.save_bill()
+        with self.f['db']() as con:
+            con.execute('INSERT INTO slips(selections_json,status) VALUES (?,?)', ('[{"pick_id":1},{}]', 'รอตรวจผล'))
+            con.execute('''INSERT INTO slips(selections_json,status,profit_units,final_summary)
+                           VALUES (?,?,?,?)''', ('{bad', 'แพ้บิล', -1, 'keep final result'))
+            protected = [tuple(r) for r in con.execute('SELECT * FROM slips WHERE id>1 ORDER BY id')]
+        self.f['update_pick_result'](1, '0-0', 'แพ้ครึ่ง', -.5)
+        self.assertEqual(self.f['refresh_slip_settlements'](), 1)
+        self.assertEqual(self.f['load_slips']().query('id == 1').iloc[0].profit_units, -.5)
+        self.assertEqual(self.f['refresh_slip_settlements'](), 0)
+        with self.f['db']() as con:
+            self.assertEqual(protected, [tuple(r) for r in con.execute('SELECT * FROM slips WHERE id>1 ORDER BY id')])
+
     def test_quarter_lines_expected_returns(self):
         for market, side, point, hg, ag, expected in [
             ('Asian Handicap', 'home', -.25, 0, 0, -.5),

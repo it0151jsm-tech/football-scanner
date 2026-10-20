@@ -191,6 +191,32 @@ def init_db():
 init_db()
 
 
+def read_slip_selections(raw):
+    """Read legacy JSON without repairing, rewriting, or guessing its contents."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return []
+    try:
+        selections = json.loads(raw)
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+    return selections if isinstance(selections, list) else None
+
+
+def slip_pick_id(leg):
+    """Accept only positive SQLite integer IDs, including legacy numeric strings."""
+    if not isinstance(leg, dict):
+        return None
+    value = leg.get("pick_id")
+    if type(value) is not int:
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value.strip()):
+            return None
+        try:
+            value = int(value)
+        except ValueError:
+            return None
+    return value if 0 < value <= 9223372036854775807 else None
+
+
 def save_picks(rows, snapshot_rows=None):
     """Save the latest pending recommendation per event/market/side/bookmaker.
     Store all observed prices separately, regardless of the user's odds filter.
@@ -211,9 +237,18 @@ def save_picks(rows, snapshot_rows=None):
     with db() as con:
         # Picks referenced by a saved slip are immutable, including legacy slips.
         locked_ids = set()
+        uncertain_references = False
         for saved_slip in con.execute("SELECT selections_json FROM slips"):
-            for leg in json.loads(saved_slip["selections_json"] or "[]"):
-                locked_ids.add(int(leg["pick_id"]))
+            selections = read_slip_selections(saved_slip["selections_json"])
+            if selections is None:
+                uncertain_references = True
+                continue
+            for leg in selections:
+                pick_id = slip_pick_id(leg)
+                if pick_id is None:
+                    uncertain_references = True
+                else:
+                    locked_ids.add(pick_id)
         for r in rows or []:
             values = {col: r.get(col) for col in pick_columns}
             values["scanned_at"] = now_text
@@ -225,7 +260,9 @@ def save_picks(rows, snapshot_rows=None):
                 WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND status!='ตรวจแล้ว'
                 ORDER BY id DESC LIMIT 1""",
                 (values["event_id"], values["market"], values["side"], values["bookmaker"])).fetchone()
-            if existing and existing["id"] not in locked_ids:
+            # If damaged JSON hides references, append quotes rather than risk
+            # overwriting an existing pick. The damaged bill itself stays intact.
+            if existing and not uncertain_references and existing["id"] not in locked_ids:
                 update_cols = [c for c in pick_columns if c != "event_id"]
                 sql = "UPDATE picks SET " + ",".join(f"{c}=?" for c in update_cols) + " WHERE id=?"
                 con.execute(sql, [values[c] for c in update_cols] + [existing["id"]])
@@ -303,14 +340,14 @@ def refresh_slip_settlements():
         slips = con.execute("SELECT id, selections_json FROM slips WHERE status='รอตรวจผล'").fetchall()
         for slip in slips:
             try:
-                selections = json.loads(slip["selections_json"] or "[]")
-                if not selections:
+                selections = read_slip_selections(slip["selections_json"])
+                if not selections or any(slip_pick_id(leg) is None for leg in selections):
                     continue
                 factors = []
                 labels = []
                 complete = True
                 for leg in selections:
-                    pick = con.execute("SELECT * FROM picks WHERE id=?", (int(leg["pick_id"]),)).fetchone()
+                    pick = con.execute("SELECT * FROM picks WHERE id=?", (slip_pick_id(leg),)).fetchone()
                     if not pick or pick["status"] != "ตรวจแล้ว":
                         complete = False
                         break
@@ -1323,8 +1360,11 @@ with tab_slips:
             for _, saved in saved_slips.iterrows():
                 st.markdown(f"**บิล #{int(saved['id'])} — {saved['status']}**")
                 try:
-                    legs = json.loads(saved["selections_json"] or "[]")
-                    st.dataframe(pd.DataFrame(legs).rename(columns={"pick_id":"รหัสคำแนะนำ", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "odds":"ค่าน้ำ"}), use_container_width=True, hide_index=True)
+                    legs = read_slip_selections(saved["selections_json"])
+                    if legs is None or any(slip_pick_id(leg) is None for leg in legs):
+                        st.warning("อ่านรายละเอียดบิลนี้ไม่ได้ — เก็บข้อมูลเดิมไว้โดยไม่เปลี่ยนผลบิล")
+                    else:
+                        st.dataframe(pd.DataFrame(legs).rename(columns={"pick_id":"รหัสคำแนะนำ", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "odds":"ค่าน้ำ"}), use_container_width=True, hide_index=True)
                 except (ValueError, TypeError):
                     st.warning("อ่านรายละเอียดบิลนี้ไม่ได้")
 
