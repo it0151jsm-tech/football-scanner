@@ -84,6 +84,8 @@ UNDERSTAT_LEAGUES = {
     "soccer_russia_premier_league": "RFPL",
 }
 UNDERSTAT_SEASONS = (2026, 2025, 2024, 2023, 2022)
+# Allow an off-season, but do not price fixtures from abandoned/stale feeds.
+MAX_XG_AGE_DAYS = 120
 
 EUROPEAN_CUPS = {
     "soccer_uefa_champs_league",
@@ -189,6 +191,32 @@ def init_db():
 init_db()
 
 
+def read_slip_selections(raw):
+    """Read legacy JSON without repairing, rewriting, or guessing its contents."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return []
+    try:
+        selections = json.loads(raw)
+    except (ValueError, TypeError, UnicodeDecodeError):
+        return None
+    return selections if isinstance(selections, list) else None
+
+
+def slip_pick_id(leg):
+    """Accept only positive SQLite integer IDs, including legacy numeric strings."""
+    if not isinstance(leg, dict):
+        return None
+    value = leg.get("pick_id")
+    if type(value) is not int:
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9]+", value.strip()):
+            return None
+        try:
+            value = int(value)
+        except ValueError:
+            return None
+    return value if 0 < value <= 9223372036854775807 else None
+
+
 def save_picks(rows, snapshot_rows=None):
     """Save the latest pending recommendation per event/market/side/bookmaker.
     Store all observed prices separately, regardless of the user's odds filter.
@@ -207,6 +235,20 @@ def save_picks(rows, snapshot_rows=None):
     ]
     saved = 0
     with db() as con:
+        # Picks referenced by a saved slip are immutable, including legacy slips.
+        locked_ids = set()
+        uncertain_references = False
+        for saved_slip in con.execute("SELECT selections_json FROM slips"):
+            selections = read_slip_selections(saved_slip["selections_json"])
+            if selections is None:
+                uncertain_references = True
+                continue
+            for leg in selections:
+                pick_id = slip_pick_id(leg)
+                if pick_id is None:
+                    uncertain_references = True
+                else:
+                    locked_ids.add(pick_id)
         for r in rows or []:
             values = {col: r.get(col) for col in pick_columns}
             values["scanned_at"] = now_text
@@ -218,7 +260,9 @@ def save_picks(rows, snapshot_rows=None):
                 WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND status!='ตรวจแล้ว'
                 ORDER BY id DESC LIMIT 1""",
                 (values["event_id"], values["market"], values["side"], values["bookmaker"])).fetchone()
-            if existing:
+            # If damaged JSON hides references, append quotes rather than risk
+            # overwriting an existing pick. The damaged bill itself stays intact.
+            if existing and not uncertain_references and existing["id"] not in locked_ids:
                 update_cols = [c for c in pick_columns if c != "event_id"]
                 sql = "UPDATE picks SET " + ",".join(f"{c}=?" for c in update_cols) + " WHERE id=?"
                 con.execute(sql, [values[c] for c in update_cols] + [existing["id"]])
@@ -250,10 +294,18 @@ def save_picks(rows, snapshot_rows=None):
     return saved, inserted_snapshots
 
 
+def has_result_source(league):
+    return any(name == league and code for name, code in LEAGUES.values())
+
+
 def save_slip_record(slip_df, combined_odds, estimated_probability):
     """Persist an explicitly saved combination, including immutable pick IDs and odds."""
+    if slip_df.empty:
+        raise ValueError("บิลต้องมีอย่างน้อยหนึ่งคู่")
     selections = []
     for _, row in slip_df.iterrows():
+        if not has_result_source(row.get("league")):
+            raise ValueError("ลีกนี้ไม่มีแหล่งตรวจผลอัตโนมัติ จึงยังบันทึกบิลใหม่ไม่ได้")
         selections.append({
             "pick_id": int(row["id"]),
             "league": str(row.get("league", "")),
@@ -261,6 +313,10 @@ def save_slip_record(slip_df, combined_odds, estimated_probability):
             "market": str(row.get("market", "")),
             "selection": str(row.get("selection", "")),
             "odds": float(row["odds"]),
+            "point": float(row["point"]),
+            "side": str(row["side"]),
+            "event_id": str(row["event_id"]),
+            "bookmaker": str(row["bookmaker"]),
         })
     with db() as con:
         cur = con.execute(
@@ -284,18 +340,33 @@ def refresh_slip_settlements():
         slips = con.execute("SELECT id, selections_json FROM slips WHERE status='รอตรวจผล'").fetchall()
         for slip in slips:
             try:
-                selections = json.loads(slip["selections_json"] or "[]")
-                if not selections:
+                selections = read_slip_selections(slip["selections_json"])
+                if not selections or any(slip_pick_id(leg) is None for leg in selections):
                     continue
                 factors = []
                 labels = []
                 complete = True
                 for leg in selections:
-                    pick = con.execute("SELECT status, settlement FROM picks WHERE id=?", (int(leg["pick_id"]),)).fetchone()
+                    pick = con.execute("SELECT * FROM picks WHERE id=?", (slip_pick_id(leg),)).fetchone()
                     if not pick or pick["status"] != "ตรวจแล้ว":
                         complete = False
                         break
-                    label = str(pick["settlement"] or "")
+                    # Recompute using the saved quote, never a mutable pick settlement.
+                    quote = dict(pick)
+                    quote.update(leg)
+                    if "point" not in leg:
+                        # Older bills saved the original line in their selection text.
+                        line_match = re.search(r"\((?:Over |Under )?([+-]?\d+(?:\.\d+)?)\)$", leg.get("selection", ""))
+                        if not line_match:
+                            complete = False
+                            break
+                        quote["point"] = float(line_match.group(1))
+                    hg, ag = map(int, str(pick["final_score"]).split("-"))
+                    result = settle_pick(quote, hg, ag)
+                    if result is None:
+                        complete = False
+                        break
+                    label = result[0]
                     odds = float(leg["odds"])
                     if label == "ชนะเต็ม": factor = odds
                     elif label == "ชนะครึ่ง": factor = (odds + 1.0) / 2.0
@@ -328,6 +399,8 @@ def refresh_slip_settlements():
 
 def load_picks(limit=5000):
     with db() as con:
+        if limit is None:
+            return pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC", con)
         return pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC LIMIT ?", con, params=(limit,))
 
 
@@ -600,6 +673,10 @@ def estimate_goals(df, home_api, away_api, kickoff):
     a_away = hist[hist["AwayTeam"] == away].tail(10)
     if len(h_home) < 5 or len(a_away) < 5:
         return None
+    # Both venue samples must be current; old seasons alone are insufficient.
+    if any((cutoff_day - sample["Date_dt"].max().normalize()).days > MAX_XG_AGE_DAYS
+           for sample in (h_home, a_away)):
+        return None
     # Require xG values for all sampled matches; don't silently substitute goals.
     h_home = h_home.dropna(subset=["xG_home", "xG_away"])
     a_away = a_away.dropna(subset=["xG_home", "xG_away"])
@@ -696,8 +773,9 @@ def estimate_form_signal(df, home_api, away_api, kickoff, market, side, point, w
             samples = [(float(r.FTAG), float(r.FTHG)) for r in away_games.itertuples()]
     else:
         # Each historical match appears only once; these are venue-specific samples.
-        samples = [(float(r.FTHG), float(r.FTAG)) for r in home_games.itertuples()]
-        samples += [(float(r.FTHG), float(r.FTAG)) for r in away_games.itertuples()]
+        unique_games = pd.concat([home_games, away_games]).drop_duplicates(
+            subset=["Date_dt", "HomeTeam", "AwayTeam"])
+        samples = [(float(r.FTHG), float(r.FTAG)) for r in unique_games.itertuples()]
     if not samples:
         result["form_summary"] = "ไม่มีเกมเหย้า/เยือนย้อนหลังสำหรับทีมนี้"
         return result
@@ -1146,7 +1224,7 @@ with tab_scan:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df.sort_values("id", ascending=False).drop_duplicates(
-            subset=["event_id", "market", "side", "point", "bookmaker"], keep="first")
+            subset=["event_id", "market", "side", "bookmaker"], keep="first")
         upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
         # Use the best available price for the same line/selection across bookmakers.
         quoted = upcoming[upcoming["odds"].notna()].copy()
@@ -1224,7 +1302,7 @@ with tab_slips:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         now_ts = pd.Timestamp.now(tz="UTC")
         df = df.sort_values("id", ascending=False).drop_duplicates(
-            subset=["event_id", "market", "side", "point", "bookmaker"], keep="first")
+            subset=["event_id", "market", "side", "bookmaker"], keep="first")
         candidates = df[(df["kickoff_parsed"] >= now_ts) & df["odds"].notna() &
             (df["status"] == "รอตรวจผล") & (df["confidence_score"] >= min_confidence)].copy()
         candidates = candidates.sort_values(["confidence_score", "odds"], ascending=False)
@@ -1257,7 +1335,10 @@ with tab_slips:
                     "confidence_score":"คะแนนมั่นใจ/100", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ"
                 }), use_container_width=True, hide_index=True)
                 save_key = f"save_slip_{size}_" + "_".join(str(int(x)) for x in slip["id"].tolist())
-                if st.button(f"💾 บันทึกบิล {size} คู่", key=save_key):
+                can_settle = all(has_result_source(name) for name in slip["league"])
+                if not can_settle:
+                    st.caption("บิลนี้มีลีกที่ยังไม่มีแหล่งตรวจผลอัตโนมัติ จึงยังบันทึกไม่ได้")
+                if st.button(f"💾 บันทึกบิล {size} คู่", key=save_key, disabled=not can_settle):
                     probability = float((slip["p_win"].clip(0, 100) / 100).prod()) if slip["p_win"].notna().all() else None
                     slip_id = save_slip_record(slip, combined_odds, probability)
                     st.success(f"บันทึกบิลหมายเลข #{slip_id} แล้ว — จะตรวจผลเมื่อผลของทุกคู่พร้อม")
@@ -1279,8 +1360,11 @@ with tab_slips:
             for _, saved in saved_slips.iterrows():
                 st.markdown(f"**บิล #{int(saved['id'])} — {saved['status']}**")
                 try:
-                    legs = json.loads(saved["selections_json"] or "[]")
-                    st.dataframe(pd.DataFrame(legs).rename(columns={"pick_id":"รหัสคำแนะนำ", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "odds":"ค่าน้ำ"}), use_container_width=True, hide_index=True)
+                    legs = read_slip_selections(saved["selections_json"])
+                    if legs is None or any(slip_pick_id(leg) is None for leg in legs):
+                        st.warning("อ่านรายละเอียดบิลนี้ไม่ได้ — เก็บข้อมูลเดิมไว้โดยไม่เปลี่ยนผลบิล")
+                    else:
+                        st.dataframe(pd.DataFrame(legs).rename(columns={"pick_id":"รหัสคำแนะนำ", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "odds":"ค่าน้ำ"}), use_container_width=True, hide_index=True)
                 except (ValueError, TypeError):
                     st.warning("อ่านรายละเอียดบิลนี้ไม่ได้")
 
@@ -1325,7 +1409,8 @@ with tab_history:
     if not df.empty:
         st.dataframe(df[["id","kickoff_th","league","match","selection","odds","ev_pct","model_status","status","final_score","settlement","profit_units"]], use_container_width=True, hide_index=True)
         if st.button("🔄 ตรวจและคำนวณผลที่หาเจอ", type="secondary"):
-            pending = df[df["status"] != "ตรวจแล้ว"].copy()
+            all_picks = load_picks(limit=None)
+            pending = all_picks[all_picks["status"] != "ตรวจแล้ว"].copy()
             checked = 0
             skipped_no_source = 0
             skipped_no_history = 0
@@ -1399,6 +1484,27 @@ with tab_history:
             # Reload so the result table and summary reflect the changes immediately.
             df = load_picks()
 
+        unsupported = load_picks(limit=None)
+        unsupported = unsupported[(unsupported["status"] != "ตรวจแล้ว") &
+            ~unsupported["league"].map(has_result_source) &
+            unsupported["market"].isin(["Asian Handicap", "Over/Under"])]
+        if not unsupported.empty:
+            with st.expander("กรอกผลด้วยตนเองสำหรับลีกที่ไม่มีแหล่งตรวจผล (รวมบิลเดิม)"):
+                event_ids = unsupported["event_id"].drop_duplicates().tolist()
+                event_id = st.selectbox("คู่แข่งขัน", event_ids,
+                    format_func=lambda eid: str(unsupported.loc[unsupported["event_id"] == eid, "match"].iloc[0] or eid))
+                hg = st.number_input("ประตูเจ้าบ้าน", min_value=0, step=1)
+                ag = st.number_input("ประตูทีมเยือน", min_value=0, step=1)
+                confirmed = st.checkbox("ยืนยันว่าเป็นผลจบการแข่งขันอย่างเป็นทางการ")
+                if st.button("บันทึกผลที่ยืนยันแล้ว", disabled=not confirmed):
+                    for _, pick in unsupported[unsupported["event_id"] == event_id].iterrows():
+                        result = settle_pick(pick, int(hg), int(ag))
+                        if result is not None:
+                            label, profit, binary = result
+                            update_pick_result(pick["id"], f"{int(hg)}-{int(ag)}", label, profit, binary)
+                    refresh_slip_settlements()
+                    st.success("บันทึกผลและอัปเดตบิลที่เกี่ยวข้องแล้ว")
+
         # Refresh pending slips as a safety net when the history tab is opened again.
         try:
             refresh_slip_settlements()
@@ -1406,7 +1512,8 @@ with tab_history:
             pass
         df = load_picks()
 
-        settled = df[df["status"] == "ตรวจแล้ว"].copy()
+        all_picks = load_picks(limit=None)
+        settled = all_picks[all_picks["status"] == "ตรวจแล้ว"].copy()
         if not settled.empty:
             settled["profit_units"] = pd.to_numeric(settled["profit_units"], errors="coerce")
             total_profit = settled["profit_units"].fillna(0).sum()
@@ -1434,9 +1541,12 @@ with tab_help:
 - **ประวัติราคา:** เก็บราคาในช่วงเวลาที่สแกนโดยไม่ใช้ตัวกรองค่าน้ำของหน้าคัดคู่; “ราคาแรกที่ระบบพบ” ไม่ใช่ราคาเปิดตลาดจริง ต้องสแกนหลายครั้ง และเมื่อเส้นเปลี่ยนจะไม่เปรียบเทียบค่าน้ำราวกับเป็นเส้นเดียวกัน
 - **โควตา The Odds API:** เลือกสแกนเฉพาะลีกที่สนใจ; แต่ละลีกใช้คำขอราคา 1 ครั้ง โดยขอ 2 ตลาดในภูมิภาคเดียว; ต้นทุนขึ้นกับการคิดเครดิตของแผนและตลาดที่ตอบกลับ ให้ยึด response headers เป็นหลัก
 - **ข้อมูลบน Streamlit Cloud:** SQLite ในพื้นที่แอปอาจไม่ถาวรหลังรีสตาร์ตหรือ redeploy ควรดาวน์โหลดสำรองเป็นระยะ
-- **ผลตรวจย้อนหลัง:** คำแนะนำที่ยังไม่เริ่มแข่งจะอัปเดตเป็นค่าล่าสุดเพื่อลดการนับซ้ำจากการสแกนหลายรอบ; จึงไม่ควรตีความตัวเลขนี้เป็น backtest แบบล็อกราคาเดิมพันจริง
+- **ผลตรวจย้อนหลัง:** คำแนะนำที่ไม่ได้บันทึกเป็นบิลจะอัปเดตเป็นค่าล่าสุด; รายการที่อยู่ในบิลจะล็อกเส้นและค่าน้ำเดิม. การตรวจผลและ ROI ใช้ข้อมูลทั้งหมด แม้ตารางจะแสดงเพียง 5,000 รายการล่าสุด. สถิตินี้ไม่ใช่ backtest อิสระ
+- **บิลและแหล่งผล:** บิลใหม่ต้องมีรหัสแหล่งผลอัตโนมัติครบทุกลีก; บิลเดิมในลีกที่ไม่มีแหล่งผลสามารถกรอกผลจบการแข่งขันที่ยืนยันแล้วในหน้าประวัติ
+- **ความสดของ xG:** หากเกมล่าสุดในชุดเหย้าหรือเยือนเก่ากว่าวันแข่งเกิน 120 วัน ระบบจะเว้น EV; เกณฑ์นี้เผื่อช่วงปิดฤดูกาลและยังไม่ได้ปรับเทียบเชิงสถิติ
 - **EV:** ใช้ประกอบการดูความคุ้มค่าของราคา ไม่ได้ใช้คัดคู่ตั้งแต่ต้น. EV ติดลบหมายถึงราคาที่ประเมินอาจไม่คุ้ม แม้ฟอร์มจะดูดี
 """)
 
 st.divider()
 st.caption("Value Bet Pro xG Edition | confidence scores are rankings, not calibrated win probabilities; no model is guaranteed profitable")
+
