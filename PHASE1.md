@@ -92,3 +92,41 @@ views on iPhone, confirm switching does not consume API quota, then test a saved
 bill and its result workflow. SQLite on Community Cloud is not durable across
 rebuilds; download test backups when needed. No production deployment or merge
 has been performed by this change.
+
+## Grouped AH/OU recommendations
+
+The mobile view now reads all saved upcoming picks and groups by `event_id`,
+instead of feeding the legacy table's highest-price/highest-A reduction into
+cards. The original table and bill-building rankings remain unchanged. Each
+fixture has independent AH and OU sections, including separate quote, line,
+bookmaker, A/B/C, first price, and snapshot provenance. Missing market IDs are
+isolated rather than merged by fixture text; conflicting team/league identities
+within one event ID are flagged and excluded from combination.
+
+For each market/side/bookmaker only the latest saved quote is considered (scan
+time, then row ID). Ranking tiers are: A >=55 with at least five form examples
+and internally consistent positive B EV; supporting form with unavailable EV;
+supporting form with nonpositive EV; and insufficient evidence. Within a tier,
+sample size capped at ten, EV, snapshot recency, A score, and row ID break ties.
+Odds are not a ranking key. This is a display-selection policy, not a change to
+the A/B/C formulas or a guarantee of profit. Other candidates and their reasons
+remain inspectable in the details expander.
+
+Unknown EV with form is labeled `แนวโน้มจากสถิติ — ยังยืนยันความคุ้มค่าราคาไม่ได้`.
+Negative EV or insufficient evidence receives `ยังไม่แนะนำ` with reasons. An
+absent/invalid market receives `ไม่มีราคาตลาด`; no quote/line is generated.
+
+OU output is used only from that OU row, with its saved model line exactly
+matching the actual quoted line (including 2.75 and 3.0). Mismatched or incomplete
+OU probabilities are withheld, not recalculated from a reference line. AH-only
+fixtures no longer display reference OU 2.5 tiles in the grouped dashboard.
+Saved A price/line and row EV must also agree with the quote before they can
+support an EV-based recommendation. No probabilities or EV are recomputed by
+the presentation/selection modules.
+
+Snapshot lookup reads SQLite using event, market, side, bookmaker, line, odds,
+and an observation time no later than the saved pick scan. If no matching
+snapshot exists, the card explicitly reports this and shows the pick's saved
+time instead of claiming a snapshot ID. First Observed Price remains the first
+recorded observation, never verified opening odds. View rendering performs no
+Odds API calls and makes no database writes.

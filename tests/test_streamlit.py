@@ -98,7 +98,7 @@ class StreamlitSmokeTests(unittest.TestCase):
             self.assertTrue(any('class="vbp-dashboard"' in item.value for item in app.tabs[0].markdown))
             self.assertTrue(any('ข้อมูลโมเดลไม่เพียงพอ' in item.value for item in app.tabs[0].markdown))
             self.assertTrue(any(item.label == 'ดูรายละเอียดเพิ่มเติม' for item in app.tabs[0].expander))
-            self.assertTrue(any('ยังประเมินความคุ้มค่าราคาไม่ได้' in item.value for item in app.tabs[0].markdown))
+            self.assertTrue(any('แนวโน้มจากสถิติ — ยังยืนยันความคุ้มค่าราคาไม่ได้' in item.value for item in app.tabs[0].markdown))
             self.assertFalse(any('ตัวเลือกเด่น' in item.value for item in app.tabs[0].markdown))
             app.radio[0].set_value('ตารางเดิม').run()
             self.assertEqual(len(app.exception), 0)
@@ -158,3 +158,39 @@ class StreamlitSmokeTests(unittest.TestCase):
         with f['db']() as con:
             self.assertEqual(before_picks, [tuple(r) for r in con.execute('SELECT * FROM picks')])
             self.assertEqual(before_bills, [tuple(r) for r in con.execute('SELECT * FROM slips')])
+
+    def test_grouped_ah_ou_multiple_books_and_view_switch_are_offline(self):
+        from test_market_recommendations import quote
+        f = load_functions(self.path)
+        f['DB_FILE'] = self.db_path
+        f['init_db']()
+        ah = quote('Asian Handicap', -.25, 'home', 'AH Book', pick=1)
+        ou = quote(point=2.75, book='OU Book', pick=2)
+        other = quote(point=3, book='Other Book', pick=3, odds=1.05)
+        for row in [ah, ou, other]:
+            row['kickoff_utc'] = (datetime.now(timezone.utc)+timedelta(hours=5)).isoformat()
+        f['save_picks']([ah, ou, other], [dict(event_id='event', market=ou['market'], side=ou['side'],
+                                            point=ou['point'], odds=ou['odds'], bookmaker=ou['bookmaker'])])
+        with f['db']() as con:
+            before = {table: [tuple(r) for r in con.execute('SELECT * FROM '+table)] for table in ['picks', 'slips', 'odds_snapshots']}
+        with patch('requests.get', side_effect=AssertionError('views must remain offline')) as get:
+            app = self.app()
+            self.assertEqual(len(app.exception), 0)
+            cards = [item.value for item in app.tabs[0].markdown if '<article class="vbp-dashboard"' in item.value]
+            self.assertEqual(len(cards), 1)
+            self.assertIn('data-market="Asian Handicap"', cards[0])
+            self.assertIn('data-market="Over/Under"', cards[0])
+            self.assertIn('AH Book', cards[0])
+            self.assertIn('OU Book', cards[0])
+            self.assertNotIn('Other Book', cards[0])
+            self.assertIn('Snapshot #', cards[0])
+            app.radio[0].set_value('ตารางเดิม').run()
+            self.assertEqual(len(app.exception), 0)
+            app.radio[0].set_value('การ์ดมือถือ').run()
+            self.assertEqual(len(app.exception), 0)
+            self.assertEqual(len(app.tabs), 4)
+            self.assertEqual(sum('<article class="vbp-dashboard"' in item.value for item in app.tabs[0].markdown), 1)
+            get.assert_not_called()
+        with f['db']() as con:
+            after = {table: [tuple(r) for r in con.execute('SELECT * FROM '+table)] for table in before}
+            self.assertEqual(before, after)

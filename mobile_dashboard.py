@@ -95,7 +95,7 @@ def form_tile(row, a, side):
             f'<p class="vbp-small">5 นัดล่าสุด · มีข้อมูล {text(profile.get("sample5", 0))} นัด</p></div>')
 
 
-def model_html(row, b):
+def model_html(row, b, include_ou=True):
     if not model_ready(b):
         return ('<div class="vbp-status" data-model="unavailable"><p class="vbp-result">ข้อมูลโมเดลไม่เพียงพอ</p>'
                 '<p class="vbp-small">ยังไม่แสดงประตูคาดการณ์ เปอร์เซ็นต์ หรือ EV ทดแทน</p></div>')
@@ -113,6 +113,8 @@ def model_html(row, b):
     for key, label in labels:
         content += f'<div><p class="vbp-small">{label}</p><p class="vbp-percent">{number(hda[key], 2, "%")}</p></div>'
     content += '</div>'
+    if not include_ou:
+        return content + '<p class="vbp-small">ยังไม่ผ่าน Calibration</p></div>'
     ou = mapping(b.get("ou"))
     same_market = row.get("market") == "Over/Under" and isinstance(row.get("point"), (int, float)) and row.get("point") == b.get("ou_line")
     line_label = "เส้นตลาดจริง" if same_market else "เส้นอ้างอิงโมเดล · ไม่ใช่ราคาตลาดนี้"
@@ -186,3 +188,75 @@ def details_html(row):
                 f'<p>สแกน: {text(row.get("scanned_at"))}</p><p>Kickoff UTC: {text(row.get("kickoff_utc"))}</p>'
                 f'<p>H2H: {text(row.get("h2h_summary"))}</p></div>')
     return content
+
+
+def market_panel_html(entry, market):
+    label = 'คำแนะนำแฮนดิแคป (AH)' if market == 'Asian Handicap' else 'คำแนะนำสูง–ต่ำ (OU)'
+    content = f'<section class="vbp-section" data-market="{text(market)}"><p class="vbp-label">{label}</p>'
+    if entry is None:
+        return content + '<div class="vbp-status"><p class="vbp-result">ไม่มีราคาตลาด</p><p class="vbp-small">ยังไม่แนะนำ — ไม่มีเส้นและราคาที่บันทึกไว้สำหรับตลาดนี้</p></div></section>'
+    row, a, b = entry['row'], entry['a'], entry['b']
+    if market == 'Asian Handicap':
+        team = row.get('home_team') if row['side'] == 'home' else row.get('away_team')
+        kind = 'ทีมต่อ' if row['point'] < 0 else 'ทีมรอง' if row['point'] > 0 else 'เสมอ (AH 0)'
+        selection = f'{kind}: {team}'
+    else:
+        selection = 'สูง (Over)' if row['side'] == 'over' else 'ต่ำ (Under)'
+    snapshot = entry.get('snapshot') or {}
+    snapshot_note = (f'Snapshot #{text(snapshot.get("id"))} · {text(snapshot.get("captured_at"))}' if snapshot else
+                     'ไม่พบ Snapshot ที่ยืนยันตรงแถวนี้ · เวลาบันทึกคำแนะนำ ' + text(row.get('scanned_at')))
+    content += (f'<div class="vbp-quote"><span class="vbp-selection">{text(selection)} · เส้น {number(row["point"], 2)}</span>'
+                f'<span class="vbp-odds">{number(row["odds"], 2)}</span></div><p class="vbp-small">เจ้ามือ {text(row.get("bookmaker"))} · แถว #{text(row.get("id"))}</p>'
+                f'<p class="vbp-small">{snapshot_note}</p><div class="vbp-score-row" style="margin-top:14px">'
+                f'<div class="vbp-score">{number(a.get("score"))}<small> /100</small></div><div><p class="vbp-result">ระบบ A: {text(a.get("result"))}</p>'
+                '<p class="vbp-small">คะแนนหลักฐานของตัวเลือกนี้ ไม่ใช่โอกาสชนะ</p></div></div><p class="vbp-label">ระบบ B</p>')
+    content += model_html(row, b if entry['model_valid'] else {}, include_ou=market == 'Over/Under')
+    if entry['model_valid']:
+        selection_b = mapping(b.get('selection'))
+        content += (f'<p class="vbp-small">ตัวเลือกนี้: ชนะเต็ม {number(selection_b.get("p_win"), 2, "%")} · '
+                    f'ผลครึ่ง/คืนทุน {number(selection_b.get("p_partial"), 2, "%")} · แพ้เต็ม {number(selection_b.get("p_loss"), 2, "%")}</p>')
+    content += f'<p class="vbp-result">EV {number(entry.get("ev"), 2, "%")}</p><p class="vbp-small">สถานะข้อมูล: {text(row.get("model_status"))}</p>'
+    content += '<p class="vbp-label" style="margin-top:14px">ราคาไหลของตัวเลือกนี้</p>'
+    price = mapping(a.get('price'))
+    # Never display first/current prices taken from a different saved quote.
+    price_matches = (isinstance(price.get('current_point'), (int, float)) and isinstance(price.get('current_odds'), (int, float)) and
+                     price['current_point'] == row['point'] and price['current_odds'] == row['odds'])
+    content += price_html(a if price_matches else {})
+    content += '<p class="vbp-small">First Observed Price = ราคาแรกที่พบ ไม่ใช่ราคาเปิดจริง</p>'
+    content += (f'<div class="vbp-conclusion" style="margin-top:14px"><p class="vbp-result">ระบบ C: {text(entry["conclusion"])}</p>'
+                f'<p class="vbp-small">{text(entry["reason"])}</p><p class="vbp-small">A ไม่ใช่ความน่าจะเป็น · B ยังไม่ผ่าน Calibration</p></div></section>')
+    return content
+
+
+def fixture_dashboard_html(fixture):
+    row, markets = fixture['row'], fixture['markets']
+    content = (f'<article class="vbp-dashboard" data-event="{text(fixture.get("event_id"))}" aria-label="ผลวิเคราะห์ {text(row.get("match"))}">'
+               f'<header class="vbp-header"><p class="vbp-meta">{text(row.get("league"))} · {text(row.get("kickoff_th"))} (ไทย)</p>'
+               f'<h3 class="vbp-title">{text(row.get("match"))}</h3><div class="vbp-badges"><span class="vbp-badge">AH + OU · คู่เดียวกัน</span></div></header>')
+    anchor = markets.get('Asian Handicap') or markets.get('Over/Under')
+    if anchor:
+        source = anchor['row']
+        content += ('<section class="vbp-section"><p class="vbp-label">ฟอร์มตามสนาม</p>'
+                    f'<p class="vbp-small">อ้างอิงแถว #{text(source.get("id"))} · {text(source.get("bookmaker"))} · {text(source.get("scanned_at"))}</p>'
+                    '<div class="vbp-grid2">' + form_tile(source, anchor['a'], 'home') + form_tile(source, anchor['a'], 'away') + '</div></section>')
+    for market in ('Asian Handicap', 'Over/Under'):
+        content += market_panel_html(markets.get(market), market)
+    if fixture.get('identity_conflict'):
+        content += '<section class="vbp-section"><p class="vbp-small">พบชื่อทีม/ลีกขัดแย้งใน event_id เดียวกัน จึงไม่รวมแถวที่ขัดแย้งกับข้อมูลล่าสุด</p></section>'
+    return content + '</article>'
+
+
+def fixture_details_html(fixture, ranking):
+    content = f'<div class="vbp-details"><h4>หลักเกณฑ์จัดอันดับ</h4><p>{text(ranking)}</p>'
+    for market, alternatives in fixture['alternatives'].items():
+        content += f'<h4>{text(market)} · ตัวเลือกจากข้อมูลที่บันทึกไว้</h4>'
+        for index, entry in enumerate(alternatives, 1):
+            row = entry['row']
+            content += (f'<div class="vbp-tile"><p>อันดับ {index} · แถว #{text(row.get("id"))} · {text(row.get("selection"))}</p>'
+                        f'<p>เส้น {number(row.get("point"), 2)} · ราคา {number(row.get("odds"), 2)} · {text(row.get("bookmaker"))}</p>'
+                        f'<p>เวลาแถวคำแนะนำ {text(row.get("scanned_at"))} · A {number(entry["a"].get("score"))} · EV {number(entry.get("ev"), 2, "%")}</p>'
+                        f'<p>{text(entry["conclusion"])} · {text(entry["reason"])}</p></div>')
+        selected = fixture['markets'].get(market)
+        if selected:
+            content += details_html(selected['row'])
+    return content + '</div>'

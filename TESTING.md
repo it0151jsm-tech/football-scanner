@@ -58,3 +58,13 @@ CI installs `requirements-test.txt` and Chromium, runs every test, and uploads
 The local sandbox may skip Chromium/AppTest when browser launch or Streamlit is
 unavailable; these tests must pass in CI. Safari on an actual iPhone remains an
 acceptance check after updating the separate test app.
+
+Grouped-market coverage includes one event with multiple markets/bookmakers,
+latest-per-book quote isolation, ranking independent of highest odds/A alone,
+unknown/nonpositive EV, missing market prices, exact OU quarter/integer lines,
+mismatched reference lines, and snapshot lookup across bookmaker/market/line/time.
+AppTest switches between grouped cards and the original table with HTTP forbidden
+and compares picks, slips and snapshots before/after. Chromium checks grouped
+AH/OU layouts and uploads grouped light/dark screenshots alongside earlier UI
+fixtures. Compile the additional read-only module with
+`python -m py_compile app.py mobile_dashboard.py market_recommendations.py`.

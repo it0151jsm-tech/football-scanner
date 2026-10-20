@@ -6,7 +6,7 @@ import shutil
 import unittest
 from pathlib import Path
 
-from mobile_dashboard import DASHBOARD_CSS, dashboard_html, details_html
+from mobile_dashboard import DASHBOARD_CSS, dashboard_html, details_html, fixture_dashboard_html, fixture_details_html
 from test_dashboard import complete_row
 
 
@@ -75,3 +75,28 @@ class DashboardBrowserTests(unittest.TestCase):
             self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
         finally:
             page.close()
+
+    def test_grouped_markets_fit_mobile_without_horizontal_scroll(self):
+        import test_regressions as regression
+        from market_recommendations import group_fixture_recommendations, RANKING
+        from test_market_recommendations import quote
+        f = regression.load_functions(Path(__file__).resolve().parents[1] / 'app.py')
+        fixture = group_fixture_recommendations([quote('Asian Handicap', -.25, 'home', 'AH Book'), quote(point=2.75, pick=2)], f['choose_recommendation'])[0]
+        for dark in [False, True]:
+            page = self.browser.new_page(viewport={'width': 320, 'height': 844}, color_scheme='dark' if dark else 'light')
+            try:
+                # Replace only the fixture markup; retain the tested theme and viewport wrapper.
+                page.set_content(self.page_content(complete_row(), dark))
+                page.locator('body').evaluate('(body, markup)=>body.innerHTML=markup', fixture_dashboard_html(fixture) + '<details><summary>ดูรายละเอียดเพิ่มเติม</summary>' + fixture_details_html(fixture, RANKING) + '</details>')
+                self.assertEqual(page.locator('article.vbp-dashboard').count(), 1)
+                self.assertEqual(page.locator('[data-market]').count(), 2)
+                self.assertEqual(page.locator('.vbp-tile.vbp-ou').count(), 2)
+                self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                if os.environ.get('DASHBOARD_SCREENSHOTS'):
+                    folder = Path(os.environ['DASHBOARD_SCREENSHOTS'])
+                    folder.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(path=str(folder / ('grouped-ah-ou-dark.png' if dark else 'grouped-ah-ou-light.png')), full_page=True)
+                page.locator('summary').click()
+                self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+            finally:
+                page.close()

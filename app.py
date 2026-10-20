@@ -1134,20 +1134,33 @@ def mobile_card_lines(row):
     return text
 
 
+def lookup_quote_snapshot(row):
+    """Read a matching stored observation; never borrow another market/bookmaker."""
+    with db() as con:
+        snapshot = con.execute("""SELECT id,captured_at FROM odds_snapshots
+            WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
+              AND captured_at<=? ORDER BY captured_at DESC,id DESC LIMIT 1""",
+            (row.get("event_id"), row.get("market"), row.get("side"), row.get("bookmaker"),
+             row.get("point"), row.get("odds"), row.get("scanned_at") or "")).fetchone()
+    return dict(snapshot) if snapshot else None
+
+
 def render_mobile_cards(rows):
-    from mobile_dashboard import DASHBOARD_CSS, dashboard_html, details_html
+    from mobile_dashboard import DASHBOARD_CSS, fixture_dashboard_html, fixture_details_html
+    from market_recommendations import RANKING, group_fixture_recommendations
 
     if rows.empty:
         return
     st.markdown(DASHBOARD_CSS, unsafe_allow_html=True)
-    for _, row in rows.iterrows():
-        a, b = saved_analysis(row.get("analysis_a_json")), saved_analysis(row.get("analysis_b_json"))
-        ev = b.get("selection", {}).get("ev_pct") if b.get("available") else None
-        recommendation = choose_recommendation(a.get("score"), ev, bool(row.get("odds_in_range", 1)))
+    st.caption(RANKING)
+    for fixture in group_fixture_recommendations(rows.to_dict("records"), choose_recommendation):
+        for entry in fixture["markets"].values():
+            if entry is not None:
+                entry["snapshot"] = lookup_quote_snapshot(entry["row"])
         with st.container():
-            st.markdown(dashboard_html(row, recommendation), unsafe_allow_html=True)
+            st.markdown(fixture_dashboard_html(fixture), unsafe_allow_html=True)
             with st.expander("ดูรายละเอียดเพิ่มเติม"):
-                st.markdown(details_html(row), unsafe_allow_html=True)
+                st.markdown(fixture_details_html(fixture, RANKING), unsafe_allow_html=True)
 
 
 def analysis_display_rows(df):
@@ -1413,7 +1426,7 @@ with tab_scan:
             for err in errors:
                 st.warning(err)
 
-    df = analysis_display_rows(load_picks())
+    df = analysis_display_rows(load_picks(limit=None))
     if df.empty:
         st.info("ยังไม่มีข้อมูล เลือกลีกและกดสแกน")
     else:
@@ -1422,6 +1435,7 @@ with tab_scan:
         for col in ("ev_pct", "odds", "p_win", "score", "confidence_score", "form_rate", "form_rate_10", "form_rate_season"):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
+        dashboard_rows = df[df["kickoff_parsed"] >= now_ts].copy()
         df = df.sort_values("id", ascending=False).drop_duplicates(
             subset=["event_id", "market", "side", "bookmaker"], keep="first")
         upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
@@ -1443,8 +1457,15 @@ with tab_scan:
         a.metric("คู่ที่ยังไม่เริ่ม", len(fixtures))
         b.metric("คู่มีราคาตลาด", upcoming[upcoming["market"] != "ยังไม่มีราคา"]["event_id"].nunique())
         c.metric("คู่ที่ยังไม่มีราคา", upcoming[upcoming["market"] == "ยังไม่มีราคา"]["event_id"].nunique())
-        st.caption("ทุกคู่ที่ API ส่งมาในช่วงเวลาที่เลือกจะแสดง แม้ EV ติดลบหรือข้อมูล xG ไม่ครบ ค่าน้ำที่ดีที่สุดของเส้นเดียวกันถูกใช้แสดงผล; ประวัติราคาเก็บทุกเจ้ามือแยกไว้")
+        if analysis_view == "การ์ดมือถือ":
+            st.caption("หนึ่งการ์ดต่อ event_id · AH/OU จัดอันดับแยกกันจากแถวที่บันทึกไว้ · ระบุเจ้ามือ เส้น ราคา และ Snapshot แยกตลาด · ไม่เลือกเพราะค่าน้ำสูงสุด")
+        else:
+            st.caption("ทุกคู่ที่ API ส่งมาในช่วงเวลาที่เลือกจะแสดง แม้ EV ติดลบหรือข้อมูล xG ไม่ครบ ค่าน้ำที่ดีที่สุดของเส้นเดียวกันถูกใช้แสดงผล; ประวัติราคาเก็บทุกเจ้ามือแยกไว้")
+        if analysis_view == "การ์ดมือถือ":
+            render_mobile_cards(dashboard_rows)
         for market_label, heading in [("Asian Handicap", "อันดับแฮนดิแคป: ต่อ–รอง"), ("Over/Under", "อันดับสูง–ต่ำ")]:
+            if analysis_view == "การ์ดมือถือ":
+                continue
             st.markdown(f"### {heading}")
             market_view = best_market[best_market["market"] == market_label].copy() if not best_market.empty else pd.DataFrame()
             if market_view.empty:
@@ -1471,8 +1492,6 @@ with tab_scan:
                     "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย",
                     "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือที่ให้ราคาดีสุด", "model_status":"สถานะข้อมูล"
                 }), use_container_width=True, hide_index=True)
-        if analysis_view == "การ์ดมือถือ":
-            render_mobile_cards(best_market[best_market["market"] == "ยังไม่มีราคา"])
         with st.expander("ดูเหตุผลวิเคราะห์และฟอร์มทีมแบบละเอียด"):
             detail = best_market.copy() if not best_market.empty else pd.DataFrame()
             if detail.empty:
