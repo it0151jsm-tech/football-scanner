@@ -40,3 +40,39 @@ until the legacy data is repaired. Valid empty lists and blank/NULL payloads hav
 no recoverable references and do not stop scans. Streamlit smoke coverage checks
 the same four tab labels with damaged bills present and compares all original
 bill columns before and after rendering.
+
+Phase 1 adds tests in `tests/test_analysis.py` for independent A/B results,
+model-only percentages, missing and stale xG, unknown/nonpositive EV, actual
+opponent history, First Observed Price, and additive migrations retaining all
+old pick/snapshot/bill fields. Streamlit smoke tests switch mobile/table views
+while forbidding HTTP requests. See PHASE1.md for model limitations, mobile
+acceptance checks, and separate Streamlit Cloud test deployment instructions.
+
+The dashboard presentation module is tested independently of analysis. HTML tests
+cover complete/missing/partial saved model data, real versus reference OU lines,
+changed price lines, technical-detail placement, escaped API text and invalid
+numeric inputs. Chromium tests check widths 320/375/390/430 in light and dark
+themes, two-column form layout, expanded details, and hostile long team names.
+CI installs `requirements-test.txt` and Chromium, runs every test, and uploads
+`iphone-dashboard-previews` screenshots (test fixtures, not live matches).
+The local sandbox may skip Chromium/AppTest when browser launch or Streamlit is
+unavailable; these tests must pass in CI. Safari on an actual iPhone remains an
+acceptance check after updating the separate test app.
+
+Grouped-market coverage includes one event with multiple markets/bookmakers,
+latest-per-book quote isolation, ranking independent of highest odds/A alone,
+unknown/nonpositive EV, missing market prices, exact OU quarter/integer lines,
+mismatched reference lines, and snapshot lookup across bookmaker/market/line/time.
+AppTest switches between grouped cards and the original table with HTTP forbidden
+and compares picks, slips and snapshots before/after. Chromium checks grouped
+AH/OU layouts and uploads grouped light/dark screenshots alongside earlier UI
+fixtures. Compile the additional read-only module with
+`python -m py_compile app.py mobile_dashboard.py market_recommendations.py`.
+
+Historical-data tests in test_history_data.py cover timeout/HTTP errors, empty or
+malformed schemas, explicit verified aliases versus wrong/similar clubs, mixed
+date formats, invalid/incomplete scores, UTC kickoff-day exclusion, old-season
+sample warnings, diagnostic escaping and absence of goals-to-xG substitution.
+The PR-only live E2 audit writes HTTP/schema/name/count evidence plus post-fix
+sample diagnostics to e2-live-history-audit.json in the existing CI artifact.
+See HISTORY_DIAGNOSIS.md for the verified root cause and limits of the live check.

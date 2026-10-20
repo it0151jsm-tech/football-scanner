@@ -20,7 +20,8 @@ def load_functions(path):
               get_close_matches=get_close_matches, TH_TZ=timezone(timedelta(hours=7)),
               UTC=timezone.utc, MAX_XG_AGE_DAYS=120)
     for node in tree.body:
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'LEAGUES' for t in node.targets):
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in
+                {'LEAGUES', 'EUROPEAN_CUPS', 'UNDERSTAT_LEAGUES', 'MAX_XG_AGE_DAYS'} for t in node.targets):
             exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), 'exec'), ns)
         if isinstance(node, ast.FunctionDef):
             node.decorator_list = []
