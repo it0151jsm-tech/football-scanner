@@ -16,7 +16,7 @@ def select_main_line(choices):
     batches = {}
     for entry in choices:
         row = entry['row']
-        if not row.get('scanned_at') or not finite(row.get('point')) or row['point'] < 0 or abs(row['point']*4-round(row['point']*4)) > 1e-9:
+        if row.get('bookmaker') in (None,'','Unknown','-') or not row.get('scanned_at') or not finite(row.get('point')) or row['point'] < 0 or abs(row['point']*4-round(row['point']*4)) > 1e-9:
             continue
         key = (row['bookmaker'],row['point'],row['scanned_at'])
         batches.setdefault(key,{})[row['side']] = entry

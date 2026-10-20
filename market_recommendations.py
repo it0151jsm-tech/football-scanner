@@ -151,3 +151,25 @@ def group_fixture_recommendations(rows, choose_c):
                        'alternatives': alternatives, 'ou_main': main, 'ou_direction': chosen['row']['side'] if chosen else None,
                        'ou_reason': side_reason, 'identity_conflict': len(coherent) != len(event_rows)})
     return sorted(output, key=lambda item: (str(item['row'].get('kickoff_utc') or ''), str(item.get('event_id') or '')))
+
+
+def ou_table_rows(rows, choose_c):
+    """Table and card share OU assessment; an anchor is never a recommendation."""
+    result = []
+    for fixture in group_fixture_recommendations(rows,choose_c):
+        pair=fixture['ou_main'].get('pair')
+        entries=[pair[s] for s in ('over','under')] if pair else fixture['alternatives']['Over/Under']
+        for entry in entries:
+            row=dict(entry['row'])
+            selected=bool(pair) and fixture['ou_direction']==row['side']
+            row['recommendation']=fixture['ou_reason'] if selected else 'ตัวเลือกตลาดที่กำลังประเมิน — ไม่ใช่คำแนะนำเดิมพัน'
+            row['system_c_reason']=fixture['ou_reason']
+            row['ou_main_status']=fixture['ou_main']['status']
+            row['ou_selected']=selected
+            result.append(row)
+    return result
+
+
+def recommended_ou_ids(rows,choose_c):
+    """Only confirmed directional OU evaluations may enter new slip suggestions."""
+    return {row['id'] for row in ou_table_rows(rows,choose_c) if row['ou_selected']}

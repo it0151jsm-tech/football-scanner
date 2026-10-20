@@ -1136,6 +1136,8 @@ def render_data_health():
         if source.get("full_report_url"):
             st.link_button("รายงานชื่อทีม/แหล่งข้อมูลฉบับเต็มจาก CI",source["full_report_url"])
         st.dataframe(pd.DataFrame(table_rows(LEAGUES,UNDERSTAT_LEAGUES,audits,source)),hide_index=True,use_container_width=True)
+        for context in source.get("context_only_sources",[]):
+            st.write("แหล่งประกอบถ้วยเท่านั้น (ไม่ใช่ลีกที่เลือกสแกน)",context)
         for key,audit in audits.items():
             problems = [team for team in audit["teams"] if any(team[s]["status"] not in ("matched","unsupported") for s in ("csv","understat"))]
             if problems:
@@ -1191,6 +1193,15 @@ def render_mobile_cards(rows):
                             st.markdown(manual_quotes_html(load_manual_quotes(fixture["event_id"])[:1]),unsafe_allow_html=True)
                         except ValueError as exc:
                             st.error(str(exc))
+
+
+def latest_saved_quotes(df):
+    """OU retains each actual line; AH keeps its existing latest-side policy."""
+    latest = df.sort_values("id",ascending=False)
+    keys = ["event_id","market","side","bookmaker"]
+    ou = latest[latest["market"] == "Over/Under"].drop_duplicates(subset=keys+["point"],keep="first")
+    other = latest[latest["market"] != "Over/Under"].drop_duplicates(subset=keys,keep="first")
+    return pd.concat([other,ou],ignore_index=True,sort=False)
 
 
 def analysis_display_rows(df):
@@ -1471,13 +1482,12 @@ with tab_scan:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         dashboard_rows = df[df["kickoff_parsed"] >= now_ts].copy()
-        df = df.sort_values("id", ascending=False).drop_duplicates(
-            subset=["event_id", "market", "side", "bookmaker"], keep="first")
+        df = latest_saved_quotes(df)
         upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
         # Use the best available price for the same line/selection across bookmakers.
         quoted = upcoming[upcoming["odds"].notna()].copy()
         if not quoted.empty:
-            best_quote = quoted.sort_values("odds", ascending=False).drop_duplicates(
+            best_quote = quoted[quoted["market"] != "Over/Under"].sort_values("odds", ascending=False).drop_duplicates(
                 subset=["event_id", "market", "side", "point"], keep="first")
             # Pick the top-confidence side per fixture and market; keep all matches in each market.
             best_market = best_quote.sort_values(["confidence_score", "odds"], ascending=False, na_position="last").drop_duplicates(
@@ -1487,6 +1497,12 @@ with tab_scan:
                 best_market = pd.concat([best_market, no_price_rows], ignore_index=True, sort=False)
         else:
             best_market = upcoming[upcoming["market"] == "ยังไม่มีราคา"].copy()
+        from market_recommendations import ou_table_rows
+        ou_rows = ou_table_rows(dashboard_rows.to_dict("records"),choose_recommendation)
+        if not best_market.empty:
+            best_market = best_market[best_market["market"] != "Over/Under"].copy()
+        if ou_rows:
+            best_market = pd.concat([best_market,pd.DataFrame(ou_rows)],ignore_index=True,sort=False)
         fixtures = upcoming[["event_id", "match", "league", "kickoff_th"]].drop_duplicates("event_id")
         a, b, c = st.columns(3)
         a.metric("คู่ที่ยังไม่เริ่ม", len(fixtures))
@@ -1495,7 +1511,7 @@ with tab_scan:
         if analysis_view == "การ์ดมือถือ":
             st.caption("หนึ่งการ์ดต่อ event_id · AH/OU จัดอันดับแยกกันจากแถวที่บันทึกไว้ · ระบุเจ้ามือ เส้น ราคา และ Snapshot แยกตลาด · ไม่เลือกเพราะค่าน้ำสูงสุด")
         else:
-            st.caption("ทุกคู่ที่ API ส่งมาในช่วงเวลาที่เลือกจะแสดง แม้ EV ติดลบหรือข้อมูล xG ไม่ครบ ค่าน้ำที่ดีที่สุดของเส้นเดียวกันถูกใช้แสดงผล; ประวัติราคาเก็บทุกเจ้ามือแยกไว้")
+            st.caption("ทุกคู่ที่ API ส่งมาในช่วงเวลาที่เลือกจะแสดง แม้ EV ติดลบหรือข้อมูล xG ไม่ครบ OU แสดงราคาสองฝั่งของเส้นหลักที่ประมาณ; เมื่อยืนยันไม่ได้แสดงเป็นข้อมูลประเมิน ไม่เลือกฝั่ง; AH คงตารางเดิม")
         if analysis_view == "การ์ดมือถือ":
             render_mobile_cards(dashboard_rows)
         for market_label, heading in [("Asian Handicap", "อันดับแฮนดิแคป: ต่อ–รอง"), ("Over/Under", "อันดับสูง–ต่ำ")]:
@@ -1514,18 +1530,18 @@ with tab_scan:
             )
             cols = ["kickoff_th", "league", "match", "selection", "odds", "confidence_score", "system_a_result", "system_b_status", "recommendation",
                     "ev_pct", "p_win", "form_rate", "form_rate_10", "form_rate_season", "xg_home_avg", "xga_home_avg",
-                    "xg_away_avg", "xga_away_avg", "bookmaker", "model_status"]
+                    "xg_away_avg", "xga_away_avg", "bookmaker", "model_status", "ou_main_status", "system_c_reason"]
             cols = [c for c in cols if c in market_view.columns]
             if analysis_view == "การ์ดมือถือ":
                 render_mobile_cards(market_view)
             else:
                 st.dataframe(market_view[cols].rename(columns={
                     "kickoff_th":"เวลาแข่ง (ไทย)", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"คำแนะนำตลาด",
-                    "odds":"ค่าน้ำดีที่สุด", "confidence_score":"คะแนนหลักฐาน A/100", "system_a_result":"ระบบ A", "system_b_status":"ระบบ B", "recommendation":"ระบบ C อ่าน A/B ร่วมกัน",
+                    "odds":"ราคาที่บันทึก", "confidence_score":"คะแนนหลักฐาน A/100", "system_a_result":"ระบบ A", "system_b_status":"ระบบ B", "recommendation":"ระบบ C อ่าน A/B ร่วมกัน",
                     "ev_pct":"EV (%)", "p_win":"ชนะเต็มตามโมเดล (%)", "form_rate":"ฟอร์มเทียบเส้น 5 นัด (%)",
                     "form_rate_10":"ฟอร์มเทียบเส้น 10 นัด (%)", "form_rate_season":"ฟอร์มเทียบเส้นทั้งหมด (%)",
                     "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย",
-                    "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือที่ให้ราคาดีสุด", "model_status":"สถานะข้อมูล"
+                    "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือ", "model_status":"สถานะข้อมูล"
                 }), use_container_width=True, hide_index=True)
         with st.expander("ดูเหตุผลวิเคราะห์และฟอร์มทีมแบบละเอียด"):
             detail = best_market.copy() if not best_market.empty else pd.DataFrame()
@@ -1549,7 +1565,7 @@ with tab_scan:
         st.caption("คะแนน A มาจากหลักฐานฟอร์ม ไม่ใช่ความน่าจะเป็น; เปอร์เซ็นต์ของ B มาจาก Poisson และยังไม่ผ่าน Calibration; EV อาจคลาดเคลื่อนตามคุณภาพ xG")
 
 with tab_slips:
-    st.subheader("🎟️ จัดอันดับตัวเลือกตามความมั่นใจ — EV เป็นข้อมูลประกอบ")
+    st.subheader("🎟️ จัดอันดับตัวเลือก — OU ต้องมีเส้นหลักและ EV ที่ยืนยันได้")
     df = analysis_display_rows(load_picks())
     if df.empty:
         st.info("สแกนราคาก่อน")
@@ -1559,20 +1575,23 @@ with tab_slips:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         now_ts = pd.Timestamp.now(tz="UTC")
-        df = df.sort_values("id", ascending=False).drop_duplicates(
-            subset=["event_id", "market", "side", "bookmaker"], keep="first")
+        df = latest_saved_quotes(df)
         candidates = df[(df["kickoff_parsed"] >= now_ts) & df["odds"].notna() &
             (df["status"] == "รอตรวจผล") & (df["confidence_score"] >= min_confidence)].copy()
-        candidates = candidates.sort_values(["confidence_score", "odds"], ascending=False)
+        from market_recommendations import recommended_ou_ids
+        upcoming_quotes = df[df["kickoff_parsed"] >= now_ts]
+        ou_ids = recommended_ou_ids(upcoming_quotes.to_dict("records"),choose_recommendation)
+        candidates = candidates[(candidates["market"] != "Over/Under") | candidates["id"].isin(ou_ids)]
+        candidates = candidates.sort_values(["confidence_score", "ev_pct"], ascending=False,na_position="last")
         candidates = candidates.drop_duplicates(subset=["event_id"], keep="first").reset_index(drop=True)
-        st.write(f"พบ {len(candidates)} คู่ที่คะแนนตั้งแต่ {min_confidence}/100 ขึ้นไป โดยเลือกไม่เกิน 1 ตัวเลือกต่อคู่ ไม่ตัดด้วย EV")
+        st.write(f"พบ {len(candidates)} คู่ที่คะแนนตั้งแต่ {min_confidence}/100 ขึ้นไป โดยเลือกไม่เกิน 1 ตัวเลือกต่อคู่; OU ต้องผ่าน Main Line/A/B/EV ของการ์ด")
         if not candidates.empty:
             st.dataframe(candidates[["kickoff_th", "league", "match", "market", "selection", "odds", "confidence_score", "recommendation", "ev_pct", "p_win", "bookmaker"]].rename(columns={
                 "kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก",
                 "odds":"ค่าน้ำ", "confidence_score":"คะแนนหลักฐาน A/100", "recommendation":"คำแนะนำระบบ", "ev_pct":"EV (%)",
                 "p_win":"ชนะเต็มตามโมเดล (%)", "bookmaker":"เจ้ามือ"
             }), use_container_width=True, hide_index=True)
-            st.caption("คำแนะนำที่ EV ติดลบยังคงแสดงตามคะแนน แต่ควรระวังเรื่องราคาไม่คุ้ม; คะแนนสูงไม่ได้หมายถึงกำไรแน่นอน")
+            st.caption("OU ไม่มี EV หรือยังไม่ยืนยันเส้นหลักจะไม่เข้ารายการบิลใหม่; AH คงเงื่อนไขเดิม คะแนนสูงไม่ได้หมายถึงกำไรแน่นอน")
             sizes = [5, 9, 13, 20]
             for size in sizes:
                 st.markdown(f"#### รายการ {size} คู่แรกตามคะแนน (จัดอันดับ ไม่ใช่คำรับรองให้แทงสเต็ป)")

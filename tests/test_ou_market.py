@@ -102,3 +102,26 @@ class MainOUTests(unittest.TestCase):
         self.assertNotIn('<script>',html);self.assertIn('&lt;script&gt;',html)
         self.assertNotIn('Alternative',html)
         self.assertIn('Alternative',fixture_details_html(fixture,'rule'))
+
+    def test_table_and_new_slip_use_same_assessment_without_anchor_bias(self):
+        from market_recommendations import ou_table_rows,recommended_ou_ids
+        rows=self.pair(3.5)
+        display=ou_table_rows(rows,self.f['choose_recommendation'])
+        self.assertEqual(len(display),2)
+        self.assertEqual([r['side'] for r in display if r['ou_selected']],['under'])
+        self.assertEqual(recommended_ou_ids(rows,self.f['choose_recommendation']),{rows[1]['id']})
+        for row in rows:row.update(ev_pct=None,analysis_b_json=None)
+        display=ou_table_rows(rows,self.f['choose_recommendation'])
+        self.assertFalse(any(r['ou_selected'] for r in display))
+        self.assertEqual(recommended_ou_ids(rows,self.f['choose_recommendation']),set())
+        self.assertTrue(all('ไม่ใช่คำแนะนำเดิมพัน' in r['recommendation'] for r in display))
+
+    def test_placeholder_bookmaker_cannot_confirm_main(self):
+        self.assertEqual(self.main(self.pair(book='Unknown'))['status'],'unconfirmed')
+
+    def test_latest_saved_rows_preserve_ou_lines_but_keep_ah_policy(self):
+        import pandas as pd
+        rows=[quote(point=2.5,pick=1),quote(point=3,pick=2),
+              quote('Asian Handicap',-.25,'home',pick=3),quote('Asian Handicap',-.5,'home',pick=4)]
+        latest=self.f['latest_saved_quotes'](pd.DataFrame(rows))
+        self.assertEqual(set(latest.id),{1,2,4})

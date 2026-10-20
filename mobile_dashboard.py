@@ -250,7 +250,8 @@ def fixture_dashboard_html(fixture):
     anchor = markets.get('Asian Handicap') or markets.get('Over/Under')
     if anchor:
         source = anchor['row']
-        content += ('<section class="vbp-section"><p class="vbp-label">ฟอร์มตามสนาม</p>'
+        content += ('<section class="vbp-section"><p class="vbp-label">ระบบ A: หลักฐานฟอร์ม</p>'
+                    f'<div class="vbp-score-row"><div class="vbp-score">{number(anchor["a"].get("score"))}<small> /100</small></div><p class="vbp-small">คะแนนของแถวอ้างอิง ไม่ใช่ความน่าจะเป็นหรือการเลือกฝั่ง<br>{text(source.get("selection"))}</p></div>'
                     f'<p class="vbp-small">อ้างอิงแถว #{text(source.get("id"))} · {text(source.get("bookmaker"))} · {text(source.get("scanned_at"))}</p>'
                     '<div class="vbp-grid2">' + form_tile(source, anchor['a'], 'home') + form_tile(source, anchor['a'], 'away') + '</div></section>')
     for market in ('Asian Handicap', 'Over/Under'):
