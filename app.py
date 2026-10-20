@@ -139,6 +139,14 @@ def init_db():
             selections_json TEXT, combined_odds REAL, estimated_probability REAL,
             status TEXT DEFAULT 'รอตรวจผล'
         )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS manual_ou_quotes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL, bookmaker TEXT NOT NULL,
+            point REAL NOT NULL, odds_over REAL NOT NULL, odds_under REAL NOT NULL,
+            created_at TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'MANUAL', model_result_json TEXT NOT NULL
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS league_health (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, sport_key TEXT NOT NULL, checked_at TEXT NOT NULL, payload_json TEXT NOT NULL
+        )""")
         # Upgrade an existing v3 database without deleting the user's data.
         existing = {r[1] for r in con.execute("PRAGMA table_info(picks)").fetchall()}
         migrations = {
@@ -259,9 +267,9 @@ def save_picks(rows, snapshot_rows=None):
             # For recommendations (not actual placed bets), update the latest pending quote
             # instead of counting every rescan as a separate bet. Keep settled records unchanged.
             existing = con.execute("""SELECT id FROM picks
-                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND status!='ตรวจแล้ว'
+                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point IS ? AND status!='ตรวจแล้ว'
                 ORDER BY id DESC LIMIT 1""",
-                (values["event_id"], values["market"], values["side"], values["bookmaker"])).fetchone()
+                (values["event_id"], values["market"], values["side"], values["bookmaker"], values["point"])).fetchone()
             # If damaged JSON hides references, append quotes rather than risk
             # overwriting an existing pick. The damaged bill itself stays intact.
             if existing and not uncertain_references and existing["id"] not in locked_ids:
@@ -942,7 +950,7 @@ def actual_xg_evidence(df, home_api, away_api, kickoff):
         if sample.empty or (cutoff - sample["Date_dt"].max().normalize()).days > MAX_XG_AGE_DAYS:
             result[side] = None
         else:
-            result[side] = {"xg": round(float(sample[gf].mean()), 3), "xga": round(float(sample[ga].mean()), 3), "sample": len(sample)}
+            result[side] = {"xg": round(float(sample[gf].mean()), 3), "xga": round(float(sample[ga].mean()), 3), "sample": len(sample), "last_date": str(sample["Date_dt"].max().date())}
     result["status"] = "ค่า xG/xGA จริงตามสนาม; ไม่มีการสร้าง xG ทดแทน" if any(result.values()) else "xG เก่า/จับคู่ไม่ได้"
     return result
 
@@ -1082,6 +1090,63 @@ def lookup_quote_snapshot(row):
     return dict(snapshot) if snapshot else None
 
 
+def record_data_health(sport_key, payload):
+    with db() as con:
+        con.execute("INSERT INTO league_health(sport_key,checked_at,payload_json) VALUES (?,?,?)",
+                    (sport_key,payload["checked_at"],json.dumps(payload,ensure_ascii=False)))
+
+
+def load_manual_quotes(event_id):
+    with db() as con:
+        return [dict(r) for r in con.execute("SELECT * FROM manual_ou_quotes WHERE event_id=? ORDER BY id DESC",(event_id,))]
+
+
+def save_manual_quote(event_id, bookmaker, line, over, under):
+    from manual_quotes import validate_quote, evaluate_manual
+    quote = validate_quote(bookmaker,line,over,under)
+    with db() as con:
+        models = [dict(r) for r in con.execute("SELECT * FROM picks WHERE event_id=? ORDER BY scanned_at DESC,id DESC",(event_id,))]
+        if not models:
+            raise ValueError("ไม่พบคู่แข่งขันที่บันทึกไว้")
+        identity = tuple(models[0].get(k) for k in ("home_team","away_team","league","kickoff_utc"))
+        models = [r for r in models if tuple(r.get(k) for k in ("home_team","away_team","league","kickoff_utc")) == identity]
+        now = datetime.now(UTC)
+        result = {"available":False,"reason":"ไม่มีโมเดล B ที่ยืนยันความสดได้"}
+        for model in models:
+            candidate = evaluate_manual(model,line,over,under,now,score_matrix,evaluate_market_poisson)
+            if candidate["available"]:
+                result = candidate
+                break
+        cur = con.execute("""INSERT INTO manual_ou_quotes(event_id,bookmaker,point,odds_over,odds_under,created_at,source,model_result_json)
+            VALUES (?,?,?,?,?,?,?,?)""",(event_id,quote["bookmaker"],quote["point"],quote["odds_over"],quote["odds_under"],
+            now.isoformat(timespec="seconds"),"MANUAL",json.dumps(result,ensure_ascii=False,allow_nan=False)))
+        return int(cur.lastrowid)
+
+
+def render_data_health():
+    from data_health import table_rows
+    with st.expander("Data Health · ตรวจชื่อทีมแยกตามลีก"):
+        with db() as con:
+            audits = {r["sport_key"]:json.loads(r["payload_json"]) for r in con.execute(
+                "SELECT * FROM league_health WHERE id IN (SELECT MAX(id) FROM league_health GROUP BY sport_key)")}
+        report_path = Path(__file__).parent / "reports" / "league-source-audit.json"
+        source = json.loads(report_path.read_text()) if report_path.exists() else {}
+        st.caption("ตรวจเฉพาะทีม API ที่เคยสแกนและบันทึกไว้; 0 หมายถึงยังไม่มีชื่อให้ตรวจ ไม่ใช่ผ่านทั้งหมด · ไม่เรียก API เมื่อเปิดส่วนนี้")
+        st.caption("ตรวจแหล่ง CSV/Understat เมื่อ: " + str(source.get("checked_at","ยังไม่มีรายงานสด")))
+        if source.get("full_report_url"):
+            st.link_button("รายงานชื่อทีม/แหล่งข้อมูลฉบับเต็มจาก CI",source["full_report_url"])
+        st.dataframe(pd.DataFrame(table_rows(LEAGUES,UNDERSTAT_LEAGUES,audits,source)),hide_index=True,use_container_width=True)
+        for key,audit in audits.items():
+            problems = [team for team in audit["teams"] if any(team[s]["status"] not in ("matched","unsupported") for s in ("csv","understat"))]
+            if problems:
+                st.write(audit["league"],problems)
+        st.caption("ชื่อใหม่ในชุดข้อมูลฤดูกาลใหม่ต้องตรวจ identity เพิ่ม ไม่ถือว่าเลื่อนชั้นสำเร็จหรือจับคู่จากชื่อคล้าย")
+        for league in source.get("leagues",[]):
+            unresolved = [r for r in league.get("cross_source_results",[]) if r["status"]!="matched"]
+            if unresolved or league.get("current_new_names"):
+                st.write(league.get("league",league["key"]),{"ชื่อใหม่ใน CSV":league.get("current_new_names",[]),"ยังจับคู่ข้ามแหล่งไม่ได้":unresolved})
+
+
 def render_mobile_cards(rows):
     from mobile_dashboard import DASHBOARD_CSS, fixture_dashboard_html, fixture_details_html
     from market_recommendations import RANKING, group_fixture_recommendations
@@ -1090,14 +1155,42 @@ def render_mobile_cards(rows):
         return
     st.markdown(DASHBOARD_CSS, unsafe_allow_html=True)
     st.caption(RANKING)
-    for fixture in group_fixture_recommendations(rows.to_dict("records"), choose_recommendation):
+    from ou_market import selection_counts
+    fixtures = group_fixture_recommendations(rows.to_dict("records"), choose_recommendation)
+    counts = selection_counts(fixtures)
+    st.caption(f"สัดส่วนฝั่ง OU ที่แนะนำในหน้าปัจจุบัน: Over {counts['over']} | Under {counts['under']} | ประเมินแต่ไม่เลือกฝั่ง {counts['neutral']} | ไม่ยืนยัน Main {counts['missing_main']}; ไม่ใช่อัตราชนะ")
+    if counts["over_pct"] is not None:
+        st.caption(f"เฉพาะคำแนะนำที่เลือกฝั่ง: Over {counts['over_pct']:.1f}% / Under {counts['under_pct']:.1f}%")
+    for fixture in fixtures:
         for entry in fixture["markets"].values():
             if entry is not None:
+                entry["snapshot"] = lookup_quote_snapshot(entry["row"])
+        if fixture.get("ou_main",{}).get("pair"):
+            for side in ("over","under"):
+                entry = fixture["ou_main"]["pair"][side]
                 entry["snapshot"] = lookup_quote_snapshot(entry["row"])
         with st.container():
             st.markdown(fixture_dashboard_html(fixture), unsafe_allow_html=True)
             with st.expander("ดูรายละเอียดเพิ่มเติม"):
                 st.markdown(fixture_details_html(fixture, RANKING), unsafe_allow_html=True)
+                from mobile_dashboard import manual_quotes_html
+                st.markdown(manual_quotes_html(load_manual_quotes(fixture["event_id"])),unsafe_allow_html=True)
+                if not fixture["event_id"]:
+                    st.caption("ไม่สามารถบันทึก Manual: ข้อมูลเก่าไม่มี event_id")
+                    continue
+                with st.form("manual_ou_" + str(fixture["event_id"])):
+                    st.caption("Manual OU Quote · กรอกเอง แยกจาก API และบิลเดิม; ไม่ใช้ยืนยัน Main Line ของ API")
+                    book = st.text_input("เว็บ/เจ้ามือ (Manual)")
+                    line = st.number_input("เส้นสูง–ต่ำ (Manual)",min_value=0.0,max_value=20.0,value=None,step=.25)
+                    over = st.number_input("ราคาสูง (Manual)",min_value=1.01,value=None,step=.01)
+                    under = st.number_input("ราคาต่ำ (Manual)",min_value=1.01,value=None,step=.01)
+                    if st.form_submit_button("บันทึก Manual OU Quote"):
+                        try:
+                            quote_id = save_manual_quote(fixture["event_id"],book,line,over,under)
+                            st.success(f"บันทึก Manual #{quote_id} แล้ว — ไม่ใช่บิลเดิมพัน")
+                            st.markdown(manual_quotes_html(load_manual_quotes(fixture["event_id"])[:1]),unsafe_allow_html=True)
+                        except ValueError as exc:
+                            st.error(str(exc))
 
 
 def analysis_display_rows(df):
@@ -1121,6 +1214,10 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     score_history = fetch_history(csv_code)
     domestic_context = fetch_understat_all_history() if sport_key in EUROPEAN_CUPS else pd.DataFrame()
     now = datetime.now(UTC)
+    from data_health import observe_league
+    health = observe_league(
+        sport_key, league_name, csv_code, sport_key in UNDERSTAT_LEAGUES, score_history, history, matches, now)
+    record_data_health(sport_key, health)
     target = now + timedelta(hours=hours_limit)
     rows, snapshot_rows = [], []
     first_prices = first_observed_quotes([m.get("id", "") for m in matches])
@@ -1327,6 +1424,7 @@ tab_scan, tab_slips, tab_history, tab_help = st.tabs(["📊 ผลวิเค�
 
 with tab_scan:
     st.subheader("📊 วิเคราะห์ทุกคู่ที่ดึงข้อมูลได้")
+    render_data_health()
     analysis_view = st.radio("มุมมองผลวิเคราะห์", ["การ์ดมือถือ", "ตารางเดิม"], horizontal=True)
     st.caption("ระบบ A = คะแนนหลักฐาน | ระบบ B = Poisson/EV | ระบบ C = อ่านผลร่วมกัน; ยังไม่ผ่าน Calibration")
     if scan_btn:

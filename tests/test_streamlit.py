@@ -98,7 +98,7 @@ class StreamlitSmokeTests(unittest.TestCase):
             self.assertTrue(any('class="vbp-dashboard"' in item.value for item in app.tabs[0].markdown))
             self.assertTrue(any('ข้อมูลโมเดลไม่เพียงพอ' in item.value for item in app.tabs[0].markdown))
             self.assertTrue(any(item.label == 'ดูรายละเอียดเพิ่มเติม' for item in app.tabs[0].expander))
-            self.assertTrue(any('แนวโน้มจากสถิติ — ยังยืนยันความคุ้มค่าราคาไม่ได้' in item.value for item in app.tabs[0].markdown))
+            self.assertTrue(any('ตัวเลือกตลาดที่กำลังประเมิน' in item.value for item in app.tabs[0].markdown))
             self.assertFalse(any('ตัวเลือกเด่น' in item.value for item in app.tabs[0].markdown))
             app.radio[0].set_value('ตารางเดิม').run()
             self.assertEqual(len(app.exception), 0)
@@ -131,13 +131,15 @@ class StreamlitSmokeTests(unittest.TestCase):
             self.assertTrue({'analysis_a_json', 'analysis_b_json'} <= columns)
 
     def test_complete_dashboard_renders_saved_model_without_http_or_data_changes(self):
-        from test_dashboard import complete_row
+        from test_market_recommendations import quote
         f = load_functions(self.path)
         f['DB_FILE'] = self.db_path
         f['init_db']()
-        row = complete_row()
+        row = quote()
+        opposite = quote(side='under',odds=1.85,pick=2)
         row.update(event_id='complete', side='over', kickoff_utc=(datetime.now(timezone.utc)+timedelta(hours=5)).isoformat())
-        f['save_picks']([row])
+        opposite.update(event_id='complete',kickoff_utc=row['kickoff_utc'])
+        f['save_picks']([row,opposite])
         with f['db']() as con:
             con.execute('''INSERT INTO slips(selections_json,status,profit_units,final_summary)
                            VALUES (?,?,?,?)''', ('[{"pick_id":1}]', 'แพ้บิล', -1, 'original final result'))
@@ -167,9 +169,10 @@ class StreamlitSmokeTests(unittest.TestCase):
         ah = quote('Asian Handicap', -.25, 'home', 'AH Book', pick=1)
         ou = quote(point=2.75, book='OU Book', pick=2)
         other = quote(point=3, book='Other Book', pick=3, odds=1.05)
-        for row in [ah, ou, other]:
+        under = quote(point=2.75,side='under',odds=1.85,pick=4)
+        for row in [ah, ou, other, under]:
             row['kickoff_utc'] = (datetime.now(timezone.utc)+timedelta(hours=5)).isoformat()
-        f['save_picks']([ah, ou, other], [dict(event_id='event', market=ou['market'], side=ou['side'],
+        f['save_picks']([ah, ou, other, under], [dict(event_id='event', market=ou['market'], side=ou['side'],
                                             point=ou['point'], odds=ou['odds'], bookmaker=ou['bookmaker'])])
         with f['db']() as con:
             before = {table: [tuple(r) for r in con.execute('SELECT * FROM '+table)] for table in ['picks', 'slips', 'odds_snapshots']}
@@ -194,3 +197,30 @@ class StreamlitSmokeTests(unittest.TestCase):
         with f['db']() as con:
             after = {table: [tuple(r) for r in con.execute('SELECT * FROM '+table)] for table in before}
             self.assertEqual(before, after)
+
+    def test_manual_form_submit_is_offline_and_preserves_existing_data(self):
+        from test_market_recommendations import quote
+        f=load_functions(self.path);f['DB_FILE']=self.db_path;f['init_db']()
+        rows=[quote(side=s,odds=p,pick=i) for i,(s,p) in enumerate([('over',1.95),('under',1.95)],1)]
+        for row in rows:
+            row['kickoff_utc']=(datetime.now(timezone.utc)+timedelta(hours=5)).isoformat()
+        f['save_picks'](rows)
+        with f['db']() as con:
+            con.execute('INSERT INTO slips(selections_json,status,profit_units,final_summary) VALUES (?,?,?,?)',('{bad','แพ้บิล',-1,'unchanged'))
+            before={t:[tuple(r) for r in con.execute('SELECT * FROM '+t)] for t in ('picks','slips','odds_snapshots')}
+        with patch('requests.get',side_effect=AssertionError('manual form must remain offline')) as get:
+            app=self.app()
+            next(w for w in app.text_input if w.label=='เว็บ/เจ้ามือ (Manual)').set_value('My Book')
+            for label,value in [('เส้นสูง–ต่ำ (Manual)',3.25),('ราคาสูง (Manual)',1.98),('ราคาต่ำ (Manual)',1.91)]:
+                next(w for w in app.number_input if w.label==label).set_value(value)
+            next(w for w in app.button if w.label=='บันทึก Manual OU Quote').click().run()
+            self.assertEqual(len(app.exception),0)
+            self.assertEqual(len(app.tabs),4)
+            self.assertEqual(len(f['load_manual_quotes']('event')),1)
+            app.radio[0].set_value('ตารางเดิม').run()
+            app.radio[0].set_value('การ์ดมือถือ').run()
+            self.assertEqual(len(app.exception),0)
+            self.assertEqual(len(f['load_manual_quotes']('event')),1)
+            get.assert_not_called()
+        with f['db']() as con:
+            self.assertEqual(before,{t:[tuple(r) for r in con.execute('SELECT * FROM '+t)] for t in before})

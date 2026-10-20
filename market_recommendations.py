@@ -8,7 +8,9 @@ from mobile_dashboard import model_ready
 
 MARKETS = ('Asian Handicap', 'Over/Under')
 TREND = 'แนวโน้มจากสถิติ — ยังยืนยันความคุ้มค่าราคาไม่ได้'
-RANKING = ('อันดับเฉพาะการ์ด: A ≥55 จากอย่างน้อย 5 ตัวอย่าง และ B/EV ตรงข้อมูลพร้อม EV บวกก่อน; '
+RANKING = ('OU: ประมาณเส้นหลักจากคู่ราคาของเจ้ามือ/รอบเดียวกันก่อน เปรียบเทียบ EV สองฝั่งอย่างเท่าเทียม; '
+           'ไม่มี EV ครบหรือหลักฐานเท่ากันไม่เลือกฝั่ง ไม่ตัดสินด้วยราคา/A/รหัสแถว; '
+           'AH และลำดับรายละเอียด: A ≥55 จากอย่างน้อย 5 ตัวอย่าง และ B/EV ตรงข้อมูลพร้อม EV บวกก่อน; '
            'ถัดมาฟอร์มที่ยังไม่มี EV, ข้อมูล EV ไม่บวก, และหลักฐานไม่พอ ตามลำดับ; '
            'ภายในกลุ่มดูจำนวนตัวอย่างฟอร์ม (ไม่เกิน 10), EV, เวลา snapshot, คะแนน A และรหัสแถว '
            'ไม่จัดอันดับด้วยราคาสูงสุด; ไม่เปลี่ยนสูตร A/B/C หรือการจัดบิล')
@@ -63,7 +65,7 @@ def assess(row, choose_c):
         elif abs(sum(ou[k] for k in ('over_full', 'under_full', 'partial_or_push')) - 100) > .1:
             valid, reason = False, 'ผล OU สำหรับเส้นนี้ไม่ครบ 100%'
     price = obj(a.get('price'))
-    if price and (not finite(price.get('current_point')) or not finite(price.get('current_odds')) or
+    if price and (not finite(row.get('point')) or not finite(row.get('odds')) or not finite(price.get('current_point')) or not finite(price.get('current_odds')) or
                   abs(price['current_point'] - row['point']) > 1e-9 or abs(price['current_odds'] - row['odds']) > 1e-9):
         valid, reason = False, 'ราคา/เส้นในหลักฐาน A ไม่ตรงแถวที่บันทึกไว้'
     selection = obj(b.get('selection'))
@@ -124,12 +126,28 @@ def group_fixture_recommendations(rows, choose_c):
                     continue
                 if not row.get('bookmaker') or not finite(row.get('point')) or not finite(row.get('odds')) or row['odds'] <= 1:
                     continue
-                key = (row['side'], row['bookmaker'])
+                key = (row['side'], row['bookmaker'], row['point']) if market == 'Over/Under' else (row['side'], row['bookmaker'])
                 if key not in latest or (timestamp(row), row_id(row)) > (timestamp(latest[key]), row_id(latest[key])):
                     latest[key] = row
             choices = sorted((assess(row, choose_c) for row in latest.values()), key=lambda item: item['rank'], reverse=True)
             markets[market] = choices[0] if choices else None
             alternatives[market] = choices
+            if market == 'Over/Under':
+                from ou_market import select_main_line, compare_sides
+                newest = {}
+                for entry in choices:
+                    book = entry['row']['bookmaker']
+                    newest[book] = max(newest.get(book,0),timestamp(entry['row']))
+                choices = [e for e in choices if timestamp(e['row']) == newest[e['row']['bookmaker']]]
+                main = select_main_line(choices)
+                chosen,side_reason = compare_sides(main)
+                # Keep a saved row only as a presentation anchor, never as an
+                # implicit directional recommendation when EV/main is absent.
+                anchor_choice = chosen or (main['pair']['over'] if main['pair'] else (choices[0] if choices else None))
+                markets[market] = anchor_choice
+                alternatives[market] = choices
+
         output.append({'event_id': anchor.get('event_id'), 'row': anchor, 'markets': markets,
-                       'alternatives': alternatives, 'identity_conflict': len(coherent) != len(event_rows)})
+                       'alternatives': alternatives, 'ou_main': main, 'ou_direction': chosen['row']['side'] if chosen else None,
+                       'ou_reason': side_reason, 'identity_conflict': len(coherent) != len(event_rows)})
     return sorted(output, key=lambda item: (str(item['row'].get('kickoff_utc') or ''), str(item.get('event_id') or '')))

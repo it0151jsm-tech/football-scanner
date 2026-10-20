@@ -1,0 +1,658 @@
+{
+  "checked_at": "2026-10-20T14:51:24.181777+00:00",
+  "configured_leagues": 38,
+  "scope": "Actual configured source rosters; exact/verified aliases only. Not a complete Odds API club census. Summary only; full per-team names and source URLs are in the linked CI artifact.",
+  "full_report_url": "https://github.com/it0151jsm-tech/football-scanner/actions/runs/39442842219",
+  "leagues": [
+    {
+      "key": "soccer_epl",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "ok"
+      },
+      "current_source_teams": 20,
+      "cross_source_checked": 20,
+      "cross_source_matched": 16,
+      "current_new_names": [
+        "Coventry",
+        "Hull",
+        "Ipswich"
+      ],
+      "api_teams_checked": 0,
+      "league": "พรีเมียร์ลีก อังกฤษ"
+    },
+    {
+      "key": "soccer_efl_champ",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 24,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Bolton",
+        "Burnley",
+        "Cardiff",
+        "Lincoln",
+        "West Ham",
+        "Wolves"
+      ],
+      "api_teams_checked": 0,
+      "league": "แชมเปียนชิพ อังกฤษ"
+    },
+    {
+      "key": "soccer_england_league1",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 24,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Bromley",
+        "Cambridge",
+        "Leicester",
+        "Milton Keynes Dons",
+        "Notts County",
+        "Oxford",
+        "Sheffield Weds"
+      ],
+      "api_teams_checked": 0,
+      "league": "ลีกวัน อังกฤษ"
+    },
+    {
+      "key": "soccer_england_league2",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 24,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Exeter",
+        "Northampton",
+        "Port Vale",
+        "Rochdale",
+        "Rotherham",
+        "York"
+      ],
+      "api_teams_checked": 0,
+      "league": "ลีกทู อังกฤษ"
+    },
+    {
+      "key": "soccer_spain_la_liga",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "ok"
+      },
+      "current_source_teams": 20,
+      "cross_source_checked": 20,
+      "cross_source_matched": 11,
+      "current_new_names": [
+        "La Coruna",
+        "Malaga",
+        "Santander"
+      ],
+      "api_teams_checked": 0,
+      "league": "ลาลีกา สเปน"
+    },
+    {
+      "key": "soccer_italy_serie_a",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "ok"
+      },
+      "current_source_teams": 20,
+      "cross_source_checked": 20,
+      "cross_source_matched": 18,
+      "current_new_names": [
+        "Frosinone",
+        "Monza",
+        "Venezia"
+      ],
+      "api_teams_checked": 0,
+      "league": "เซเรียอา อิตาลี"
+    },
+    {
+      "key": "soccer_italy_serie_b",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 20,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Arezzo",
+        "Ascoli",
+        "Benevento",
+        "Cremonese",
+        "Pisa",
+        "Verona",
+        "Vicenza"
+      ],
+      "api_teams_checked": 0,
+      "league": "เซเรียบี อิตาลี"
+    },
+    {
+      "key": "soccer_germany_bundesliga",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "ok"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 18,
+      "cross_source_matched": 9,
+      "current_new_names": [
+        "Elversberg",
+        "Paderborn",
+        "Schalke 04"
+      ],
+      "api_teams_checked": 0,
+      "league": "บุนเดสลีกา เยอรมนี"
+    },
+    {
+      "key": "soccer_germany_bundesliga2",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Cottbus",
+        "Heidenheim",
+        "Osnabruck",
+        "St Pauli",
+        "Wolfsburg"
+      ],
+      "api_teams_checked": 0,
+      "league": "บุนเดสลีกา 2 เยอรมนี"
+    },
+    {
+      "key": "soccer_germany_liga3",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ลีก 3 เยอรมนี"
+    },
+    {
+      "key": "soccer_france_ligue_one",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "ok"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 18,
+      "cross_source_matched": 17,
+      "current_new_names": [
+        "Le Mans",
+        "Troyes"
+      ],
+      "api_teams_checked": 0,
+      "league": "ลีกเอิง ฝรั่งเศส"
+    },
+    {
+      "key": "soccer_netherlands_eredivisie",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Cambuur",
+        "Den Haag",
+        "Willem II"
+      ],
+      "api_teams_checked": 0,
+      "league": "เอเรดิวิซี เนเธอร์แลนด์"
+    },
+    {
+      "key": "soccer_portugal_primeira_liga",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Academico Viseu",
+        "Maritimo"
+      ],
+      "api_teams_checked": 0,
+      "league": "โปรตุเกส พรีเมราลีกา"
+    },
+    {
+      "key": "soccer_norway_eliteserien",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "นอร์เวย์ เอลิเตเซเรียน"
+    },
+    {
+      "key": "soccer_uefa_champs_league",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ยูฟ่า แชมเปียนส์ลีก"
+    },
+    {
+      "key": "soccer_uefa_europa_league",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ยูฟ่า ยูโรปาลีก"
+    },
+    {
+      "key": "soccer_uefa_europa_conference_league",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ยูฟ่า คอนเฟอเรนซ์ลีก"
+    },
+    {
+      "key": "soccer_saudi_arabia_pro_league",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ซาอุดีอาระเบีย โปรลีก"
+    },
+    {
+      "key": "soccer_usa_mls",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "เมเจอร์ลีก ซอคเกอร์ (MLS)"
+    },
+    {
+      "key": "soccer_thailand_thai_league",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ไทยลีก"
+    },
+    {
+      "key": "soccer_japan_j_league",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "เจลีก ญี่ปุ่น"
+    },
+    {
+      "key": "soccer_korea_kleague1",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "เคลีก เกาหลีใต้"
+    },
+    {
+      "key": "soccer_brazil_campeonato",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "บราซิล ซีรีเอ"
+    },
+    {
+      "key": "soccer_brazil_serie_b",
+      "csv_current": {
+        "status": "unsupported"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "บราซิล ซีรีบี"
+    },
+    {
+      "key": "soccer_turkey_super_league",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Amedspor",
+        "Corum",
+        "Erzurumspor"
+      ],
+      "api_teams_checked": 0,
+      "league": "ตุรกี ซูเปอร์ลีก"
+    },
+    {
+      "key": "soccer_belgium_first_div",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Beveren",
+        "Kortrijk",
+        "Lommel SK"
+      ],
+      "api_teams_checked": 0,
+      "league": "เบลเยียม โปรลีก"
+    },
+    {
+      "key": "soccer_denmark_superliga",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "เดนมาร์ก ซูเปอร์ลีกา"
+    },
+    {
+      "key": "soccer_sweden_allsvenskan",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "สวีเดน ออลสเวนส์คาน"
+    },
+    {
+      "key": "soccer_switzerland_superleague",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "สวิตเซอร์แลนด์ ซูเปอร์ลีก"
+    },
+    {
+      "key": "soccer_poland_ekstraklasa",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "โปแลนด์ เอ็กสตราคลาซา"
+    },
+    {
+      "key": "soccer_mexico_ligamx",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "เม็กซิโก ลีกา เอ็มเอ็กซ์"
+    },
+    {
+      "key": "soccer_china_superleague",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "จีน ซูเปอร์ลีก"
+    },
+    {
+      "key": "soccer_finland_veikkausliiga",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ฟินแลนด์ เวกเคาส์ลีกา"
+    },
+    {
+      "key": "soccer_australia_aleague",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ออสเตรเลีย เอ-ลีก"
+    },
+    {
+      "key": "soccer_spl",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 12,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "St Johnstone"
+      ],
+      "api_teams_checked": 0,
+      "league": "สกอตแลนด์ พรีเมียร์ชิป"
+    },
+    {
+      "key": "soccer_austria_bundesliga",
+      "csv_current": {
+        "status": "load_error"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 0,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [],
+      "api_teams_checked": 0,
+      "league": "ออสเตรีย บุนเดสลีกา"
+    },
+    {
+      "key": "soccer_greece_super_league",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 14,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Iraklis",
+        "Kalamata"
+      ],
+      "api_teams_checked": 0,
+      "league": "กรีซ ซูเปอร์ลีก"
+    },
+    {
+      "key": "soccer_france_ligue_two",
+      "csv_current": {
+        "status": "ok"
+      },
+      "understat": {
+        "status": "unsupported"
+      },
+      "current_source_teams": 18,
+      "cross_source_checked": 0,
+      "cross_source_matched": 0,
+      "current_new_names": [
+        "Dijon",
+        "Metz",
+        "Nantes",
+        "Sochaux"
+      ],
+      "api_teams_checked": 0,
+      "league": "ลีกเดอซ์ ฝรั่งเศส"
+    }
+  ]
+}

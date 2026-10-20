@@ -78,12 +78,16 @@ if __name__ == '__main__':
     settings = config()
     with ThreadPoolExecutor(max_workers=6) as pool:
         reports = list(pool.map(lambda item:audit_one(item,settings['UNDERSTAT_LEAGUES']),settings['LEAGUES'].items()))
-    output = dict(checked_at=datetime.now(timezone.utc).isoformat(),configured_leagues=len(reports),
+    context = [dict(key=key,context_only=True,understat=understat_source(code))
+               for key,code in settings['UNDERSTAT_LEAGUES'].items() if key not in settings['LEAGUES']]
+    output = dict(context_only_sources=context,checked_at=datetime.now(timezone.utc).isoformat(),configured_leagues=len(reports),
                   scope='Actual configured source rosters; exact/verified aliases only. Not a complete Odds API club census.',leagues=reports)
     Path('test-artifacts').mkdir(exist_ok=True)
     Path('test-artifacts/league-source-audit.json').write_text(json.dumps(output,ensure_ascii=False,indent=2)+'\n')
     print(json.dumps({k:v for k,v in output.items() if k!='leagues'},ensure_ascii=False))
+    for extra in context:
+        print(json.dumps(extra,ensure_ascii=False))
     for r in reports:
         print(json.dumps(dict(league=r['key'],csv=r['csv_current']['status'],teams=r['current_source_teams'],
                               understat=r['understat']['status'],checked=r['cross_source_checked'],matched=r['cross_source_matched'],
-                              new_names=r['current_new_names']),ensure_ascii=False))
+                              new_names=r['current_new_names'],unresolved=[x for x in r['cross_source_results'] if x['status']!='matched']),ensure_ascii=False))

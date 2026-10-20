@@ -34,7 +34,7 @@ class MarketRecommendationsTests(unittest.TestCase):
 
     def test_one_fixture_combines_ah_and_ou_without_crossing_books(self):
         ah, ou = quote('Asian Handicap', -.25, 'home', 'AH Book', pick=1), quote(pick=2)
-        fixtures = self.groups([ah, ou])
+        fixtures = self.groups([ah, ou, quote(side="under", odds=1.85, pick=3)])
         self.assertEqual(len(fixtures), 1)
         markets = fixtures[0]['markets']
         self.assertEqual(markets['Asian Handicap']['row']['bookmaker'], 'AH Book')
@@ -93,7 +93,7 @@ class MarketRecommendationsTests(unittest.TestCase):
         probabilities = []
         for line in [2.5, 2.75, 3.0]:
             row = quote(point=line)
-            fixture = self.groups([row])[0]
+            fixture = self.groups([row,quote(point=line,side="under",odds=1.85,pick=2)])[0]
             entry = fixture['markets']['Over/Under']
             self.assertTrue(entry['model_valid'])
             self.assertEqual(entry['b']['ou_line'], line)
@@ -112,7 +112,7 @@ class MarketRecommendationsTests(unittest.TestCase):
         self.assertFalse(entry['model_valid'])
         self.assertIsNone(entry['ev'])
         html = fixture_dashboard_html(fixture)
-        self.assertIn('ไม่ตรงเส้นตลาด', html)
+        self.assertIn('ไม่ตรงเส้นตลาด', fixture_details_html(fixture, 'เกณฑ์'))
         self.assertNotIn('class="vbp-tile vbp-ou"', html)
         only_ah = fixture_dashboard_html(self.groups([quote('Asian Handicap', -.25, 'home')])[0])
         self.assertIn('ไม่มีราคาตลาด', only_ah)

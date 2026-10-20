@@ -81,9 +81,9 @@ class DashboardBrowserTests(unittest.TestCase):
         from market_recommendations import group_fixture_recommendations, RANKING
         from test_market_recommendations import quote
         f = regression.load_functions(Path(__file__).resolve().parents[1] / 'app.py')
-        fixture = group_fixture_recommendations([quote('Asian Handicap', -.25, 'home', 'AH Book'), quote(point=2.75, pick=2)], f['choose_recommendation'])[0]
-        for dark in [False, True]:
-            page = self.browser.new_page(viewport={'width': 320, 'height': 844}, color_scheme='dark' if dark else 'light')
+        fixture = group_fixture_recommendations([quote('Asian Handicap', -.25, 'home', 'AH Book'), quote(point=2.75, pick=2),quote(point=2.75,side='under',odds=1.85,pick=3)], f['choose_recommendation'])[0]
+        for width, dark in [(w,d) for w in (320,375,390,430) for d in (False,True)]:
+            page = self.browser.new_page(viewport={'width': width, 'height': 844}, color_scheme='dark' if dark else 'light')
             try:
                 # Replace only the fixture markup; retain the tested theme and viewport wrapper.
                 page.set_content(self.page_content(complete_row(), dark))

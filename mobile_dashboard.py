@@ -254,7 +254,7 @@ def fixture_dashboard_html(fixture):
                     f'<p class="vbp-small">อ้างอิงแถว #{text(source.get("id"))} · {text(source.get("bookmaker"))} · {text(source.get("scanned_at"))}</p>'
                     '<div class="vbp-grid2">' + form_tile(source, anchor['a'], 'home') + form_tile(source, anchor['a'], 'away') + '</div></section>')
     for market in ('Asian Handicap', 'Over/Under'):
-        content += market_panel_html(markets.get(market), market)
+        content += (ou_panel_html(fixture) if market=='Over/Under' else market_panel_html(markets.get(market), market))
     if fixture.get('identity_conflict'):
         content += '<section class="vbp-section"><p class="vbp-small">พบชื่อทีม/ลีกขัดแย้งใน event_id เดียวกัน จึงไม่รวมแถวที่ขัดแย้งกับข้อมูลล่าสุด</p></section>'
     return content + '</article>'
@@ -262,6 +262,12 @@ def fixture_dashboard_html(fixture):
 
 def fixture_details_html(fixture, ranking):
     content = f'<div class="vbp-details"><h4>หลักเกณฑ์จัดอันดับ</h4><p>{text(ranking)}</p>'
+    if fixture.get('ou_main'):
+        content += '<h4>Main OU Line และเส้นทางเลือก</h4><p>'+text(fixture['ou_main']['rule'])+'</p>'
+        for pair in fixture['ou_main']['pairs']:
+            content += (f'<div class="vbp-tile"><p>เส้น {number(pair["line"],2)} · {text(pair["bookmaker"])}</p>'
+                        f'<p>Over {number(pair["over"]["row"]["odds"],2)} / Under {number(pair["under"]["row"]["odds"],2)} · {text(pair["scanned_at"])}</p>'
+                        f'<p>ความห่างจากสมดุล {number(pair["balance"],3)} · ผลรวม implied {number(pair["margin"],3)} · ผ่านเกณฑ์ตลาด {text(pair["eligible"])}</p></div>')
     for market, alternatives in fixture['alternatives'].items():
         content += f'<h4>{text(market)} · ตัวเลือกจากข้อมูลที่บันทึกไว้</h4>'
         for index, entry in enumerate(alternatives, 1):
@@ -274,3 +280,48 @@ def fixture_details_html(fixture, ranking):
         if selected:
             content += details_html(selected['row'])
     return content + '</div>'
+
+
+def ou_panel_html(fixture):
+    main = fixture.get('ou_main',{})
+    content = '<section class="vbp-section" data-market="Over/Under"><p class="vbp-label">คำแนะนำสูง–ต่ำ (OU) · Main Line</p>'
+    if main.get('status')!='estimated':
+        missing = not fixture['alternatives'].get('Over/Under')
+        details='ข้อมูลโมเดลไม่เพียงพอ · ' if not any(e['model_valid'] for e in fixture['alternatives'].get('Over/Under',[])) else ''
+        return content + '<div class="vbp-status"><p class="vbp-result">'+('ไม่มีราคาตลาด' if missing else 'ไม่สามารถยืนยันเส้นหลักได้')+'</p><p class="vbp-small">'+text(main.get('reason','ไม่มีราคาคู่ Over/Under ที่ครบ'))+'</p><p class="vbp-small">'+details+'ตัวเลือกตลาดที่กำลังประเมิน — ไม่ใช่คำแนะนำเดิมพัน · ยังไม่แนะนำ · เปิดดูแถวราคาที่มีจริงในรายละเอียด</p></div></section>'
+    pair = main['pair']
+    content += (f'<p class="vbp-result">เส้นหลักที่ระบบประมาณ {number(main["line"],2)}</p><p class="vbp-small">{text(main["reason"])}</p>'
+                f'<p class="vbp-small">API · เจ้ามือ {text(pair["bookmaker"])} · รอบบันทึก {text(pair["scanned_at"])}</p><div class="vbp-grid2">')
+    for side,label in [('over','สูง (Over)'),('under','ต่ำ (Under)')]:
+        e=pair[side]
+        content += (f'<div class="vbp-tile vbp-market-price"><p class="vbp-small">{label} {number(main["line"],2)}</p><p class="vbp-price">{number(e["row"]["odds"],2)}</p>'
+                    f'<p class="vbp-small">แถว #{text(e["row"].get("id"))} · A {number(e["a"].get("score"))}/100</p>'
+                    f'<p class="vbp-small">B: EV {number(e.get("ev"),2,"%")}</p><p class="vbp-small">{text(e["reason"])}</p></div>')
+    content += '</div><div class="vbp-conclusion" style="margin-top:12px"><p class="vbp-result">ระบบ C: '+text(fixture.get('ou_reason'))+'</p></div>'
+    direction=fixture.get('ou_direction')
+    anchor=pair[direction] if direction in ('over','under') else pair['over']
+    content += '<p class="vbp-label" style="margin-top:14px">ระบบ B · เส้นตลาดจริง</p>'
+    content += model_html(anchor['row'],anchor['b'] if anchor['model_valid'] else {})
+    content += '<p class="vbp-label">First Observed Price · แยกตามฝั่ง</p>'
+    for side,label in [('over','Over'),('under','Under')]:
+        entry=pair[side]
+        snap=entry.get('snapshot') or {}
+        content += f'<p class="vbp-small">{label} · เจ้ามือ {text(pair["bookmaker"])} · Snapshot #{text(snap.get("id"))} เวลา {text(snap.get("captured_at"))}</p>'
+        content += price_html(entry['a'])
+    return content+'</section>'
+
+
+def manual_quotes_html(quotes):
+    content='<div class="vbp-details"><h4>Manual OU Quotes · ข้อมูลที่กรอกเอง</h4>'
+    for quote in quotes:
+        result=object_json(quote.get('model_result_json'))
+        content+=(f'<div class="vbp-tile"><p>MANUAL #{text(quote.get("id"))} · {text(quote.get("bookmaker"))} · {text(quote.get("created_at"))}</p>'
+                  f'<p>เส้น {number(quote.get("point"),2)} · สูง {number(quote.get("odds_over"),2)} / ต่ำ {number(quote.get("odds_under"),2)}</p>'
+                  f'<p>{text(result.get("reason"))}</p>')
+        if result.get('available'):
+            for side in ('over','under'):
+                stats=mapping(mapping(result.get('results')).get(side))
+                content+=f'<p>{side} · EV {number(stats.get("ev_pct"),2,"%")}, ชนะเต็ม {number(stats.get("p_win"),2,"%")}, ผลครึ่ง/คืนทุน {number(stats.get("p_partial"),2,"%")}</p>'
+            content+=f'<p>โมเดลจาก pick #{text(result.get("model_pick_id"))} · {text(result.get("model_scanned_at"))} · ไม่ใช่คำแนะนำ C และไม่ใช่บิลเดิมพัน</p>'
+        content+='</div>'
+    return content+'</div>'

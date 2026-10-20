@@ -136,6 +136,7 @@ class HistoryDataTests(unittest.TestCase):
         self.f['fetch_history'] = Mock(return_value=hist)
         self.f['fetch_understat_history'] = Mock(return_value=pd.DataFrame())
         self.f['first_observed_quotes'] = Mock(return_value={})
+        self.f['record_data_health'] = Mock()
         event = dict(id='oxford-wigan',home_team='Oxford United',away_team='Wigan Athletic',commence_time=kickoff.isoformat(),
                      bookmakers=[dict(title='Book',markets=[dict(key='totals',outcomes=[dict(name='Over',point=2.5,price=1.95)])])])
         self.f['fetch_odds'] = Mock(return_value=([event],'',''))
