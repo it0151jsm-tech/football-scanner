@@ -87,12 +87,15 @@ def model_ready(b):
 
 def form_tile(row, a, side):
     profile = mapping(a.get(side + "_form"))
+    diagnostic = mapping(profile.get('diagnostics'))
     label = "เจ้าบ้าน · เหย้า" if side == "home" else "ทีมเยือน · เยือน"
     return (f'<div class="vbp-tile"><p class="vbp-small">{label}</p>'
             f'<p class="vbp-team">{text(row.get(side + "_team"))}</p>'
             f'<div class="vbp-statline"><span>ยิงเฉลี่ย</span><b>{number(profile.get("last5_gf"), 2)}</b></div>'
             f'<div class="vbp-statline"><span>เสียเฉลี่ย</span><b>{number(profile.get("last5_ga"), 2)}</b></div>'
-            f'<p class="vbp-small">5 นัดล่าสุด · มีข้อมูล {text(profile.get("sample5", 0))} นัด</p></div>')
+            f'<p class="vbp-small">5 นัดล่าสุดตามสนาม · มีข้อมูล {text(profile.get("sample5", 0))} นัด</p>'
+            f'<p class="vbp-small">{text(diagnostic.get("message"), "สถานะโหลด/ชื่อทีม: ยังไม่มีข้อมูลวินิจฉัย")}</p>'
+            + ('<p class="vbp-small">ตัวอย่าง 5 นัดครอบคลุมช่วงเกิน 180 วัน — รวมเกมเก่า</p>' if diagnostic.get('sample5_span_days', 0) > 180 else '') + '</div>')
 
 
 def model_html(row, b, include_ou=True):
@@ -176,6 +179,17 @@ def details_html(row):
                     f'<p>ทั้งหมด: ยิง {number(profile.get("season_gf"), 2)} / เสีย {number(profile.get("season_ga"), 2)} · {text(profile.get("season_n", 0))} นัด</p>'
                     f'<p>คุณภาพคู่แข่ง PPG {number(opponent.get("mean_ppg"), 2)} · {text(opponent.get("sample", 0))} นัด</p><p>{text(opponent.get("status"))}</p>'
                     f'<p>xG/xGA จริง {number(xg.get("xg"), 2)} / {number(xg.get("xga"), 2)} · {text(xg.get("sample", 0))} นัด</p></div>')
+        diagnostic = mapping(profile.get('diagnostics'))
+        if diagnostic:
+            content += (f'<div class="vbp-tile"><b>วินิจฉัยฟอร์ม {label}</b><p>{text(diagnostic.get("message"))}</p>'
+                        f'<p>ชื่อ API/แถว: {text(diagnostic.get("input_name"))} → CSV: {text(diagnostic.get("matched_name"))} · วิธี {text(diagnostic.get("mapping"))}</p>'
+                        f'<p>ตัดก่อนวันที่ {text(diagnostic.get("cutoff_date"))} · รวมก่อนแข่ง {text(diagnostic.get("all_before_count"))} นัด · ตามสนาม {text(diagnostic.get("venue_before_count"))} นัด</p>'
+                        f'<p>ฤดูกาล/จำนวนตามสนาม: {text(diagnostic.get("season_counts"))}</p><p>วันที่ในตัวอย่าง 5 นัด: {text(diagnostic.get("sample5_dates"))}</p>'
+                        f'<p>แหล่ง alias: {text(diagnostic.get("alias_source"))}</p></div>')
+            for source in mapping(diagnostic.get('source')).get('sources', []):
+                source = mapping(source)
+                content += (f'<div class="vbp-tile"><p>CSV {text(source.get("csv_code"))} / {text(source.get("season"))} · HTTP {text(source.get("http_status"))} · {text(source.get("status"))}</p>'
+                            f'<p>{text(source.get("url"))}</p><p>ตรวจเมื่อ {text(source.get("checked_at"))} · ใช้ได้ {text(source.get("valid_rows", 0))} แถว · วันที่ผิด {text(source.get("invalid_dates", 0))} · สกอร์ผิด/ขาด {text(source.get("invalid_scores", 0))}</p></div>')
     content += '</div><h4>ฟอร์มเทียบเส้นในอดีต (ไม่ใช่ความน่าจะเป็น)</h4>'
     for key, label in [("form5", "5 นัด"), ("form10", "10 นัด"), ("form_all", "ทั้งหมด")]:
         form = mapping(a.get(key))

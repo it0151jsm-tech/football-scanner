@@ -1,5 +1,6 @@
 """Explicit live CSV audit; never imports the app or calls The Odds API."""
 import json
+import sys
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -7,9 +8,12 @@ from pathlib import Path
 import pandas as pd
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 def audit():
     reports = []
+    frames = []
     for season in ('2627', '2526', '2425', '2324'):
         url = f'https://www.football-data.co.uk/mmz4281/{season}/E2.csv'
         result = dict(season=season, url=url)
@@ -39,10 +43,22 @@ def audit():
                                   team_samples={name: {'all_before': int((before & ((frame['HomeTeam']==name) | (frame['AwayTeam']==name))).sum()),
                                                       'home_before': int((before & (frame['HomeTeam']==name)).sum()),
                                                       'away_before': int((before & (frame['AwayTeam']==name)).sum())} for name in matches})
+                    from history_data import parse_csv
+                    fixed_frame, fixed_report = parse_csv(response.content)
+                    fixed_frame['_history_season'] = season
+                    frames.append(fixed_frame)
+                    result['validated_parser'] = fixed_report
         except Exception as exc:
             result.update(status='download_or_parse_error', error=type(exc).__name__)
         reports.append(result)
-    return dict(checked_at=datetime.now(timezone.utc).isoformat(), fixture_date='2026-10-21',
+    fixed_profiles = {}
+    if frames:
+        from history_data import team_history
+        combined = pd.concat(frames, ignore_index=True).sort_values('Date_dt').drop_duplicates(['Date_dt','HomeTeam','AwayTeam'])
+        for name, venue in [('Oxford United','home'),('Wigan Athletic','away')]:
+            games, diagnostic = team_history(combined, name, datetime(2026,10,21,tzinfo=timezone.utc), venue)
+            fixed_profiles[name] = dict(diagnostic, sample5=min(5,len(games)), sample10=min(10,len(games)))
+    return dict(checked_at=datetime.now(timezone.utc).isoformat(), fixture_date='2026-10-21', post_fix_profiles=fixed_profiles,
                 api_names_from_user=['Oxford United', 'Wigan Athletic'],
                 note='No Odds API request; API names are the supplied fixture, not a newly fetched API response.', seasons=reports)
 

@@ -430,39 +430,11 @@ def fetch_odds(sport_key, regions, api_key):
     return response.json(), response.headers.get("x-requests-remaining", "ไม่ระบุ"), response.headers.get("x-requests-used", "ไม่ระบุ")
 
 # -------------------- HISTORICAL RESULTS --------------------
-@st.cache_data(ttl=21600, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def fetch_history(csv_code):
-    if not csv_code:
-        return pd.DataFrame()
-    seasons = ("2627", "2526", "2425", "2324")
-    def download_one(season):
-        url = f"https://www.football-data.co.uk/mmz4281/{season}/{csv_code}.csv"
-        try:
-            response = requests.get(url, timeout=HISTORY_TIMEOUT)
-            if response.status_code != 200 or not response.content:
-                return None
-            from io import BytesIO
-            frame = pd.read_csv(BytesIO(response.content))
-            required = {"Date", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
-            if not required.issubset(frame.columns):
-                return None
-            frame["Date_dt"] = pd.to_datetime(frame["Date"], dayfirst=True, errors="coerce")
-            frame["FTHG"] = pd.to_numeric(frame["FTHG"], errors="coerce")
-            frame["FTAG"] = pd.to_numeric(frame["FTAG"], errors="coerce")
-            return frame.dropna(subset=["Date_dt", "FTHG", "FTAG", "HomeTeam", "AwayTeam"])
-        except Exception:
-            return None
-    frames = []
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = [pool.submit(download_one, season) for season in seasons]
-        for future in as_completed(futures):
-            frame = future.result()
-            if frame is not None and not frame.empty:
-                frames.append(frame)
-    if not frames:
-        return pd.DataFrame()
-    result = pd.concat(frames, ignore_index=True).sort_values("Date_dt")
-    return result.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last").reset_index(drop=True)
+    from history_data import load_history
+    return load_history(csv_code, requests.get, timeout=HISTORY_TIMEOUT)
+
 
 def get_h2h_history(score_history, home_api, away_api, kickoff, limit=5):
     """Display-only H2H from the selected league's Football-Data results.
@@ -646,14 +618,8 @@ def norm_name(name):
 
 
 def map_team(name, candidates):
-    if not candidates:
-        return None
-    lookup = {norm_name(x): x for x in candidates}
-    normalized = norm_name(name)
-    if normalized in lookup:
-        return lookup[normalized]
-    match = get_close_matches(normalized, list(lookup.keys()), n=1, cutoff=0.82)
-    return lookup[match[0]] if match else None
+    from history_data import match_team
+    return match_team(name, candidates)[0]
 
 
 def estimate_goals(df, home_api, away_api, kickoff):
@@ -746,24 +712,13 @@ def estimate_form_signal(df, home_api, away_api, kickoff, market, side, point, w
         "form_summary": "ไม่มีผลย้อนหลังที่จับคู่ทีมได้เพียงพอ",
         "form_method": "Football-Data scores only; not EV",
     }
-    if df is None or df.empty or not {"Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}.issubset(df.columns):
+    from history_data import team_history
+    home_games, home_diagnostic = team_history(df, home_api, kickoff, "home")
+    away_games, away_diagnostic = team_history(df, away_api, kickoff, "away")
+    result["diagnostics"] = {"home": home_diagnostic, "away": away_diagnostic}
+    if not home_diagnostic.get("matched_name") or not away_diagnostic.get("matched_name"):
+        result["form_summary"] = " | ".join(d["message"] for d in (home_diagnostic, away_diagnostic))
         return result
-    try:
-        kickoff_day = pd.Timestamp(kickoff.astimezone(UTC).date())
-        hist = df[df["Date_dt"].dt.normalize() < kickoff_day].copy()
-    except Exception:
-        return result
-    if hist.empty:
-        return result
-    teams = sorted(set(hist["HomeTeam"].dropna().astype(str)) | set(hist["AwayTeam"].dropna().astype(str)))
-    home = map_team(home_api, teams)
-    away = map_team(away_api, teams)
-    if not home or not away or home == away:
-        result["form_summary"] = "จับคู่ชื่อทีมกับฐานผลย้อนหลังไม่ได้"
-        return result
-    hist = hist.sort_values("Date_dt")
-    home_games = hist[hist["HomeTeam"] == home].copy()
-    away_games = hist[hist["AwayTeam"] == away].copy()
     if window is not None:
         home_games = home_games.tail(window)
         away_games = away_games.tail(window)
@@ -805,47 +760,29 @@ def estimate_form_signal(df, home_api, away_api, kickoff, market, side, point, w
 
 # -------------------- TEAM FORM / CONFIDENCE --------------------
 def team_form_profile(score_history, team_api, kickoff, venue=None):
-    """Summarize completed score history before kickoff. No future scores are used."""
-    empty = {"summary": "ข้อมูลฟอร์มย้อนหลังไม่พอ", "last5_gf": None, "last5_ga": None,
+    """Validated historical score form with explicit source/name/date diagnostics."""
+    from history_data import team_history
+    games, diagnostic = team_history(score_history, team_api, kickoff, venue)
+    empty = {"summary": diagnostic["message"], "last5_gf": None, "last5_ga": None,
              "last10_gf": None, "last10_ga": None, "season_gf": None, "season_ga": None,
-             "sample5": 0, "sample10": 0, "season_n": 0}
-    if score_history is None or score_history.empty:
+             "sample5": 0, "sample10": 0, "season_n": 0, "diagnostics": diagnostic}
+    if games.empty:
         return empty
-    required = {"Date_dt", "HomeTeam", "AwayTeam", "FTHG", "FTAG"}
-    if not required.issubset(score_history.columns):
-        return empty
-    try:
-        cutoff = pd.Timestamp(kickoff.astimezone(UTC).date())
-        hist = score_history[score_history["Date_dt"].dt.normalize() < cutoff].copy()
-        names = sorted(set(hist["HomeTeam"].dropna().astype(str)) | set(hist["AwayTeam"].dropna().astype(str)))
-        team = map_team(team_api, names)
-        if not team:
-            return empty
-        is_home = hist["HomeTeam"].astype(str) == team
-        is_away = hist["AwayTeam"].astype(str) == team
-        games = hist[is_home | is_away].copy()
-        games["GF"] = games.apply(lambda r: float(r["FTHG"]) if str(r["HomeTeam"]) == team else float(r["FTAG"]), axis=1)
-        games["GA"] = games.apply(lambda r: float(r["FTAG"]) if str(r["HomeTeam"]) == team else float(r["FTHG"]), axis=1)
-        if venue == "home":
-            games = games[games["HomeTeam"].astype(str) == team]
-        elif venue == "away":
-            games = games[games["AwayTeam"].astype(str) == team]
-        games = games.sort_values("Date_dt")
-        if games.empty:
-            return empty
-        g5, g10 = games.tail(5), games.tail(10)
-        gf5, ga5 = float(g5["GF"].mean()), float(g5["GA"].mean())
-        gf10, ga10 = float(g10["GF"].mean()), float(g10["GA"].mean())
-        gfs, gas = float(games["GF"].mean()), float(games["GA"].mean())
-        points = sum(3 if gf > ga else 1 if gf == ga else 0 for gf, ga in zip(g5["GF"], g5["GA"]))
-        summary = (f"ย้อนหลัง {len(games)} นัด | 5 นัด: ยิง {gf5:.2f}/เสีย {ga5:.2f}, {points}/15 แต้ม | "
-                   f"10 นัด: ยิง {gf10:.2f}/เสีย {ga10:.2f} | รวม: ยิง {gfs:.2f}/เสีย {gas:.2f} ต่อเกม")
-        return {"summary": summary, "last5_gf": round(gf5, 3), "last5_ga": round(ga5, 3),
-                "last10_gf": round(gf10, 3), "last10_ga": round(ga10, 3),
-                "season_gf": round(gfs, 3), "season_ga": round(gas, 3),
-                "sample5": len(g5), "sample10": len(g10), "season_n": len(games)}
-    except Exception:
-        return empty
+    team = diagnostic["matched_name"]
+    games = games.copy()
+    games["GF"] = games.apply(lambda r: float(r["FTHG"]) if str(r["HomeTeam"]) == team else float(r["FTAG"]), axis=1)
+    games["GA"] = games.apply(lambda r: float(r["FTAG"]) if str(r["HomeTeam"]) == team else float(r["FTHG"]), axis=1)
+    g5, g10 = games.tail(5), games.tail(10)
+    gf5, ga5 = float(g5["GF"].mean()), float(g5["GA"].mean())
+    gf10, ga10 = float(g10["GF"].mean()), float(g10["GA"].mean())
+    gfs, gas = float(games["GF"].mean()), float(games["GA"].mean())
+    points = sum(3 if gf > ga else 1 if gf == ga else 0 for gf, ga in zip(g5["GF"], g5["GA"]))
+    summary = (f"ย้อนหลัง {len(games)} นัด | 5 นัด: ยิง {gf5:.2f}/เสีย {ga5:.2f}, {points}/15 แต้ม | "
+               f"10 นัด: ยิง {gf10:.2f}/เสีย {ga10:.2f} | รวม: ยิง {gfs:.2f}/เสีย {gas:.2f} ต่อเกม")
+    return {"summary": summary, "last5_gf": round(gf5, 3), "last5_ga": round(ga5, 3),
+            "last10_gf": round(gf10, 3), "last10_ga": round(ga10, 3),
+            "season_gf": round(gfs, 3), "season_ga": round(gas, 3),
+            "sample5": len(g5), "sample10": len(g10), "season_n": len(games), "diagnostics": diagnostic}
 
 
 def blended_form_rate(rate5, rate10, rate_season, n5=0, n10=0, nseason=0):
@@ -1181,7 +1118,7 @@ def analysis_display_rows(df):
 def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
     matches, remaining, used = fetch_odds(sport_key, regions, api_key)
     history = fetch_understat_history(sport_key)
-    score_history = fetch_history(csv_code) if csv_code else pd.DataFrame()
+    score_history = fetch_history(csv_code)
     domestic_context = fetch_understat_all_history() if sport_key in EUROPEAN_CUPS else pd.DataFrame()
     now = datetime.now(UTC)
     target = now + timedelta(hours=hours_limit)

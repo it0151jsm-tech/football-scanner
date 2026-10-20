@@ -68,3 +68,11 @@ and compares picks, slips and snapshots before/after. Chromium checks grouped
 AH/OU layouts and uploads grouped light/dark screenshots alongside earlier UI
 fixtures. Compile the additional read-only module with
 `python -m py_compile app.py mobile_dashboard.py market_recommendations.py`.
+
+Historical-data tests in test_history_data.py cover timeout/HTTP errors, empty or
+malformed schemas, explicit verified aliases versus wrong/similar clubs, mixed
+date formats, invalid/incomplete scores, UTC kickoff-day exclusion, old-season
+sample warnings, diagnostic escaping and absence of goals-to-xG substitution.
+The PR-only live E2 audit writes HTTP/schema/name/count evidence plus post-fix
+sample diagnostics to e2-live-history-audit.json in the existing CI artifact.
+See HISTORY_DIAGNOSIS.md for the verified root cause and limits of the live check.
