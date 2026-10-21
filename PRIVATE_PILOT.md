@@ -131,8 +131,8 @@ No deployment was performed. Before authorizing a separate test app:
 ## Evidence and Go / No-Go
 
 `fixtures/readiness/pr2-contract.json` records baseline UI call literals/layout flags,
-mobile renderer/CSS hash, and AST hashes of unchanged model/settlement functions.
-The contract test compares them to this patch; browser tests check rendering and escaping,
+mobile renderer/CSS hash, and source hashes of unchanged model/settlement functions.
+Source hashes avoid Python 3.11/3.12 AST-version differences. The contract test compares them to this patch; browser tests check rendering and escaping,
 not betting accuracy. Mobile templates are byte-identical to PR #2. Dependencies are
 pinned to the direct versions already used by PR #2's successful CI run 39449438019.
 CI runs offline fixtures with Python socket access denied to external hosts; source

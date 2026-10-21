@@ -218,14 +218,16 @@ class ReadinessTests(unittest.TestCase):
     def test_ui_templates_widgets_labels_css_and_model_formulas_unchanged(self):
         contract=json.loads((ROOT/'fixtures/readiness/pr2-contract.json').read_text())
         self.assertEqual(hashlib.sha256((ROOT/'mobile_dashboard.py').read_bytes()).hexdigest(),contract['mobile_sha256'])
-        tree=ast.parse((ROOT/'app.py').read_text());ui=[]
+        source=(ROOT/'app.py').read_text()
+        tree=ast.parse(source);ui=[]
         for n in ast.walk(tree):
             if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and isinstance(n.func.value,ast.Name) and n.func.value.id=='st':
                 ui.append((n.lineno,n.func.attr,[v.value for v in ast.walk(n) if isinstance(v,ast.Constant) and isinstance(v.value,(str,int,float,bool,type(None)))]))
         self.assertEqual([list(x[1:]) for x in sorted(ui)],contract['ui_calls'])
         for n in tree.body:
-            if isinstance(n,ast.FunctionDef) and n.name in contract['formulas']:
-                self.assertEqual(hashlib.sha256(ast.dump(n,include_attributes=False).encode()).hexdigest(),contract['formulas'][n.name],n.name)
+            if isinstance(n,ast.FunctionDef) and n.name in contract['formula_source_sha256']:
+                # Source hashes are stricter and portable across Python 3.11/3.12 AST changes.
+                self.assertEqual(hashlib.sha256(ast.get_source_segment(source,n).encode()).hexdigest(),contract['formula_source_sha256'][n.name],n.name)
 
     def test_settled_slip_result_cannot_be_overwritten_by_sql(self):
         with self.f['db']() as con:
