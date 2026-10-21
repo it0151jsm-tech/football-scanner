@@ -105,7 +105,9 @@ class DashboardBrowserTests(unittest.TestCase):
         from market_recommendations import group_fixture_recommendations, RANKING
         from test_ucl_scan import UCLScanTests
         case=UCLScanTests();case.setUp();self.addCleanup(case.doCleanups)
-        case.prepare();rows,_,_,_=case.scan()
+        case.prepare();rows,snapshots,_,_=case.scan()
+        case.f['save_picks'](rows,snapshots)
+        rows=case.f['load_picks']().to_dict('records')
         # Long source strings and genuine synthetic row evidence must wrap safely.
         for row in rows:
             a=json.loads(row['analysis_a_json'])

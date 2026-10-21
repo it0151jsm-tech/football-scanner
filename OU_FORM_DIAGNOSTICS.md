@@ -25,6 +25,8 @@
 
 การจับคู่แยกตาม event, provider key/ชื่อเจ้ามือ, เส้น, เวลาบันทึก, เวลารับ และเวลาที่เจ้ามืออัปเดต แปลงเฉพาะ timestamp ที่มี timezone เป็น UTC instant เพื่อยอมรับการเขียน Z/+00/+07 ของเวลาเดียวกัน ไม่รวมคนละ Snapshot ราคาฝั่งเดียวกันขัดแย้งจะถูกแยกรอตรวจ ไม่หยิบแถวสุดท้ายมาแทน
 
+ตรวจตลอดเส้นทางการ์ด/ตารางด้วย: ตัวจัดกลุ่มเก็บแถว OU ที่ timestamp ล่าสุดเท่ากันให้ตัวตรวจ Snapshot เห็นทุกแถว แทนเลือก ID ล่าสุดแล้วซ่อนความขัดแย้ง ประวัติ scan ที่เก่ากว่ายังไม่ถูกดึงกลับมาเป็นคำแนะนำ นโยบายจัดกลุ่ม AH ไม่เปลี่ยน
+
 คู่ที่ผ่าน S/Balance แต่ไม่มี provider key/เวลา รับหรืออัปเดตเกินอายุสูงสุด 900 วินาที/ลำดับเวลาไม่สมเหตุผล จะไม่ผ่าน Main Line ปรับอายุให้เข้มกว่า 900 วินาทีได้ตาม config เดิม ไม่ยืดอายุเพื่อให้ผ่าน ไม่มีการสแกนอัตโนมัติหรือเพิ่มคำขอ API
 
 ส่วน “ดูรายละเอียดเพิ่มเติม” เดิมแสดงทุกคู่: เจ้ามือ/key, event, เส้น, ราคาทั้งสองฝั่ง, S, Overround, Balance, ผลตรวจแยกตัวเลข/ความสด, เวลาอัปเดต/รับ/บันทึก, ID แถว/Snapshot และเหตุผล พร้อมรายการขาดคู่/เส้นหรือเจ้ามือไม่ตรง/ข้อมูลไม่ถูกต้อง ไม่มีการสร้างอีกฝั่งขึ้นเอง
@@ -46,13 +48,14 @@ UCL B/EV **ยังปิด** แม้มี domestic xG: ยังไม่�
 ## ไฟล์และหลักฐานรักษา UI/บิล
 
 - `ou_market.py`: นิยาม/diagnostics/pair integrity/freshness โดยคงเกณฑ์และ `compare_sides`
+- `market_recommendations.py`: ไม่ตัดหลักฐาน OU ที่ timestamp ล่าสุดเท่ากันก่อนตรวจความขัดแย้ง
 - `history_data.py`: quarantine ความขัดแย้ง/ฤดูกาล/ข้อมูลซ้ำ และ receipt/checksum/URL ของไฟล์ที่โหลดตาม scan เดิม
 - `form_audit.py`: read-only replay ฟอร์มและข้อสังเกต
 - `domestic_data.py`: ตรวจสกอร์ขัดแย้งหลัง remap ชื่อที่ยืนยันแล้ว ก่อน dedup
 - `app.py`: เก็บ manifest ใน A เฉพาะถ้วย รวม placeholder ไม่มีราคา; invalidate cache เดิมผ่าน version ใน wrapper ไม่มีการเรียก API เพื่อ render
 - `mobile_dashboard.py`: เพิ่ม helpers และรายละเอียดใน expander เดิมเท่านั้น
 - `fixtures/readiness/pr2-contract.json`, `tests/test_readiness.py`: เก็บ hash **จาก source PR #5 ก่อนแก้** ของทุก renderer เดิมยกเว้น `fixture_details_html` ที่อนุญาตให้เพิ่ม diagnostics; CSS, Streamlit calls/labels และ 11 สูตรเดิมต้องตรง baseline
-- Tests ใหม่ `test_ou_diagnostics.py`, `test_form_audit.py`, `test_history_quality.py`, `test_diagnostic_rendering.py`, `test_domestic_quality.py`; ขยาย scan/persistence/Streamlit/browser checks และปรับ fixtures เวลาเก่าให้สอดคล้องการทดสอบความสด
+- Tests ใหม่ `test_ou_diagnostics.py`, `test_form_audit.py`, `test_history_quality.py`, `test_diagnostic_rendering.py`, `test_domestic_quality.py`, `test_ou_group_integrity.py`; ขยาย scan/persistence/Streamlit/browser checks และปรับ fixtures เวลาเก่าให้สอดคล้องการทดสอบความสด
 - `.github/workflows/tests.yml`: compile module ใหม่; tests ยังคงออฟไลน์
 
 ไม่มี schema migration, ไม่มีเปิดฐานบิลจริง, ไม่มีแก้ Settlement/ผลบิลเก่า, ไม่มีต่อ Foundation ใน PR #3 การทดสอบบิลใช้ฐานชั่วคราวและตรวจข้อมูลก่อน/หลังสแกนและเปลี่ยนมุมมอง
