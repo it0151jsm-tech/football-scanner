@@ -1,6 +1,6 @@
 {
   "base_commit": "fac7ea0d389e72c171ae0fd154d1870cc4ec8b56",
-  "baseline_functions_sha256": "d2b584c7a99f139917bff95c21e0a379c5ff5136a1e4a58622ab0d368898ccff",
+  "baseline_functions_sha256": "2de0906d093d8f80006351430d9286a7c3ea87c7f3e6e28804ad93339874ae0d",
   "protected_files": {
     "app.py": "a8aa0d8c003bcf631726871f2edc417b1adc051f191bd139bfaa6faeaa70f2cb",
     "mobile_dashboard.py": "e3cfff8ad4861771358544e98b86dd6fd8327a9f70f159280ccf85abaeea18d9",
@@ -9,5 +9,6 @@
     "manual_quotes.py": "e16240125d90e32023b237427459d1f351b3189d9c95af664ffb78dcc43d4250",
     "history_data.py": "43728e152fcc40d93f9626e471a04e55f9d59917bee48b523db576e3e53088e2",
     "data_health.py": "837fb8ec82fb1855a4576b3db71e9fc9a355f5c58793231f5671b70bef9cab3c"
-  }
+  },
+  "hash_format": "utf8-source-segments-v1 (independent of Python AST field versions)"
 }

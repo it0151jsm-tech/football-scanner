@@ -21,7 +21,7 @@ def load_baseline():
     source=(ROOT/'app.py').read_text()
     nodes={n.name:n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef)}
     selected=[nodes[name] for name in FUNCTIONS]
-    canonical='\n'.join(ast.dump(n,include_attributes=False) for n in selected)
+    canonical='\n'.join(ast.get_source_segment(source,n) for n in selected)
     model_hash=hashlib.sha256(canonical.encode()).hexdigest()
     if model_hash!=manifest['baseline_functions_sha256']:
         raise ValueError('baseline function hash mismatch')
