@@ -26,7 +26,15 @@ TH_TZ = timezone(timedelta(hours=7))
 UTC = timezone.utc
 TIMEOUT = 25
 HISTORY_TIMEOUT = (3, 8)
-DB_FILE = Path(os.getenv("VALUE_BET_DB", "data/value_bet_pro_v4.db"))
+def runtime_setting(name, default):
+    # Read Cloud secrets before deriving paths; do not assume secrets were loaded earlier.
+    try:
+        return os.environ.get(name) or st.secrets.get(name, default)
+    except Exception:
+        return os.environ.get(name, default)
+
+
+DB_FILE = Path(runtime_setting("VALUE_BET_DB", "data/value_bet_pro_v4.db"))
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 # CSV codes are only set where a matching Football-Data competition code is known.
@@ -147,6 +155,13 @@ def init_db():
         con.execute("""CREATE TABLE IF NOT EXISTS league_health (
             id INTEGER PRIMARY KEY AUTOINCREMENT, sport_key TEXT NOT NULL, checked_at TEXT NOT NULL, payload_json TEXT NOT NULL
         )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS result_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, pick_id INTEGER NOT NULL,
+            received_at TEXT NOT NULL, reason TEXT NOT NULL, evidence_json TEXT NOT NULL
+        )""")
+        con.execute("""CREATE TABLE IF NOT EXISTS api_receipts (
+            sport_key TEXT PRIMARY KEY, received_at TEXT NOT NULL
+        )""")
         # Upgrade an existing v3 database without deleting the user's data.
         existing = {r[1] for r in con.execute("PRAGMA table_info(picks)").fetchall()}
         migrations = {
@@ -182,6 +197,9 @@ def init_db():
             "away_form_summary": "TEXT",
             "analysis_a_json": "TEXT",
             "analysis_b_json": "TEXT",
+            "received_at": "TEXT",
+            "source_updated_at": "TEXT",
+            "bookmaker_key": "TEXT",
         }
         for name, decl in migrations.items():
             if name not in existing:
@@ -194,6 +212,21 @@ def init_db():
         for name, decl in slip_migrations.items():
             if name not in slip_columns:
                 con.execute(f"ALTER TABLE slips ADD COLUMN {name} {decl}")
+        for name in ('received_at', 'source_updated_at', 'bookmaker_key'):
+            if name not in {r[1] for r in con.execute("PRAGMA table_info(odds_snapshots)")}:
+                con.execute(f"ALTER TABLE odds_snapshots ADD COLUMN {name} TEXT")
+        con.execute("""CREATE TRIGGER IF NOT EXISTS protect_settled_pick
+            BEFORE UPDATE OF status,final_score,settlement,profit_units,outcome_binary ON picks
+            WHEN OLD.status='ตรวจแล้ว' AND (NEW.status IS NOT OLD.status OR
+                NEW.final_score IS NOT OLD.final_score OR NEW.settlement IS NOT OLD.settlement OR
+                NEW.profit_units IS NOT OLD.profit_units OR NEW.outcome_binary IS NOT OLD.outcome_binary)
+            BEGIN SELECT RAISE(ABORT,'settled pick is immutable'); END""")
+        con.execute("""CREATE TRIGGER IF NOT EXISTS protect_settled_slip
+            BEFORE UPDATE OF status,profit_units,final_summary,selections_json ON slips
+            WHEN OLD.status!='รอตรวจผล' AND (NEW.status IS NOT OLD.status OR
+                NEW.profit_units IS NOT OLD.profit_units OR NEW.final_summary IS NOT OLD.final_summary OR
+                NEW.selections_json IS NOT OLD.selections_json)
+            BEGIN SELECT RAISE(ABORT,'settled slip is immutable'); END""")
         con.execute("CREATE INDEX IF NOT EXISTS idx_picks_event ON picks(event_id)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_event ON odds_snapshots(event_id, captured_at)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON odds_snapshots(event_id, market, side, bookmaker, captured_at)")
@@ -241,10 +274,12 @@ def save_picks(rows, snapshot_rows=None):
         "away_context_matches", "context_status", "form_rate", "form_sample", "form_signal",
         "form_summary", "form_method", "h2h_summary", "h2h_detail", "h2h_sample", "form_rate_10", "form_rate_season",
         "confidence_score", "recommendation", "analysis_reason", "odds_in_range",
-        "home_form_summary", "away_form_summary", "analysis_a_json", "analysis_b_json"
+        "home_form_summary", "away_form_summary", "analysis_a_json", "analysis_b_json",
+        "received_at", "source_updated_at", "bookmaker_key"
     ]
     saved = 0
     with db() as con:
+        con.execute('BEGIN IMMEDIATE')
         # Picks referenced by a saved slip are immutable, including legacy slips.
         locked_ids = set()
         uncertain_references = False
@@ -286,19 +321,25 @@ def save_picks(rows, snapshot_rows=None):
         recent_cutoff = (datetime.now(TH_TZ) - timedelta(minutes=10)).isoformat(timespec="seconds")
         for r in snapshot_rows or []:
             # Avoid presenting repeated clicks on the same cached API response as new observations.
-            duplicate = con.execute("""SELECT 1 FROM odds_snapshots
-                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
-                AND captured_at>=? LIMIT 1""", (
-                r.get("event_id"), r.get("market"), r.get("side"), r.get("bookmaker"),
-                r.get("point"), r.get("odds"), recent_cutoff
-            )).fetchone()
+            if r.get('received_at'):
+                duplicate = con.execute("""SELECT 1 FROM odds_snapshots
+                    WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
+                    AND received_at=? AND source_updated_at IS ? LIMIT 1""", (
+                    r.get('event_id'),r.get('market'),r.get('side'),r.get('bookmaker'),r.get('point'),r.get('odds'),
+                    r.get('received_at'),r.get('source_updated_at'))).fetchone()
+            else:
+                duplicate = con.execute("""SELECT 1 FROM odds_snapshots
+                    WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
+                    AND julianday(captured_at)>=julianday(?) LIMIT 1""", (
+                    r.get('event_id'),r.get('market'),r.get('side'),r.get('bookmaker'),r.get('point'),r.get('odds'),recent_cutoff)).fetchone()
             if duplicate:
                 continue
             con.execute("""INSERT INTO odds_snapshots
-                (event_id,match_name,market,side,point,odds,bookmaker,captured_at)
-                VALUES (?,?,?,?,?,?,?,?)""", (
+                (event_id,match_name,market,side,point,odds,bookmaker,captured_at,received_at,source_updated_at,bookmaker_key)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (
                 r.get("event_id"), r.get("match_name"), r.get("market"), r.get("side"),
-                r.get("point"), r.get("odds"), r.get("bookmaker"), now_text
+                r.get("point"), r.get("odds"), r.get("bookmaker"), r.get("received_at") or now_text,
+                r.get("received_at"), r.get("source_updated_at"), r.get("bookmaker_key")
             ))
             inserted_snapshots += 1
     return saved, inserted_snapshots
@@ -308,33 +349,47 @@ def has_result_source(league):
     return any(name == league and code for name, code in LEAGUES.values())
 
 
-def save_slip_record(slip_df, combined_odds, estimated_probability):
-    """Persist an explicitly saved combination, including immutable pick IDs and odds."""
+def save_slip_record(slip_df, combined_odds, estimated_probability, selected_league_names=None):
+    """Recheck canonical SQLite quotes at click time, under the same write lock."""
+    from readiness import analysis_scope
+    from market_recommendations import recommended_pick_ids
     if slip_df.empty:
         raise ValueError("บิลต้องมีอย่างน้อยหนึ่งคู่")
-    selections = []
-    for _, row in slip_df.iterrows():
-        if not has_result_source(row.get("league")):
-            raise ValueError("ลีกนี้ไม่มีแหล่งตรวจผลอัตโนมัติ จึงยังบันทึกบิลใหม่ไม่ได้")
-        selections.append({
-            "pick_id": int(row["id"]),
-            "league": str(row.get("league", "")),
-            "match": str(row.get("match", "")),
-            "market": str(row.get("market", "")),
-            "selection": str(row.get("selection", "")),
-            "odds": float(row["odds"]),
-            "point": float(row["point"]),
-            "side": str(row["side"]),
-            "event_id": str(row["event_id"]),
-            "bookmaker": str(row["bookmaker"]),
-        })
+    ids = [slip_pick_id({'pick_id': value}) for value in slip_df['id']]
+    if None in ids or len(set(ids)) != len(ids):
+        raise ValueError("รหัสรายการในบิลไม่ถูกต้อง")
     with db() as con:
+        con.execute('BEGIN IMMEDIATE')
+        canonical = pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC", con)
+        leagues = selected_league_names if selected_league_names is not None else list(slip_df['league'])
+        scoped = analysis_scope(canonical, leagues, latest_receipts=latest_api_receipts(con))
+        eligible = recommended_pick_ids(scoped.to_dict('records'), choose_recommendation)
+        if not set(ids).issubset(eligible):
+            raise ValueError("ยังไม่แนะนำ: ราคา/ข้อมูล/EV ไม่ผ่านเกณฑ์ หรืออยู่นอกลีกและช่วง 24 ชั่วโมง")
+        selections = []
+        events = set()
+        actual_odds = 1.0
+        for _, supplied in slip_df.iterrows():
+            row = canonical[canonical['id'] == supplied['id']].iloc[0]
+            if row['status'] != 'รอตรวจผล' or not has_result_source(row.get('league')) or row['event_id'] in events:
+                raise ValueError("รายการตรวจผลแล้ว ซ้ำคู่ หรือไม่มีแหล่งผลรองรับ")
+            for key in ('event_id','market','side','point','odds','bookmaker'):
+                if row[key] != supplied[key]:
+                    raise ValueError("ราคา/ตัวเลือกเปลี่ยนแล้ว กรุณาตรวจสอบบิลอีกครั้ง")
+            events.add(row['event_id'])
+            actual_odds *= float(row['odds'])
+            selections.append({
+                'pick_id': int(row['id']), 'league': str(row['league']), 'match': str(row['match']),
+                'market': str(row['market']), 'selection': str(row['selection']), 'odds': float(row['odds']),
+                'point': float(row['point']), 'side': str(row['side']), 'event_id': str(row['event_id']),
+                'bookmaker': str(row['bookmaker']),
+            })
+        if not math.isfinite(float(combined_odds)) or not math.isclose(actual_odds, float(combined_odds), rel_tol=1e-9):
+            raise ValueError("ราคาบิลรวมไม่ตรงรายการที่บันทึก")
         cur = con.execute(
             "INSERT INTO slips (created_at, slip_size, selections_json, combined_odds, estimated_probability, status) VALUES (?,?,?,?,?,?)",
             (datetime.now(TH_TZ).isoformat(timespec="seconds"), len(selections),
-             json.dumps(selections, ensure_ascii=False), float(combined_odds),
-             estimated_probability, "รอตรวจผล")
-        )
+             json.dumps(selections, ensure_ascii=False), actual_odds, estimated_probability, "รอตรวจผล"))
         return int(cur.lastrowid)
 
 
@@ -414,28 +469,69 @@ def load_picks(limit=5000):
         return pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC LIMIT ?", con, params=(limit,))
 
 
+def record_api_receipt(sport_key, received_at):
+    from readiness import instant
+    if instant(received_at) is None:
+        return
+    with db() as con:
+        con.execute("""INSERT INTO api_receipts(sport_key,received_at) VALUES(?,?)
+            ON CONFLICT(sport_key) DO UPDATE SET received_at=excluded.received_at
+            WHERE julianday(excluded.received_at)>julianday(api_receipts.received_at)""",(sport_key,received_at))
+
+
+def latest_api_receipts(con=None):
+    if con is None:
+        with db() as connection:
+            return latest_api_receipts(connection)
+    return {LEAGUES[r['sport_key']][0]:r['received_at'] for r in con.execute('SELECT * FROM api_receipts') if r['sport_key'] in LEAGUES}
+
+
+def record_result_review(pick_id, reason, evidence):
+    with db() as con:
+        con.execute('INSERT INTO result_reviews(pick_id,received_at,reason,evidence_json) VALUES(?,?,?,?)',
+                    (int(pick_id),datetime.now(UTC).isoformat(),reason,json.dumps(evidence,ensure_ascii=False,default=str)))
+
+
+def manual_review_ids():
+    with db() as con:
+        return {int(r[0]) for r in con.execute('SELECT DISTINCT pick_id FROM result_reviews')}
+
+
 def update_pick_result(pick_id, score, settlement, profit_units, outcome_binary=None):
     with db() as con:
         con.execute("""UPDATE picks SET final_score=?, settlement=?, status='ตรวจแล้ว',
-            profit_units=?, outcome_binary=? WHERE id=?""",
+            profit_units=?, outcome_binary=? WHERE id=? AND status!='ตรวจแล้ว'""",
             (score, settlement, profit_units, outcome_binary, int(pick_id)))
 
 # -------------------- ODDS API --------------------
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_odds(sport_key, regions, api_key):
+    from odds_budget import Budget, ScanStopped, OddsBatch
+    from credential_redaction import protect
+    protect(api_key)
+    budget = Budget(bill_path=DB_FILE)
+    reservation = budget.reserve(api_key, sport_key, regions)
     url = f"{API_BASE}/sports/{sport_key}/odds/"
     params = {"apiKey": api_key, "regions": regions, "markets": "spreads,totals", "oddsFormat": "decimal"}
     try:
         response = requests.get(url, params=params, timeout=TIMEOUT)
-    except requests.RequestException as exc:
-        raise RuntimeError(f"เชื่อมต่อ API ไม่สำเร็จ: {exc}") from exc
-    if response.status_code == 401:
-        raise RuntimeError("API Key ไม่ถูกต้องหรือไม่มีสิทธิ์ใช้งาน")
-    if response.status_code == 429:
-        raise RuntimeError("โควตา API หมดหรือเรียกถี่เกินไป")
+    except requests.RequestException:
+        budget.complete(reservation, 'network_error', {})
+        # Never interpolate request exceptions, URLs or provider bodies containing credentials.
+        raise ScanStopped("หยุดสแกน: เชื่อมต่อ API ไม่สำเร็จ") from None
+    budget.complete(reservation, response.status_code, response.headers)
     if response.status_code != 200:
-        raise RuntimeError(f"API ตอบ HTTP {response.status_code}: {response.text[:200]}")
-    return response.json(), response.headers.get("x-requests-remaining", "ไม่ระบุ"), response.headers.get("x-requests-used", "ไม่ระบุ")
+        raise ScanStopped(f"หยุดสแกน: API ตอบ HTTP {response.status_code}")
+    try:
+        matches = response.json()
+        if not isinstance(matches, list) or not all(isinstance(m, dict) for m in matches):
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ScanStopped("หยุดสแกน: รูปแบบข้อมูล API ไม่ถูกต้อง") from None
+    received_at = datetime.now(UTC).isoformat()
+    for match in matches:
+        match['_received_at'] = received_at
+    return OddsBatch(matches, received_at), response.headers.get("x-requests-remaining", "ไม่ระบุ"), response.headers.get("x-requests-used", "ไม่ระบุ")
 
 # -------------------- HISTORICAL RESULTS --------------------
 @st.cache_data(ttl=900, show_spinner=False)
@@ -1082,11 +1178,14 @@ def mobile_card_lines(row):
 def lookup_quote_snapshot(row):
     """Read a matching stored observation; never borrow another market/bookmaker."""
     with db() as con:
-        snapshot = con.execute("""SELECT id,captured_at FROM odds_snapshots
+        snapshot = con.execute("""SELECT id,captured_at,received_at,source_updated_at FROM odds_snapshots
             WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
-              AND captured_at<=? ORDER BY captured_at DESC,id DESC LIMIT 1""",
+              AND julianday(captured_at)<=julianday(?)
+              AND (? IS NULL OR (received_at=? AND source_updated_at IS ?))
+            ORDER BY julianday(captured_at) DESC,id DESC LIMIT 1""",
             (row.get("event_id"), row.get("market"), row.get("side"), row.get("bookmaker"),
-             row.get("point"), row.get("odds"), row.get("scanned_at") or "")).fetchone()
+             row.get("point"), row.get("odds"), row.get("received_at") or row.get("scanned_at") or "",
+             row.get("received_at"),row.get("received_at"),row.get("source_updated_at"))).fetchone()
     return dict(snapshot) if snapshot else None
 
 
@@ -1212,15 +1311,19 @@ def analysis_display_rows(df):
     view["confidence_score"] = [item.get("score") for item in a]
     view["system_a_result"] = [item.get("result", "ข้อมูลเดิม: สแกนเพื่อสร้าง A/B") for item in a]
     view["system_b_status"] = [item.get("status", "ยังไม่มีผล B ที่บันทึกไว้") for item in b]
-    view["recommendation"] = [choose_recommendation(ai.get("score"),
-        bi.get("selection", {}).get("ev_pct") if bi.get("available") else None,
-        bool(row.get("odds_in_range", 1))) for ai, bi, (_, row) in zip(a, b, view.iterrows())]
+    from market_recommendations import assess
+    entries = [assess(row, choose_recommendation) for row in view.to_dict("records")]
+    view["recommendation"] = [entry['conclusion'] for entry in entries]
+    view["ev_pct"] = [entry['ev'] for entry in entries]
+    view["analysis_reason"] = [entry['reason'] for entry in entries]
     return view
 
 
 # -------------------- SCAN --------------------
 def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
     matches, remaining, used = fetch_odds(sport_key, regions, api_key)
+    receipt = getattr(matches, 'received_at', None) or (matches[0].get('_received_at') if matches else None)
+    record_api_receipt(sport_key, receipt)
     history = fetch_understat_history(sport_key)
     score_history = fetch_history(csv_code)
     domestic_context = fetch_understat_all_history() if sport_key in EUROPEAN_CUPS else pd.DataFrame()
@@ -1229,7 +1332,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     health = observe_league(
         sport_key, league_name, csv_code, sport_key in UNDERSTAT_LEAGUES, score_history, history, matches, now)
     record_data_health(sport_key, health)
-    target = now + timedelta(hours=hours_limit)
+    target = now + timedelta(hours=min(hours_limit, 24))
     rows, snapshot_rows = [], []
     first_prices = first_observed_quotes([m.get("id", "") for m in matches])
     for match in matches:
@@ -1261,13 +1364,15 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                 m_key = market.get("key")
                 if m_key not in ("spreads", "totals"):
                     continue
+                provenance = {"received_at": match.get("_received_at"), "source_updated_at": market.get("last_update"),
+                              "bookmaker_key": bm.get("key")}
                 for outcome in market.get("outcomes", []):
                     try:
                         odds = float(outcome.get("price", 0))
                         line = float(outcome.get("point"))
                     except (TypeError, ValueError):
                         continue
-                    if not math.isfinite(odds) or odds <= 1 or not math.isfinite(line):
+                    if not math.isfinite(odds) or odds <= 1 or not math.isfinite(line) or abs(line*4-round(line*4)) > 1e-9:
                         continue
                     name = outcome.get("name")
                     if m_key == "spreads":
@@ -1288,14 +1393,14 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         market_label = "Over/Under"
                     odds_in_range = bool(min_odds <= odds <= max_odds)
                     snapshot_rows.append({"event_id": match.get("id", ""), "match_name": f"{home} vs {away}",
-                        "market": market_label, "side": side, "point": line, "odds": odds, "bookmaker": book_name})
+                        "market": market_label, "side": side, "point": line, "odds": odds, "bookmaker": book_name, **provenance})
                     # Do not discard outcomes outside the odds filter: all available matches/quotes remain visible.
                     eval_res = evaluate_market_poisson(matrix, m_key, side, line, odds) if matrix else None
                     form5 = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=5)
                     form10 = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=10)
                     formseason = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=None)
                     price = price_evidence(first_prices.get((match.get("id", ""), market_label, side, book_name)),
-                                           line, odds, now.astimezone(TH_TZ).isoformat(timespec="seconds"))
+                                           line, odds, provenance["received_at"] or now.astimezone(TH_TZ).isoformat(timespec="seconds"))
                     analysis_a = system_a_analysis(form5, form10, formseason, home_profile, away_profile,
                                                    opponents, xg_evidence, price)
                     ou_line = line if m_key == "totals" else 2.5
@@ -1304,7 +1409,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     confidence_label, source_label = analysis_a["result"], "ระบบ A: หลักฐานเท่านั้น"
                     ev_pct = eval_res.get("ev_pct") if eval_res else None
                     recommendation = choose_recommendation(confidence, ev_pct, odds_in_range, confidence is not None)
-                    reason_parts = []
+                    reason_parts = [f"รับข้อมูล UTC: {provenance['received_at'] or 'ไม่ทราบ'} · เจ้ามืออัปเดตตลาด: {provenance['source_updated_at'] or 'ไม่ทราบ'}"]
                     if metrics:
                         reason_parts.append(f"xG คาดการณ์ {metrics['home_lambda']:.2f}-{metrics['away_lambda']:.2f}")
                     reason_parts.append(f"ผลย้อนหลังเทียบเส้น: 5 นัด {form5.get('form_rate') if form5.get('form_rate') is not None else 'n/a'}%, 10 นัด {form10.get('form_rate') if form10.get('form_rate') is not None else 'n/a'}%, ช่วงข้อมูลทั้งหมด {formseason.get('form_rate') if formseason.get('form_rate') is not None else 'n/a'}%")
@@ -1319,7 +1424,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"),
                         "league": league_name, "home_team": home, "away_team": away,
                         "match": f"{home} vs {away}", "market": market_label, "side": side,
-                        "point": line, "selection": selection, "odds": odds, "bookmaker": book_name,
+                        "point": line, "selection": selection, "odds": odds, "bookmaker": book_name, **provenance,
                         "lambda_home": metrics["home_lambda"] if metrics else None,
                         "lambda_away": metrics["away_lambda"] if metrics else None,
                         "history_matches": metrics["history_matches"] if metrics else 0,
@@ -1354,7 +1459,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
             rows.append({"event_id": match.get("id", ""), "kickoff_utc": kickoff.isoformat(),
                 "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"), "league": league_name,
                 "home_team": home, "away_team": away, "match": f"{home} vs {away}",
-                "market": "ยังไม่มีราคา", "side": "none", "point": None, "selection": "ยังไม่มีราคาแฮนดิแคป/สูงต่ำ",
+                "market": "ยังไม่มีราคา", "received_at": receipt, "side": "none", "point": None, "selection": "ยังไม่มีราคาแฮนดิแคป/สูงต่ำ",
                 "odds": None, "bookmaker": "-", "model_status": "API ไม่มีราคาในตลาดที่รองรับ",
                 "ev_pct": None, "p_win": None, "p_partial": None, "p_loss": None,
                 "score": None, "confidence_score": None, "confidence_label": "ข้อมูลไม่พอ",
@@ -1456,7 +1561,10 @@ with tab_scan:
                     all_snapshots.extend(snapshots)
                     quota_info.append(f"{league_name}: ใช้ไป {used}, เหลือ {remaining}")
                 except Exception as exc:
-                    errors.append(f"{league_name}: {exc}")
+                    from odds_budget import ScanStopped
+                    errors.append(f"{league_name}: {str(exc) if isinstance(exc, ScanStopped) else type(exc).__name__}")
+                    if isinstance(exc, ScanStopped):
+                        break
                 progress.progress((i + 1) / len(selected_leagues))
             progress.empty()
             if all_rows or all_snapshots:
@@ -1472,7 +1580,8 @@ with tab_scan:
             for err in errors:
                 st.warning(err)
 
-    df = analysis_display_rows(load_picks(limit=None))
+    from readiness import analysis_scope
+    df = analysis_display_rows(analysis_scope(load_picks(limit=None), [LEAGUES[k][0] for k in selected_leagues], latest_receipts=latest_api_receipts()))
     if df.empty:
         st.info("ยังไม่มีข้อมูล เลือกลีกและกดสแกน")
     else:
@@ -1487,11 +1596,8 @@ with tab_scan:
         # Use the best available price for the same line/selection across bookmakers.
         quoted = upcoming[upcoming["odds"].notna()].copy()
         if not quoted.empty:
-            best_quote = quoted[quoted["market"] != "Over/Under"].sort_values("odds", ascending=False).drop_duplicates(
-                subset=["event_id", "market", "side", "point"], keep="first")
-            # Pick the top-confidence side per fixture and market; keep all matches in each market.
-            best_market = best_quote.sort_values(["confidence_score", "odds"], ascending=False, na_position="last").drop_duplicates(
-                subset=["event_id", "market"], keep="first")
+            from market_recommendations import ah_table_rows
+            best_market = pd.DataFrame(ah_table_rows(dashboard_rows.to_dict("records"), choose_recommendation))
             no_price_rows = upcoming[upcoming["market"] == "ยังไม่มีราคา"].copy()
             if not no_price_rows.empty:
                 best_market = pd.concat([best_market, no_price_rows], ignore_index=True, sort=False)
@@ -1566,7 +1672,8 @@ with tab_scan:
 
 with tab_slips:
     st.subheader("🎟️ จัดอันดับตัวเลือก — OU ต้องมีเส้นหลักและ EV ที่ยืนยันได้")
-    df = analysis_display_rows(load_picks())
+    from readiness import analysis_scope
+    df = analysis_display_rows(analysis_scope(load_picks(limit=None), [LEAGUES[k][0] for k in selected_leagues], latest_receipts=latest_api_receipts()))
     if df.empty:
         st.info("สแกนราคาก่อน")
     else:
@@ -1578,11 +1685,11 @@ with tab_slips:
         df = latest_saved_quotes(df)
         candidates = df[(df["kickoff_parsed"] >= now_ts) & df["odds"].notna() &
             (df["status"] == "รอตรวจผล") & (df["confidence_score"] >= min_confidence)].copy()
-        from market_recommendations import recommended_ou_ids
+        from market_recommendations import recommended_pick_ids
         upcoming_quotes = df[df["kickoff_parsed"] >= now_ts]
-        ou_ids = recommended_ou_ids(upcoming_quotes.to_dict("records"),choose_recommendation)
-        candidates = candidates[(candidates["market"] != "Over/Under") | candidates["id"].isin(ou_ids)]
-        candidates = candidates.sort_values(["confidence_score", "ev_pct"], ascending=False,na_position="last")
+        eligible_ids = recommended_pick_ids(upcoming_quotes.to_dict("records"),choose_recommendation)
+        candidates = candidates[candidates["id"].isin(eligible_ids)]
+        candidates = candidates.sort_values(["ev_pct", "confidence_score"], ascending=False,na_position="last")
         candidates = candidates.drop_duplicates(subset=["event_id"], keep="first").reset_index(drop=True)
         st.write(f"พบ {len(candidates)} คู่ที่คะแนนตั้งแต่ {min_confidence}/100 ขึ้นไป โดยเลือกไม่เกิน 1 ตัวเลือกต่อคู่; OU ต้องผ่าน Main Line/A/B/EV ของการ์ด")
         if not candidates.empty:
@@ -1617,7 +1724,7 @@ with tab_slips:
                     st.caption("บิลนี้มีลีกที่ยังไม่มีแหล่งตรวจผลอัตโนมัติ จึงยังบันทึกไม่ได้")
                 if st.button(f"💾 บันทึกบิล {size} คู่", key=save_key, disabled=not can_settle):
                     probability = float((slip["p_win"].clip(0, 100) / 100).prod()) if slip["p_win"].notna().all() else None
-                    slip_id = save_slip_record(slip, combined_odds, probability)
+                    slip_id = save_slip_record(slip, combined_odds, probability, [LEAGUES[k][0] for k in selected_leagues])
                     st.success(f"บันทึกบิลหมายเลข #{slip_id} แล้ว — จะตรวจผลเมื่อผลของทุกคู่พร้อม")
         else:
             st.info("ยังไม่มีตัวเลือกถึงคะแนนขั้นต่ำนี้ — แต่คู่ทั้งหมดดูได้ในเมนูวิเคราะห์")
@@ -1656,7 +1763,7 @@ with tab_history:
         for _, keyrow in keys.iterrows():
             rows = con.execute("""SELECT point, odds, captured_at FROM odds_snapshots
                 WHERE event_id=? AND market=? AND side=? AND bookmaker=?
-                ORDER BY captured_at ASC, id ASC""", (keyrow["event_id"], keyrow["market"], keyrow["side"], keyrow["bookmaker"])).fetchall()
+                ORDER BY julianday(captured_at) ASC, id ASC""", (keyrow["event_id"], keyrow["market"], keyrow["side"], keyrow["bookmaker"])).fetchall()
             if not rows:
                 continue
             first, latest = rows[0], rows[-1]
@@ -1701,6 +1808,11 @@ with tab_history:
             try:
                 for index, (_, row) in enumerate(pending.iterrows(), start=1):
                     status_box.info(f"กำลังตรวจผล {index}/{total}: {row.get('match', 'ไม่ทราบคู่')}")
+                    from readiness import result_time_ready
+                    if not result_time_ready(row):
+                        skipped_no_match += 1
+                        progress.progress(index / max(total, 1))
+                        continue
                     code = next((v[1] for v in LEAGUES.values() if v[0] == row["league"]), None)
                     if not code:
                         skipped_no_source += 1
@@ -1714,6 +1826,8 @@ with tab_history:
                             errors.append(f"{row['league']}: ดาวน์โหลดผลย้อนหลังผิดพลาด ({type(exc).__name__})")
                     hist = history_cache[code]
                     if hist.empty:
+                        record_result_review(row['id'], 'โหลดผลย้อนหลังไม่ได้/ไม่มีผลที่ตรวจสอบได้ — รอตรวจด้วยมือ',
+                                             {'csv_code':code,'kickoff_utc':row.get('kickoff_utc')})
                         skipped_no_history += 1
                         progress.progress(index / max(total, 1))
                         continue
@@ -1723,21 +1837,19 @@ with tab_history:
                         home = map_team(row["home_team"], teams)
                         away = map_team(row["away_team"], teams)
                         if not home or not away:
+                            record_result_review(row['id'], 'จับคู่ชื่อทีมกับแหล่งผลไม่ได้ — รอตรวจด้วยมือ',
+                                                 {'csv_code':code,'home':row.get('home_team'),'away':row.get('away_team')})
                             skipped_no_match += 1
                             progress.progress(index / max(total, 1))
                             continue
-                        candidates = hist[(hist["HomeTeam"] == home) & (hist["AwayTeam"] == away)].copy()
-                        if candidates.empty:
+                        from readiness import unique_result
+                        result = unique_result(hist, home, away, row["kickoff_utc"])
+                        if result is None:
+                            evidence = hist[(hist['HomeTeam']==home) & (hist['AwayTeam']==away)]
+                            record_result_review(row['id'], 'ผลไม่เป็นเอกลักษณ์/วันหรือหลักฐานไม่พอ — รอตรวจด้วยมือ', evidence.to_dict('records'))
                             skipped_no_match += 1
                             progress.progress(index / max(total, 1))
                             continue
-                        candidates["date_diff"] = (candidates["Date_dt"].dt.normalize() - kickoff).abs().dt.days
-                        candidates = candidates[candidates["date_diff"] <= 1].sort_values("date_diff")
-                        if candidates.empty:
-                            skipped_no_match += 1
-                            progress.progress(index / max(total, 1))
-                            continue
-                        result = candidates.iloc[0]
                         hg, ag = int(result["FTHG"]), int(result["FTAG"])
                         settled_result = settle_pick(row, hg, ag)
                         if settled_result is None:
@@ -1761,9 +1873,11 @@ with tab_history:
             # Reload so the result table and summary reflect the changes immediately.
             df = load_picks()
 
+        from readiness import result_time_ready
         unsupported = load_picks(limit=None)
         unsupported = unsupported[(unsupported["status"] != "ตรวจแล้ว") &
-            ~unsupported["league"].map(has_result_source) &
+            unsupported.apply(result_time_ready, axis=1) &
+            (~unsupported["league"].map(has_result_source) | unsupported["id"].isin(manual_review_ids())) &
             unsupported["market"].isin(["Asian Handicap", "Over/Under"])]
         if not unsupported.empty:
             with st.expander("กรอกผลด้วยตนเองสำหรับลีกที่ไม่มีแหล่งตรวจผล (รวมบิลเดิม)"):
@@ -1775,6 +1889,8 @@ with tab_history:
                 confirmed = st.checkbox("ยืนยันว่าเป็นผลจบการแข่งขันอย่างเป็นทางการ")
                 if st.button("บันทึกผลที่ยืนยันแล้ว", disabled=not confirmed):
                     for _, pick in unsupported[unsupported["event_id"] == event_id].iterrows():
+                        if not result_time_ready(pick):
+                            continue
                         result = settle_pick(pick, int(hg), int(ag))
                         if result is not None:
                             label, profit, binary = result
@@ -1803,7 +1919,8 @@ with tab_history:
             st.caption("สถิตินี้เป็นผลของคำแนะนำที่บันทึกไว้ ไม่ใช่ backtest อิสระที่สมบูรณ์ และไม่ใช่ผลเดิมพันเงินจริง; หนึ่งหน่วยต่อรายการ ไม่รวมค่าคอมมิชชัน")
     st.divider()
     if DB_FILE.exists():
-        st.download_button("⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite", data=DB_FILE.read_bytes(), file_name=DB_FILE.name, mime="application/octet-stream")
+        from bill_backup import backup_bytes
+        st.download_button("⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite", data=backup_bytes(DB_FILE), file_name=DB_FILE.name, mime="application/octet-stream")
 
 with tab_help:
     st.subheader("ℹ️ วิธีใช้และข้อจำกัด")

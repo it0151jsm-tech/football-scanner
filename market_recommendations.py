@@ -4,6 +4,7 @@ import math
 from datetime import datetime
 
 from mobile_dashboard import model_ready
+from readiness import quote_freshness
 
 
 MARKETS = ('Asian Handicap', 'Over/Under')
@@ -80,6 +81,9 @@ def assess(row, choose_c):
         ev = None
         if valid:
             reason = 'EV ไม่มีค่า หรือ EV ในแถวไม่ตรงกับผล B ที่บันทึกไว้'
+    fresh, freshness_reason = quote_freshness(row)
+    if not fresh:
+        ev, reason = None, freshness_reason
     if support and ev is not None and ev > 0:
         tier = 4
         conclusion = choose_c(score, ev, bool(row.get('odds_in_range', 1)))
@@ -96,6 +100,7 @@ def assess(row, choose_c):
     else:
         tier, conclusion = 0, 'ยังไม่แนะนำ'
         reason = reason or 'หลักฐาน A ยังไม่สนับสนุน หรือข้อมูลฟอร์มไม่พอ'
+    reason += f" · รับข้อมูล UTC: {row.get('received_at') or 'ไม่ทราบ'} · เจ้ามืออัปเดตตลาด: {row.get('source_updated_at') or 'ไม่ทราบ'}"
     return {'row': row, 'a': a, 'b': b, 'model_valid': valid, 'ev': ev,
             'conclusion': conclusion, 'reason': reason, 'tier': tier,
             'rank': (tier, min(10, max(0, sample)), ev if ev is not None else -float('inf'),
@@ -113,9 +118,9 @@ def group_fixture_recommendations(rows, choose_c):
     output = []
     for event_rows in fixtures.values():
         anchor = max(event_rows, key=lambda r: (timestamp(r), row_id(r)))
-        identity = tuple(anchor.get(k) for k in ('home_team', 'away_team', 'league'))
+        identity = tuple(anchor.get(k) for k in ('home_team', 'away_team', 'league', 'kickoff_utc'))
         # Conflicting identities must not be combined even if legacy event_id was reused.
-        coherent = [r for r in event_rows if tuple(r.get(k) for k in ('home_team', 'away_team', 'league')) == identity]
+        coherent = [r for r in event_rows if tuple(r.get(k) for k in ('home_team', 'away_team', 'league', 'kickoff_utc')) == identity]
         markets, alternatives = {}, {}
         for market in MARKETS:
             latest = {}
@@ -172,4 +177,26 @@ def ou_table_rows(rows, choose_c):
 
 def recommended_ou_ids(rows,choose_c):
     """Only confirmed directional OU evaluations may enter new slip suggestions."""
-    return {row['id'] for row in ou_table_rows(rows,choose_c) if row['ou_selected']}
+    valid_events = {fixture['event_id'] for fixture in group_fixture_recommendations(rows,choose_c) if not fixture['identity_conflict']}
+    return {row['id'] for row in ou_table_rows(rows,choose_c) if row['ou_selected'] and row.get('event_id') in valid_events}
+
+
+def ah_table_rows(rows, choose_c):
+    result = []
+    for fixture in group_fixture_recommendations(rows, choose_c):
+        entry = fixture['markets']['Asian Handicap']
+        if entry:
+            row = dict(entry['row'])
+            row.update(recommendation=entry['conclusion'], ev_pct=entry['ev'], analysis_reason=entry['reason'])
+            result.append(row)
+    return result
+
+
+def recommended_pick_ids(rows, choose_c):
+    """One policy for both markets. OU additionally requires a paired main line."""
+    output = recommended_ou_ids(rows, choose_c)
+    for fixture in group_fixture_recommendations(rows, choose_c):
+        entry = fixture['markets']['Asian Handicap']
+        if entry and entry['tier'] == 4 and not fixture['identity_conflict']:
+            output.add(entry['row']['id'])
+    return output

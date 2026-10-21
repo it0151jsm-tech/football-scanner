@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ def quote(market='Over/Under', point=2.5, side='over', book='OU Book', event='ev
     row = complete_row()
     row.update(event_id=event, id=pick, market=market, point=point, side=side, bookmaker=book, odds=odds,
                scanned_at='2026-10-20T12:00:00+07:00', kickoff_utc='2026-10-21T12:00:00+00:00')
+    row.update(bookmaker_key="fixture-book", received_at=datetime.now(timezone.utc).replace(second=0,microsecond=0).isoformat(), source_updated_at=datetime.now(timezone.utc).replace(second=0,microsecond=0).isoformat())
     a = json.loads(row['analysis_a_json'])
     a['price'] = f['price_evidence'](None, point, odds, row['scanned_at'])
     matrix = f['score_matrix'](1.7, 1.1)
@@ -138,6 +140,8 @@ class MarketRecommendationsTests(unittest.TestCase):
             self.f['DB_FILE'] = Path(folder) / 'test.db'
             self.f['init_db']()
             row = quote()
+            row.pop("received_at", None)
+            row.pop("source_updated_at", None)
             with self.f['db']() as con:
                 for market, book, point, at in [('Over/Under', 'OU Book', 2.5, '2026-10-20T11:00:00+07:00'),
                                                ('Asian Handicap', 'OU Book', 2.5, '2026-10-20T11:30:00+07:00'),

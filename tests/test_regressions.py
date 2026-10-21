@@ -44,6 +44,10 @@ class Regressions(unittest.TestCase):
         return self.f['load_picks']().iloc[0].to_dict()
 
     def save_bill(self):
+        from test_market_recommendations import quote
+        evidence = quote('Asian Handicap', -.25, 'home', 'Book', odds=2.0)
+        self.row.update({k: v for k, v in evidence.items() if k not in ('id', 'event_id')})
+        self.row['kickoff_utc'] = (datetime.now(timezone.utc)+timedelta(hours=12)).isoformat()
         self.f['save_picks']([self.row])
         return self.f['save_slip_record'](pd.DataFrame([self.pick()]), 2.0, 0.5)
 
@@ -117,6 +121,7 @@ class Regressions(unittest.TestCase):
         self.save_bill()
         before = self.f['load_slips']().iloc[0].selections_json
         with self.f['db']() as con:
+            con.execute('DROP TRIGGER protect_settled_slip')
             con.execute('ALTER TABLE slips DROP COLUMN profit_units')
             con.execute('ALTER TABLE slips DROP COLUMN final_summary')
             con.execute('ALTER TABLE picks DROP COLUMN confidence_score')
