@@ -45,6 +45,11 @@ class UCLScanTests(unittest.TestCase):
         self.assertEqual((a['home_form']['sample10'],a['away_form']['sample10']),(10,10))
         self.assertIsNotNone(a['score']);self.assertEqual(a['xg']['home']['sample'],10);self.assertEqual(a['xg']['away']['sample'],10)
         self.assertEqual(a['domestic_sources']['home']['csv_code'],'D1');self.assertEqual(a['domestic_sources']['away']['csv_code'],'E0')
+        audit=a['form_audit']
+        self.assertEqual(audit['home']['windows']['5']['sum_gf'],10)
+        self.assertTrue(audit['home']['windows']['5']['matches_profile'])
+        self.assertEqual(audit['away']['windows']['10']['count'],10)
+        self.assertIsNotNone(datetime.fromisoformat(audit['recorded_at']).tzinfo)
         self.assertFalse(b['available']);self.assertEqual(b['scope'],'domestic_context_only');self.assertTrue(b['domestic_xg_available'])
         self.assertIn('มี xG ลีกในประเทศจริง',b['status']);self.assertIsNone(row['ev_pct']);self.assertNotIn('expected_goals',b)
         self.assertEqual({c.args[0] for c in self.f['fetch_history'].call_args_list},{'D1','E0'})
@@ -61,6 +66,22 @@ class UCLScanTests(unittest.TestCase):
         rows,_,_,_=self.scan();a=json.loads(rows[0]['analysis_a_json']);b=json.loads(rows[0]['analysis_b_json'])
         self.assertEqual(a['home_form']['sample5'],5);self.assertIsNone(a['xg']['home']);self.assertIsNone(a['xg']['away'])
         self.assertIn('Understat โหลดไม่ได้',a['xg']['status']);self.assertFalse(b['domestic_xg_available']);self.assertIsNone(rows[0]['ev_pct'])
+
+    def test_form_manifest_persists_without_rewriting_previous_saved_analysis(self):
+        self.prepare();rows,snapshots,_,_=self.scan()
+        self.f['save_picks'](rows,snapshots)
+        saved=self.f['load_picks']().iloc[0].to_dict()
+        audit=json.loads(saved['analysis_a_json'])['form_audit']
+        self.assertEqual(audit['home']['windows']['5']['mean_gf'],2)
+        self.assertEqual(audit['away']['windows']['5']['mean_gf'],2)
+        self.assertEqual(audit['home']['windows']['10']['rows'][0]['season'],season_for_kickoff(self.kickoff))
+        self.assertTrue(all(r['date']<self.kickoff.date().isoformat() for r in audit['home']['windows']['10']['rows']))
+
+    def test_no_price_placeholder_keeps_form_evidence_without_ev(self):
+        self.prepare();self.event['bookmakers']=[]
+        rows,_,_,_=self.scan();a=json.loads(rows[0]['analysis_a_json'])
+        self.assertEqual(a['form_audit']['home']['windows']['5']['count'],5)
+        self.assertEqual(rows[0]['market'],'ยังไม่มีราคา');self.assertIsNone(rows[0]['ev_pct'])
 
     def test_old_xg_is_reported_without_inventing_values(self):
         self.prepare()

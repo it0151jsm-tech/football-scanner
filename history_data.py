@@ -1,5 +1,6 @@
 """Validated Football-Data scores and explicit diagnostics; never creates xG."""
 import re
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from io import BytesIO
@@ -19,6 +20,8 @@ MESSAGES = {
     'empty_file': 'ไฟล์ CSV ว่าง', 'empty_history': 'ไม่มีแถวผลย้อนหลังที่ใช้ได้',
     'missing_columns': 'ไฟล์ขาดคอลัมน์ที่จำเป็น', 'parse_error': 'อ่านไฟล์ CSV ไม่สำเร็จ',
     'invalid_dates': 'วันที่ผลย้อนหลังผิดรูปแบบ', 'invalid_scores': 'ผลประตูไม่ครบหรือไม่ถูกต้อง',
+    'conflicting_scores': 'พบสกอร์ขัดแย้ง — แยกออกจากการคำนวณรอตรวจ',
+    'invalid_season': 'วันที่ไม่ตรงฤดูกาลต้นทาง — แยกออกจากการคำนวณรอตรวจ',
     'name_unmatched': 'จับคู่ชื่อทีมไม่สำเร็จ', 'name_ambiguous': 'ชื่อทีมกำกวม — ไม่เดาจากชื่อคล้าย',
     'no_history_before_kickoff': 'ไม่มีผลก่อนวันแข่งขัน', 'insufficient_history': 'มีผลย้อนหลังตามสนามไม่ถึง 5 นัด',
     'invalid_kickoff': 'วันแข่งขันไม่ถูกต้องหรือไม่มีเขตเวลา', 'unsupported_source': 'ลีกนี้ไม่มีรหัสแหล่งผลย้อนหลัง',
@@ -64,7 +67,8 @@ def validate_rows(frame):
     out = frame.copy()
     out['Date_dt'] = pd.to_datetime(out['Date_dt'], utc=True, errors='coerce', format='mixed').dt.tz_convert(None)
     hg, ag = pd.to_numeric(out['FTHG'], errors='coerce'), pd.to_numeric(out['FTAG'], errors='coerce')
-    scores = hg.notna() & ag.notna() & (hg >= 0) & (ag >= 0) & (hg < float('inf')) & (ag < float('inf')) & (hg % 1 == 0) & (ag % 1 == 0)
+    bool_values = out['FTHG'].map(lambda v: isinstance(v, bool) or pd.api.types.is_bool_dtype(type(v))) | out['FTAG'].map(lambda v: isinstance(v, bool) or pd.api.types.is_bool_dtype(type(v)))
+    scores = ~bool_values & hg.notna() & ag.notna() & (hg >= 0) & (ag >= 0) & (hg < float('inf')) & (ag < float('inf')) & (hg % 1 == 0) & (ag % 1 == 0)
     teams = out['HomeTeam'].notna() & out['AwayTeam'].notna() & out['HomeTeam'].astype(str).str.strip().ne('') & out['AwayTeam'].astype(str).str.strip().ne('')
     valid = out['Date_dt'].notna() & scores & teams
     info = {'raw_rows': len(out), 'invalid_dates': int(out['Date_dt'].isna().sum()), 'invalid_scores': int((~scores).sum()),
@@ -95,6 +99,43 @@ def parse_csv(content):
     return clean, info
 
 
+def consolidate_history(frame, code, detail_limit=50):
+    """Quarantine contradictory source fixtures before exact deduplication.
+
+    Store audit evidence before reducing rows; never choose an arbitrary score.
+    Season/date bounds here apply only to the five established July-season sources.
+    """
+    quality = dict(raw_rows=len(frame), invalid_season_rows=0, conflicting_rows=0,
+                   duplicate_rows=0, accepted_rows=0, details=[], details_truncated=False)
+    if frame.empty:
+        return frame.copy(), quality
+    out = frame.copy()
+    def note(kind, rejected):
+        for _, row in rejected.iterrows():
+            if len(quality['details']) >= detail_limit:
+                quality['details_truncated']=True
+                break
+            quality['details'].append(dict(reason=kind,date=str(row.get('Date_dt')),
+                home=str(row.get('HomeTeam')),away=str(row.get('AwayTeam')),
+                home_goals=float(row['FTHG']),away_goals=float(row['FTAG']),
+                season=str(row.get('_history_season')),source_url=row.get('_history_source_url')))
+    if code in {'E0','SP1','I1','D1','F1'}:
+        valid=pd.Series(False,index=out.index)
+        for season in out['_history_season'].astype(str).unique():
+            if re.fullmatch(r'\d{4}',season) and int(season[2:])==(int(season[:2])+1)%100:
+                begin=pd.Timestamp(year=2000+int(season[:2]),month=7,day=1)
+                valid |= out['_history_season'].astype(str).eq(season) & out.Date_dt.ge(begin) & out.Date_dt.lt(begin+pd.DateOffset(years=1))
+        quality['invalid_season_rows']=int((~valid).sum());note('date_season_mismatch',out[~valid]);out=out[valid].copy()
+    keys=['Date_dt','HomeTeam','AwayTeam']
+    if not out.empty:
+        conflicts=out.groupby(keys,dropna=False)[['FTHG','FTAG']].transform('nunique').gt(1).any(axis=1)
+        quality['conflicting_rows']=int(conflicts.sum());note('conflicting_score',out[conflicts]);out=out[~conflicts].copy()
+        duplicate=out.duplicated(keys,keep='first')
+        quality['duplicate_rows']=int(duplicate.sum());note('exact_duplicate',out[duplicate]);out=out[~duplicate].copy()
+    quality['accepted_rows']=len(out)
+    return out.sort_values('Date_dt').reset_index(drop=True),quality
+
+
 def load_history(code, get, timeout=(3, 8), seasons=SEASONS):
     if not code:
         frame = pd.DataFrame()
@@ -105,12 +146,16 @@ def load_history(code, get, timeout=(3, 8), seasons=SEASONS):
         report = {'season': season, 'csv_code': code, 'url': url, 'checked_at': datetime.now(timezone.utc).isoformat()}
         try:
             response = get(url, timeout=timeout)
-            report.update(http_status=response.status_code, bytes=len(response.content), final_url=getattr(response, 'url', url))
+            report.update(http_status=response.status_code, bytes=len(response.content), final_url=getattr(response, 'url', url), received_at=datetime.now(timezone.utc).isoformat())
             if response.status_code != 200:
                 report.update(status='http_error', valid_rows=0)
                 return pd.DataFrame(), report
             frame, parsed = parse_csv(response.content)
             frame['_history_season'] = season
+            report['payload_sha256']=hashlib.sha256(response.content).hexdigest()
+            frame['_history_source_url']=report['final_url'] if isinstance(report['final_url'],str) else url
+            frame['_history_received_at']=report['received_at']
+            frame['_history_payload_sha256']=report['payload_sha256']
             report.update(parsed)
             return frame, report
         except Exception as exc:
@@ -119,10 +164,11 @@ def load_history(code, get, timeout=(3, 8), seasons=SEASONS):
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(download, seasons))
     frames = [frame for frame, _ in results if not frame.empty]
-    out = pd.concat(frames, ignore_index=True).sort_values('Date_dt').drop_duplicates(['Date_dt', 'HomeTeam', 'AwayTeam']).reset_index(drop=True) if frames else pd.DataFrame()
+    combined=pd.concat(frames,ignore_index=True) if frames else pd.DataFrame()
+    out,quality=consolidate_history(combined,code)
     reports = [report for _, report in results]
-    out.attrs['history_diagnostics'] = {'status': 'ok' if frames else (reports[0]['status'] if len({r['status'] for r in reports}) == 1 else 'empty_history'),
-                                       'sources': reports, 'valid_rows': len(out)}
+    out.attrs['history_diagnostics'] = {'status': 'ok' if not out.empty else ('conflicting_scores' if quality['conflicting_rows'] else 'invalid_season' if quality['invalid_season_rows'] else (reports[0]['status'] if reports and len({r['status'] for r in reports}) == 1 else 'empty_history')),
+                                       'sources': reports, 'valid_rows': len(out),'quality_audit':quality}
     return out
 
 

@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,12 +10,17 @@ from market_recommendations import group_fixture_recommendations, TREND
 from mobile_dashboard import fixture_dashboard_html, fixture_details_html
 
 
+# One coherent observed batch per test module; historical metadata is opt-in below.
+FIXTURE_TIME = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+FIXTURE_STAMP = FIXTURE_TIME.isoformat()
+
+
 def quote(market='Over/Under', point=2.5, side='over', book='OU Book', event='event', pick=1, odds=2.1):
     f = regression.load_functions(Path(__file__).resolve().parents[1] / 'app.py')
     row = complete_row()
     row.update(event_id=event, id=pick, market=market, point=point, side=side, bookmaker=book, odds=odds,
-               scanned_at='2026-10-20T12:00:00+07:00', kickoff_utc='2026-10-21T12:00:00+00:00')
-    row.update(bookmaker_key="fixture-book", received_at=datetime.now(timezone.utc).replace(second=0,microsecond=0).isoformat(), source_updated_at=datetime.now(timezone.utc).replace(second=0,microsecond=0).isoformat())
+               scanned_at=FIXTURE_STAMP, kickoff_utc='2026-10-21T12:00:00+00:00')
+    row.update(bookmaker_key="fixture-book", received_at=FIXTURE_STAMP, source_updated_at=FIXTURE_STAMP)
     a = json.loads(row['analysis_a_json'])
     a['price'] = f['price_evidence'](None, point, odds, row['scanned_at'])
     matrix = f['score_matrix'](1.7, 1.1)
@@ -56,7 +61,10 @@ class MarketRecommendationsTests(unittest.TestCase):
     def test_bookmakers_remain_independent_but_latest_line_per_book_wins(self):
         old = quote(pick=1, point=2.5)
         newer = quote(pick=2, point=2.75)
-        newer['scanned_at'] = '2026-10-20T13:00:00+07:00'
+        old_at = (FIXTURE_TIME - timedelta(minutes=2)).isoformat()
+        new_at = (FIXTURE_TIME - timedelta(minutes=1)).isoformat()
+        old.update(scanned_at=old_at, received_at=old_at, source_updated_at=old_at)
+        newer.update(scanned_at=new_at, received_at=new_at, source_updated_at=new_at)
         other = quote(pick=3, book='Other Book', point=3)
         fixture = self.groups([old, newer, other])[0]
         choices = fixture['alternatives']['Over/Under']
@@ -140,6 +148,8 @@ class MarketRecommendationsTests(unittest.TestCase):
             self.f['DB_FILE'] = Path(folder) / 'test.db'
             self.f['init_db']()
             row = quote()
+            # This lookup case intentionally checks historical legacy snapshots.
+            row['scanned_at'] = '2026-10-20T12:00:00+07:00'
             row.pop("received_at", None)
             row.pop("source_updated_at", None)
             row.pop("bookmaker_key", None)

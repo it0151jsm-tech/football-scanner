@@ -195,6 +195,7 @@ def build_domestic_history(home_resolution, away_resolution, frames):
         history = history.copy()
         history['_domestic_sport_key'] = sport
         targets = [r for r in usable.values() if r['sport_key'] == sport]
+        original_names = history[['HomeTeam', 'AwayTeam']].copy()
         def rename(label):
             for target in targets:
                 mapped, _ = safe_match_team(target['csv_name'], [label])
@@ -203,6 +204,40 @@ def build_domestic_history(home_resolution, away_resolution, frames):
             return f'__domestic__[{sport}]::{label}'
         history['HomeTeam'] = history.HomeTeam.map(rename)
         history['AwayTeam'] = history.AwayTeam.map(rename)
+        # Verified identity mapping can reveal duplicates hidden by spelling or
+        # whitespace variations. Recheck score contradictions before reducing
+        # those newly identical fixtures; source-row order must never choose a score.
+        quality = dict(raw_rows=len(history),conflicting_rows=0,duplicate_rows=0,
+                       accepted_rows=0,details=[],details_truncated=False,
+                       scope='post_verified_team_mapping; source-wide counts')
+        keys = ['Date_dt','HomeTeam','AwayTeam']
+        def record(kind, rows):
+            for index,row in rows.iterrows():
+                if len(quality['details']) >= 50:
+                    quality['details_truncated'] = True
+                    break
+                original = original_names.loc[index]
+                metadata = {field: row.get('_history_'+field) if isinstance(row.get('_history_'+field),str) else None
+                            for field in ('source_url','received_at','payload_sha256')}
+                quality['details'].append(dict(
+                    reason=kind,sport_key=sport,date=str(row['Date_dt'].date()),
+                    original_home=str(original['HomeTeam']),original_away=str(original['AwayTeam']),
+                    mapped_home=str(row['HomeTeam']),mapped_away=str(row['AwayTeam']),
+                    home_goals=float(row['FTHG']),away_goals=float(row['FTAG']),
+                    season=str(row.get('_history_season')),
+                    **metadata))
+        conflicting = history.groupby(keys,dropna=False)[['FTHG','FTAG']].transform('nunique').gt(1).any(axis=1)
+        quality['conflicting_rows'] = int(conflicting.sum())
+        record('conflicting_score_after_verified_mapping',history[conflicting])
+        history = history[~conflicting].copy()
+        duplicate = history.duplicated(keys,keep='first')
+        quality['duplicate_rows'] = int(duplicate.sum())
+        record('exact_duplicate_after_verified_mapping',history[duplicate])
+        history = history[~duplicate].copy()
+        quality['accepted_rows'] = len(history)
+        report['post_mapping_quality'] = quality
+        if history.empty and quality['conflicting_rows']:
+            report['status'] = 'conflicting_scores'
         history.attrs = {}
         combined.append(history)
     out = pd.concat(combined, ignore_index=True).drop_duplicates(
@@ -213,6 +248,9 @@ def build_domestic_history(home_resolution, away_resolution, frames):
             item = deepcopy(source); item['domestic_sport_key'] = sport; reports.append(item)
     out.attrs['domestic_sources'] = resolutions
     out.attrs['domestic_source_reports'] = source_reports
+    out.attrs['post_mapping_quality'] = {sport: deepcopy(report['post_mapping_quality'])
+                                         for sport,report in source_reports.items()
+                                         if 'post_mapping_quality' in report}
     out.attrs['history_diagnostics'] = {'status': 'ok' if not out.empty else 'empty_history', 'sources': reports,
                                        'scope': 'domestic cup context only; not UCL results or cross-league probabilities'}
     return out

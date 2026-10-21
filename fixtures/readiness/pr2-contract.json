@@ -1078,5 +1078,23 @@
     "system_a_analysis": "e5229fccad24d70295756e6c86aa241d0b710e8eb8e61e65792a1ebf7e4a7e62",
     "system_b_analysis": "35714b436f648c24b43efc9be50feaff585a3b8becb1710d2add72f42008b0e6",
     "settle_pick": "fdd9b742470d2456153ca68c0be5df757a6aa973ec0e5a4137f218d6cbdf1b95"
-  }
+  },
+  "mobile_protected_source_sha256": {
+    "text": "d6c9ad5b30ab46b892988b3ec4991fc24c40954a823c5bdd06f8b955c5637e0c",
+    "number": "99f75d525c62f581933a4b26e37ecf0873e0ffe2f049d4d687fe625055cd4cc9",
+    "object_json": "9c1a0e2950071dbc86f5bf4c74aa122919f02695866bbef145c9639646adf0e8",
+    "mapping": "ccd5304f13d0ca2c9aad0a5e231b9eb2190cf2b552e4257a98b149606c0e89e2",
+    "model_ready": "4a985e006669fabb91ea58813091da6666ab66ad9de3bec26b33978519911fd6",
+    "form_tile": "f6e625796c0cec33d34e3ac68832e3dd66f4633b8a74f84958449f1468ec9074",
+    "model_html": "12c096567fecf4ff1c452a49bad118a1469f511f9972283ddef3519d7fe3c078",
+    "price_html": "210462cfd1db1062e1e3a8884919c0a20368b39d874b21ba167c14a851a521c2",
+    "dashboard_html": "603be4c5e988abd48629e68f3453fd6919d67f9490e9fa77fe2497d8a81a78a8",
+    "details_html": "46ebb5ee9d4efb8a932c82d75c621ea63465dc68cce36ae14a773dc068a4df0a",
+    "market_panel_html": "2c195159a3e2567a8c565fadb2491bb95e14ae8e6040f36b92f2375270a182b5",
+    "fixture_dashboard_html": "9a566d28f6399061c15cc2abda8d98704c4eea60c3d0359acce2bc63b226a8e9",
+    "ou_panel_html": "fe5f8805b214aae330da1c916fa0b5010bed9dcca4b5f0862ee064d5f92d20ed",
+    "manual_quotes_html": "fed7aec557fc419162dd09c331540e973119048b418fbcc1b4e1aecb2aee6c93"
+  },
+  "mobile_css_sha256": "2d5aba0060efca33800636adadc98e8f04d44cf08765db91ff5f66b6f840f699",
+  "mobile_details_exception": "PR #6: diagnostic evidence inside existing fixture details expander only; all pre-existing other renderers/CSS protected."
 }

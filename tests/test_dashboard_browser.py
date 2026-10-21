@@ -100,3 +100,35 @@ class DashboardBrowserTests(unittest.TestCase):
                 self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
             finally:
                 page.close()
+
+    def test_ou_and_ucl_form_diagnostics_fit_open_details_at_iphone_widths(self):
+        from market_recommendations import group_fixture_recommendations, RANKING
+        from test_ucl_scan import UCLScanTests
+        case=UCLScanTests();case.setUp();self.addCleanup(case.doCleanups)
+        case.prepare();rows,_,_,_=case.scan()
+        # Long source strings and genuine synthetic row evidence must wrap safely.
+        for row in rows:
+            a=json.loads(row['analysis_a_json'])
+            audit=a['form_audit']
+            for side in ('home','away'):
+                for window in audit[side]['windows'].values():
+                    for match in window['rows']:
+                        match.update(payload_sha256='a'*64,source_url='https://example.invalid/'+('source'*50)+'.csv')
+            row['analysis_a_json']=json.dumps(a)
+        fixture=group_fixture_recommendations(rows,case.f['choose_recommendation'])[0]
+        for width in (320,375,390,430):
+            for dark in (False,True):
+                with self.subTest(width=width,dark=dark):
+                    page=self.browser.new_page(viewport={'width':width,'height':844},color_scheme='dark' if dark else 'light')
+                    try:
+                        page.set_content(self.page_content(complete_row(),dark))
+                        page.locator('body').evaluate('(body,markup)=>body.innerHTML=markup',fixture_dashboard_html(fixture)+'<details open><summary>ดูรายละเอียดเพิ่มเติม</summary>'+fixture_details_html(fixture,RANKING)+'</details>')
+                        self.assertEqual(page.locator('[data-ou-diagnostic="pair"]').count(),1)
+                        self.assertGreater(page.locator('[data-form-audit="saved"]').count(),0)
+                        self.assertEqual(page.locator('img,script').count(),0)
+                        self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                        if width==375 and os.environ.get('DASHBOARD_SCREENSHOTS'):
+                            folder=Path(os.environ['DASHBOARD_SCREENSHOTS']);folder.mkdir(parents=True,exist_ok=True)
+                            page.screenshot(path=str(folder/('ou-form-diagnostics-dark.png' if dark else 'ou-form-diagnostics-light.png')),full_page=True)
+                    finally:
+                        page.close()

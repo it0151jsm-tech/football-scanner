@@ -537,6 +537,7 @@ def fetch_odds(sport_key, regions, api_key):
 # -------------------- HISTORICAL RESULTS --------------------
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_history(csv_code):
+    """Validated history quality-v2: quarantine contradictions before deduplication."""
     from history_data import load_history
     return load_history(csv_code, requests.get, timeout=HISTORY_TIMEOUT)
 
@@ -1332,7 +1333,7 @@ def domestic_league_definitions():
 
 @cache_data(ttl=21600, show_spinner=False)
 def fetch_domestic_rosters(season):
-    """One current-season CSV per supported league, cached; only called on explicit cup scan."""
+    """Quality-v2 current-season CSVs, cached; only called on explicit cup scan."""
     from history_data import load_history
     return {key: load_history(info['csv_code'], requests.get, timeout=HISTORY_TIMEOUT, seasons=(season,))
             for key, info in domestic_league_definitions().items()}
@@ -1525,6 +1526,12 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
         else:
             annotate_cup_profile(home_profile,pack['home'],xg_evidence)
             annotate_cup_profile(away_profile,pack['away'],xg_evidence)
+        form_audit = None
+        if is_cup:
+            from form_audit import audit_fixture_forms
+            form_audit = audit_fixture_forms(score_history, home, away, kickoff,
+                expected_profiles={'home':home_profile, 'away':away_profile})
+            form_audit['recorded_at'] = datetime.now(UTC).isoformat()
         rows_before_match = len(rows)
         for bm in match.get("bookmakers", []):
             book_name = bm.get("title", "Unknown")
@@ -1575,6 +1582,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     analysis_b = system_b_analysis(metrics, matrix, eval_res, split_line(ou_line), ou_line)
                     if is_cup:
                         analysis_a['domestic_sources']={'home':pack['home'],'away':pack['away']}
+                        analysis_a['form_audit']=form_audit
                         analysis_b.update(status=cup_model_status(xg_evidence),scope='domestic_context_only',domestic_xg_available=any(xg_evidence.get(s) is not None for s in ('home','away')))
                     confidence = analysis_a["score"]
                     confidence_label, source_label = analysis_a["result"], "ระบบ A: หลักฐานเท่านั้น"
@@ -1627,6 +1635,9 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     })
         # Keep a fixture visible even when API has not supplied usable spreads/totals outcomes.
         if len(rows) == rows_before_match:
+            no_price_a = system_a_analysis({}, {}, {}, home_profile, away_profile, opponents, xg_evidence, {})
+            if is_cup:
+                no_price_a.update(form_audit=form_audit, domestic_sources={'home':pack['home'],'away':pack['away']})
             rows.append({"event_id": match.get("id", ""), "kickoff_utc": kickoff.isoformat(),
                 "kickoff_th": kickoff_th.strftime("%d/%m/%Y %H:%M"), "league": league_name,
                 "home_team": home, "away_team": away, "match": f"{home} vs {away}",
@@ -1640,8 +1651,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                 "form_method": "ไม่มีราคา", "home_form_summary": home_profile.get("summary", ""),
                 "away_form_summary": away_profile.get("summary", ""), "h2h_summary": h2h["h2h_summary"],
                 "h2h_detail": h2h["h2h_detail"], "h2h_sample": h2h["h2h_sample"],
-                "analysis_a_json": json.dumps(system_a_analysis({}, {}, {}, home_profile, away_profile,
-                    opponents, xg_evidence, {}), ensure_ascii=False, allow_nan=False),
+                "analysis_a_json": json.dumps(no_price_a, ensure_ascii=False, allow_nan=False),
                 "analysis_b_json": json.dumps({"available": False, "calibrated": False,
                     "status": "ยังไม่มีราคาตลาดสำหรับคำนวณ EV"}, ensure_ascii=False)})
     return rows, snapshot_rows, remaining, used

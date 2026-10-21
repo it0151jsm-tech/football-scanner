@@ -217,7 +217,13 @@ class ReadinessTests(unittest.TestCase):
 
     def test_ui_templates_widgets_labels_css_and_model_formulas_unchanged(self):
         contract=json.loads((ROOT/'fixtures/readiness/pr2-contract.json').read_text())
-        self.assertEqual(hashlib.sha256((ROOT/'mobile_dashboard.py').read_bytes()).hexdigest(),contract['mobile_sha256'])
+        # PR #6 authorizes diagnostics only inside the existing details expander.
+        import mobile_dashboard
+        mobile_source=(ROOT/'mobile_dashboard.py').read_text()
+        self.assertEqual(hashlib.sha256(mobile_dashboard.DASHBOARD_CSS.encode()).hexdigest(),contract['mobile_css_sha256'])
+        protected={n.name:n for n in ast.parse(mobile_source).body if isinstance(n,ast.FunctionDef)}
+        for name,digest in contract['mobile_protected_source_sha256'].items():
+            self.assertEqual(hashlib.sha256(ast.get_source_segment(mobile_source,protected[name]).encode()).hexdigest(),digest,name)
         source=(ROOT/'app.py').read_text()
         tree=ast.parse(source);ui=[]
         for n in ast.walk(tree):

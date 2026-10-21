@@ -21,6 +21,10 @@ class UCLStreamlitTests(unittest.TestCase):
             self.assertEqual(len(app.exception),0);self.assertEqual(len(app.tabs),4)
             cards=[m.value for m in app.tabs[0].markdown if '<article class="vbp-dashboard"' in m.value]
             self.assertEqual(len(cards),1);self.assertIn('ฟอร์มลีกในประเทศ',cards[0]);self.assertIn('มี xG ลีกในประเทศจริง',cards[0])
+            evidence=next(e for e in app.tabs[0].expander if e.label=='ดูรายละเอียดเพิ่มเติม')
+            details=[m.value for m in evidence.markdown if 'data-ou-diagnostic="pair"' in m.value]
+            self.assertEqual(len(details),1);self.assertIn('data-form-audit="saved"',details[0])
+            self.assertNotIn('data-ou-diagnostic',cards[0]);self.assertNotIn('data-form-audit',cards[0])
             app.radio[0].set_value('ตารางเดิม').run();self.assertEqual(len(app.exception),0)
             app.radio[0].set_value('การ์ดมือถือ').run();self.assertEqual(len(app.exception),0)
             get.assert_not_called()

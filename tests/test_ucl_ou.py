@@ -1,11 +1,17 @@
 """Synthetic contract tests: no real Bayern/Arsenal prices, statistics or API calls."""
+from datetime import datetime, timedelta, timezone
 import unittest
 
 from ou_market import compare_sides, select_main_line
 
 
+FIXTURE_TIME = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+FIXTURE_STAMP = FIXTURE_TIME.isoformat()
+
+
 def entry(side, line=3.0, odds=1.95, bookmaker='Synthetic Book', key='synthetic-book',
-          event='synthetic-ucl-event', at='2026-10-21T12:00:00+00:00', **changes):
+          event='synthetic-ucl-event', at=None, **changes):
+    at = at or FIXTURE_STAMP
     # Minimal saved-quote contract. There is deliberately no xG or model B result.
     row = dict(event_id=event, bookmaker=bookmaker, bookmaker_key=key,
                side=side, point=line, odds=odds, scanned_at=at,
@@ -62,9 +68,9 @@ class UCLMainLineDiagnosticsTests(unittest.TestCase):
 
     def test_other_event_book_or_snapshot_never_supplies_missing_side(self):
         for changes in [dict(event_id='different-event'),dict(bookmaker='Different Book',bookmaker_key='other-key'),
-                        dict(scanned_at='2026-10-21T12:01:00+00:00'),
-                        dict(received_at='2026-10-21T12:01:00+00:00'),
-                        dict(source_updated_at='2026-10-21T11:59:00+00:00')]:
+                        dict(scanned_at=(FIXTURE_TIME + timedelta(minutes=1)).isoformat()),
+                        dict(received_at=(FIXTURE_TIME + timedelta(minutes=1)).isoformat()),
+                        dict(source_updated_at=(FIXTURE_TIME - timedelta(minutes=1)).isoformat())]:
             with self.subTest(changes=changes):
                 main=select_main_line([entry('over'),entry('under',**changes)])
                 self.assertEqual(main['reason_code'],'contract_mismatch')
@@ -91,9 +97,14 @@ class UCLMainLineDiagnosticsTests(unittest.TestCase):
         self.assertEqual(main['diagnostics']['candidate_lines'],2)
         self.assertIsNone(main['line'])
 
-    def test_legacy_quotes_without_provider_keys_can_describe_line_but_not_ev(self):
+    def test_legacy_quotes_without_provider_keys_keep_math_but_cannot_confirm_main(self):
         rows=pair()
         for e in rows:e['row'].pop('bookmaker_key')
         main=select_main_line(rows)
-        self.assertEqual(main['status'],'estimated')
+        self.assertEqual(main['status'],'unconfirmed')
+        self.assertEqual(main['reason_code'],'stale_or_unverified_snapshots')
+        self.assertEqual(len(main['pairs']),1)
+        self.assertTrue(main['pairs'][0]['numeric_eligible'])
+        self.assertFalse(main['pairs'][0]['fresh'])
+        self.assertIsNone(main['pair'])
         self.assertIsNone(compare_sides(main)[0])

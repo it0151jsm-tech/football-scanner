@@ -98,7 +98,7 @@ class MainOUTests(unittest.TestCase):
         rows=self.pair(3,book='<script>bad</script>')+self.pair(2.5,book='Alternative',over=1.45,under=2.8)
         fixture=group_fixture_recommendations(rows,self.f['choose_recommendation'])[0]
         html=fixture_dashboard_html(fixture)
-        self.assertIn('1.95',html);self.assertIn('2026-10-20',html)
+        self.assertIn('1.95',html);self.assertIn(rows[0]['scanned_at'],html)
         self.assertNotIn('<script>',html);self.assertIn('&lt;script&gt;',html)
         self.assertNotIn('Alternative',html)
         self.assertIn('Alternative',fixture_details_html(fixture,'rule'))
