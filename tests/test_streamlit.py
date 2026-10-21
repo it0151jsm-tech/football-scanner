@@ -23,7 +23,9 @@ class StreamlitSmokeTests(unittest.TestCase):
 
     def app(self):
         from streamlit.testing.v1 import AppTest
-        return AppTest.from_file(str(self.path), default_timeout=20).run()
+        app = AppTest.from_file(str(self.path), default_timeout=20).run()
+        app.multiselect[0].set_value(['soccer_epl']).run()
+        return app
 
     def test_existing_four_tabs_start_with_empty_database(self):
         app = self.app()
@@ -85,7 +87,7 @@ class StreamlitSmokeTests(unittest.TestCase):
         b = f['system_b_analysis'](None, None, None, [(2.5, 1)], 2.5)
         f['save_picks']([dict(event_id='future', market='Over/Under', side='over',
                              league=f['LEAGUES']['soccer_epl'][0], bookmaker='Book',
-                             kickoff_utc=(datetime.now(timezone.utc)+timedelta(hours=5)).isoformat(),
+                             kickoff_utc=(datetime.now(timezone.utc)+timedelta(hours=5)).replace(second=0,microsecond=0).isoformat(),
                              kickoff_th='เวลาไทยทดสอบ', home_team='A', away_team='B', match='A vs B',
                              point=2.5, odds=2, selection='สูง (Over 2.5)', confidence_score=80,
                              analysis_a_json=json.dumps(a), analysis_b_json=json.dumps(b))])
@@ -137,7 +139,7 @@ class StreamlitSmokeTests(unittest.TestCase):
         f['init_db']()
         row = quote()
         opposite = quote(side='under',odds=1.85,pick=2)
-        row.update(event_id='complete', side='over', kickoff_utc=(datetime.now(timezone.utc)+timedelta(hours=5)).isoformat())
+        row.update(event_id='complete', side='over', kickoff_utc=(datetime.now(timezone.utc)+timedelta(hours=5)).replace(second=0,microsecond=0).isoformat())
         opposite.update(event_id='complete',kickoff_utc=row['kickoff_utc'])
         f['save_picks']([row,opposite])
         with f['db']() as con:
@@ -171,7 +173,7 @@ class StreamlitSmokeTests(unittest.TestCase):
         other = quote(point=3, book='Other Book', pick=3, odds=1.05)
         under = quote(point=2.75,side='under',odds=1.85,pick=4)
         for row in [ah, ou, other, under]:
-            row['kickoff_utc'] = (datetime.now(timezone.utc)+timedelta(hours=5)).isoformat()
+            row['kickoff_utc'] = (datetime.now(timezone.utc)+timedelta(hours=5)).replace(second=0,microsecond=0).isoformat()
         f['save_picks']([ah, ou, other, under], [dict(event_id='event', market=ou['market'], side=ou['side'],
                                             point=ou['point'], odds=ou['odds'], bookmaker=ou['bookmaker'])])
         with f['db']() as con:
@@ -203,7 +205,7 @@ class StreamlitSmokeTests(unittest.TestCase):
         f=load_functions(self.path);f['DB_FILE']=self.db_path;f['init_db']()
         rows=[quote(side=s,odds=p,pick=i) for i,(s,p) in enumerate([('over',1.95),('under',1.95)],1)]
         for row in rows:
-            row['kickoff_utc']=(datetime.now(timezone.utc)+timedelta(hours=5)).isoformat()
+            row['kickoff_utc']=(datetime.now(timezone.utc)+timedelta(hours=5)).replace(second=0,microsecond=0).isoformat()
         f['save_picks'](rows)
         with f['db']() as con:
             con.execute('INSERT INTO slips(selections_json,status,profit_units,final_summary) VALUES (?,?,?,?)',('{bad','แพ้บิล',-1,'unchanged'))

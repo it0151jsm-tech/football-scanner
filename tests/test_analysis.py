@@ -110,7 +110,7 @@ class AnalysisTests(unittest.TestCase):
     def test_legacy_scores_are_not_relabeled_and_no_database_rows_change(self):
         self.save_bill()
         with self.f['db']() as con:
-            con.execute('UPDATE picks SET confidence_score=99, recommendation=?', ('ตัวเลือกเด่น',))
+            con.execute('UPDATE picks SET confidence_score=99, recommendation=?, analysis_a_json=NULL, analysis_b_json=NULL', ('ตัวเลือกเด่น',))
             before_picks = [tuple(r) for r in con.execute('SELECT * FROM picks')]
             before_slips = [tuple(r) for r in con.execute('SELECT * FROM slips')]
         view = self.f['analysis_display_rows'](self.f['load_picks']())

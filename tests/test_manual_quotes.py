@@ -93,7 +93,10 @@ class ManualQuoteTests(unittest.TestCase):
     def test_rescan_preserves_multiple_lines_and_frozen_bill(self):
         self.f['save_picks']([self.row])
         original=self.f['load_picks'](limit=None)
-        self.f['save_slip_record'](original,2.1,1)
+        # Historical bills remain valid even when they no longer qualify for a new bet.
+        with self.f['db']() as con:
+            con.execute('INSERT INTO slips(selections_json,status) VALUES (?,?)',
+                        (json.dumps([dict(pick_id=int(original.iloc[0]['id']))]), 'รอตรวจผล'))
         before=self.snapshot()
         rows=[dict(self.row,point=line) for line in (2.5,2.75,3,3.25,3.5)]
         self.f['save_picks'](rows)
