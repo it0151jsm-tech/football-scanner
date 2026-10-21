@@ -1,0 +1,328 @@
+{
+  "schema_version": 1,
+  "provider": "openfootball/football.json",
+  "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361",
+  "recorded_at": "2026-10-21T10:08:28+00:00",
+  "selection": "First three original match rows of each listed 2025-26 document; not a complete season",
+  "documents": [
+    {
+      "path": "2025-26/en.1.json",
+      "upstream_blob_sha": "41e223ee5954e6b634beb4bc70d7188b3183c665",
+      "source_url": "https://github.com/openfootball/football.json/blob/e6744429ee395bc86f247348c6184bb08d4eb361/2025-26/en.1.json",
+      "document": {
+        "name": "English Premier League 2025/26",
+        "matches": [
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-15",
+            "time": "20:00",
+            "team1": "Liverpool FC",
+            "team2": "AFC Bournemouth",
+            "score": {
+              "ft": [
+                4,
+                2
+              ],
+              "ht": [
+                1,
+                0
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-16",
+            "time": "12:30",
+            "team1": "Aston Villa FC",
+            "team2": "Newcastle United FC",
+            "score": [
+              0,
+              0
+            ]
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-16",
+            "time": "15:00",
+            "team1": "Brighton & Hove Albion FC",
+            "team2": "Fulham FC",
+            "score": {
+              "ft": [
+                1,
+                1
+              ],
+              "ht": [
+                0,
+                0
+              ]
+            }
+          }
+        ]
+      },
+      "source_row_indexes": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "path": "2025-26/es.1.json",
+      "upstream_blob_sha": "ca95ceb8861f8f1ae876eb066e71148ff773425b",
+      "source_url": "https://github.com/openfootball/football.json/blob/e6744429ee395bc86f247348c6184bb08d4eb361/2025-26/es.1.json",
+      "document": {
+        "name": "Spain Primera División 2025/26",
+        "matches": [
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-15",
+            "time": "19:00",
+            "team1": "Girona FC",
+            "team2": "Rayo Vallecano de Madrid",
+            "score": {
+              "ft": [
+                1,
+                3
+              ],
+              "ht": [
+                0,
+                3
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-15",
+            "time": "21:30",
+            "team1": "Villarreal CF",
+            "team2": "Real Oviedo",
+            "score": {
+              "ft": [
+                2,
+                0
+              ],
+              "ht": [
+                2,
+                0
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-16",
+            "time": "19:30",
+            "team1": "RCD Mallorca",
+            "team2": "FC Barcelona",
+            "score": {
+              "ft": [
+                0,
+                3
+              ],
+              "ht": [
+                0,
+                2
+              ]
+            }
+          }
+        ]
+      },
+      "source_row_indexes": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "path": "2025-26/it.1.json",
+      "upstream_blob_sha": "00c57db6aa94737d6f965a67d1b89de58fcf3746",
+      "source_url": "https://github.com/openfootball/football.json/blob/e6744429ee395bc86f247348c6184bb08d4eb361/2025-26/it.1.json",
+      "document": {
+        "name": "Italian Serie A 2025/26",
+        "matches": [
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-23",
+            "time": "18:30",
+            "team1": "Genoa CFC",
+            "team2": "US Lecce",
+            "score": [
+              0,
+              0
+            ]
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-23",
+            "time": "18:30",
+            "team1": "US Sassuolo Calcio",
+            "team2": "SSC Napoli",
+            "score": {
+              "ft": [
+                0,
+                2
+              ],
+              "ht": [
+                0,
+                1
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-23",
+            "time": "20:45",
+            "team1": "AC Milan",
+            "team2": "US Cremonese",
+            "score": {
+              "ft": [
+                1,
+                2
+              ],
+              "ht": [
+                1,
+                1
+              ]
+            }
+          }
+        ]
+      },
+      "source_row_indexes": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "path": "2025-26/de.1.json",
+      "upstream_blob_sha": "320994ff4b376c0aa7abe7929f9b9740cfc0eff5",
+      "source_url": "https://github.com/openfootball/football.json/blob/e6744429ee395bc86f247348c6184bb08d4eb361/2025-26/de.1.json",
+      "document": {
+        "name": "Deutsche Bundesliga 2025/26",
+        "matches": [
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-22",
+            "time": "20:30",
+            "team1": "FC Bayern München",
+            "team2": "RB Leipzig",
+            "score": {
+              "ft": [
+                6,
+                0
+              ],
+              "ht": [
+                3,
+                0
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-23",
+            "time": "15:30",
+            "team1": "Eintracht Frankfurt",
+            "team2": "SV Werder Bremen",
+            "score": {
+              "ft": [
+                4,
+                1
+              ],
+              "ht": [
+                2,
+                0
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-23",
+            "time": "15:30",
+            "team1": "Bayer 04 Leverkusen",
+            "team2": "TSG 1899 Hoffenheim",
+            "score": {
+              "ft": [
+                1,
+                2
+              ],
+              "ht": [
+                1,
+                1
+              ]
+            }
+          }
+        ]
+      },
+      "source_row_indexes": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "path": "2025-26/fr.1.json",
+      "upstream_blob_sha": "b6eec1251b125725d32efe85c8a969b68765d26a",
+      "source_url": "https://github.com/openfootball/football.json/blob/e6744429ee395bc86f247348c6184bb08d4eb361/2025-26/fr.1.json",
+      "document": {
+        "name": "French Ligue 1 2025/26",
+        "matches": [
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-15",
+            "time": "20:45",
+            "team1": "Stade Rennais FC 1901",
+            "team2": "Olympique de Marseille",
+            "score": {
+              "ft": [
+                1,
+                0
+              ],
+              "ht": [
+                0,
+                0
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-16",
+            "time": "17:00",
+            "team1": "Racing Club de Lens",
+            "team2": "Olympique Lyonnais",
+            "score": {
+              "ft": [
+                0,
+                1
+              ],
+              "ht": [
+                0,
+                1
+              ]
+            }
+          },
+          {
+            "round": "Matchday 1",
+            "date": "2025-08-16",
+            "time": "19:00",
+            "team1": "AS Monaco FC",
+            "team2": "Le Havre AC",
+            "score": {
+              "ft": [
+                3,
+                1
+              ],
+              "ht": [
+                1,
+                0
+              ]
+            }
+          }
+        ]
+      },
+      "source_row_indexes": [
+        0,
+        1,
+        2
+      ]
+    }
+  ]
+}
+

@@ -1,0 +1,11 @@
+SPDX-License-Identifier: CC0-1.0
+
+The authored demonstration dataset in this directory is dedicated to the public
+ domain under CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+
+These records are fictional software test fixtures created for this repository.
+They are not copied from Football-Data, Understat, The Odds API, a bookmaker,
+or any real match feed. Team names, xG, results and prices are invented test
+inputs only. They must never be used to fill missing production data, establish
+real provider coverage, demonstrate forecasting skill, or claim betting profit.
+The five league keys label adapter routing tests only, not authentic club data.

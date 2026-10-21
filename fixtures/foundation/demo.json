@@ -1,0 +1,2280 @@
+{
+  "manifest": {
+    "source_id": "authored-cc0-demo-v1",
+    "name": "Authored fictional integration fixture; NOT real football",
+    "dataset_kind": "test_sample",
+    "license": "CC0-1.0",
+    "evidence": "fixtures/foundation/LICENSE.txt",
+    "evidence_sha256": "75f13bce8d188a91ebdf1725d2f40a95d6f3ef4bc8edd63d070d2af8957bec76",
+    "rights_status": "verified",
+    "allowed_uses": [
+      "storage",
+      "research",
+      "model_training",
+      "test"
+    ],
+    "reviewed_by": "repository fixture author; declaration for authored fixtures only",
+    "reviewed_at": "2026-10-21T00:00:00+00:00"
+  },
+  "teams": [
+    {
+      "source_team_id": "fiction-0-A",
+      "name": "Fictional 0 A",
+      "country": "GB-ENG",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-0-B",
+      "name": "Fictional 0 B",
+      "country": "GB-ENG",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-0-C",
+      "name": "Fictional 0 C",
+      "country": "GB-ENG",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-0-D",
+      "name": "Fictional 0 D",
+      "country": "GB-ENG",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-1-A",
+      "name": "Fictional 1 A",
+      "country": "ES",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-1-B",
+      "name": "Fictional 1 B",
+      "country": "ES",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-1-C",
+      "name": "Fictional 1 C",
+      "country": "ES",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-1-D",
+      "name": "Fictional 1 D",
+      "country": "ES",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-2-A",
+      "name": "Fictional 2 A",
+      "country": "IT",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-2-B",
+      "name": "Fictional 2 B",
+      "country": "IT",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-2-C",
+      "name": "Fictional 2 C",
+      "country": "IT",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-2-D",
+      "name": "Fictional 2 D",
+      "country": "IT",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-3-A",
+      "name": "Fictional 3 A",
+      "country": "DE",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-3-B",
+      "name": "Fictional 3 B",
+      "country": "DE",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-3-C",
+      "name": "Fictional 3 C",
+      "country": "DE",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-3-D",
+      "name": "Fictional 3 D",
+      "country": "DE",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-4-A",
+      "name": "Fictional 4 A",
+      "country": "FR",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-4-B",
+      "name": "Fictional 4 B",
+      "country": "FR",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-4-C",
+      "name": "Fictional 4 C",
+      "country": "FR",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ]
+    },
+    {
+      "source_team_id": "fiction-4-D",
+      "name": "Fictional 4 D",
+      "country": "FR",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ]
+    }
+  ],
+  "matches": [
+    {
+      "source_match_id": "history-0-0",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-01T14:00:00+00:00",
+      "home_id": "fiction-0-A",
+      "away_id": "fiction-0-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {
+        "home": {
+          "shots": 10,
+          "shots_on_target": 4
+        }
+      }
+    },
+    {
+      "source_match_id": "history-0-1",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-02T14:00:00+00:00",
+      "home_id": "fiction-0-A",
+      "away_id": "fiction-0-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-2",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-03T14:00:00+00:00",
+      "home_id": "fiction-0-A",
+      "away_id": "fiction-0-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-3",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-04T14:00:00+00:00",
+      "home_id": "fiction-0-A",
+      "away_id": "fiction-0-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-4",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-05T14:00:00+00:00",
+      "home_id": "fiction-0-A",
+      "away_id": "fiction-0-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-5",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-06T14:00:00+00:00",
+      "home_id": "fiction-0-A",
+      "away_id": "fiction-0-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-6",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-07T14:00:00+00:00",
+      "home_id": "fiction-0-D",
+      "away_id": "fiction-0-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-7",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-08T14:00:00+00:00",
+      "home_id": "fiction-0-D",
+      "away_id": "fiction-0-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-8",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-09T14:00:00+00:00",
+      "home_id": "fiction-0-D",
+      "away_id": "fiction-0-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-9",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-10T14:00:00+00:00",
+      "home_id": "fiction-0-D",
+      "away_id": "fiction-0-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-10",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-11T14:00:00+00:00",
+      "home_id": "fiction-0-D",
+      "away_id": "fiction-0-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-0-11",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-12T14:00:00+00:00",
+      "home_id": "fiction-0-D",
+      "away_id": "fiction-0-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "target-0",
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "kickoff_utc": "2026-05-10T15:00:00+00:00",
+      "home_id": "fiction-0-A",
+      "away_id": "fiction-0-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      }
+    },
+    {
+      "source_match_id": "history-1-0",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-01T14:00:00+00:00",
+      "home_id": "fiction-1-A",
+      "away_id": "fiction-1-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {
+        "home": {
+          "shots": 10,
+          "shots_on_target": 4
+        }
+      }
+    },
+    {
+      "source_match_id": "history-1-1",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-02T14:00:00+00:00",
+      "home_id": "fiction-1-A",
+      "away_id": "fiction-1-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-2",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-03T14:00:00+00:00",
+      "home_id": "fiction-1-A",
+      "away_id": "fiction-1-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-3",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-04T14:00:00+00:00",
+      "home_id": "fiction-1-A",
+      "away_id": "fiction-1-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-4",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-05T14:00:00+00:00",
+      "home_id": "fiction-1-A",
+      "away_id": "fiction-1-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-5",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-06T14:00:00+00:00",
+      "home_id": "fiction-1-A",
+      "away_id": "fiction-1-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-6",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-07T14:00:00+00:00",
+      "home_id": "fiction-1-D",
+      "away_id": "fiction-1-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-7",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-08T14:00:00+00:00",
+      "home_id": "fiction-1-D",
+      "away_id": "fiction-1-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-8",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-09T14:00:00+00:00",
+      "home_id": "fiction-1-D",
+      "away_id": "fiction-1-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-9",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-10T14:00:00+00:00",
+      "home_id": "fiction-1-D",
+      "away_id": "fiction-1-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-10",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-11T14:00:00+00:00",
+      "home_id": "fiction-1-D",
+      "away_id": "fiction-1-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-1-11",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-12T14:00:00+00:00",
+      "home_id": "fiction-1-D",
+      "away_id": "fiction-1-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "target-1",
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-05-10T15:00:00+00:00",
+      "home_id": "fiction-1-A",
+      "away_id": "fiction-1-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      }
+    },
+    {
+      "source_match_id": "history-2-0",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-01T14:00:00+00:00",
+      "home_id": "fiction-2-A",
+      "away_id": "fiction-2-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {
+        "home": {
+          "shots": 10,
+          "shots_on_target": 4
+        }
+      }
+    },
+    {
+      "source_match_id": "history-2-1",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-02T14:00:00+00:00",
+      "home_id": "fiction-2-A",
+      "away_id": "fiction-2-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-2",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-03T14:00:00+00:00",
+      "home_id": "fiction-2-A",
+      "away_id": "fiction-2-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-3",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-04T14:00:00+00:00",
+      "home_id": "fiction-2-A",
+      "away_id": "fiction-2-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-4",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-05T14:00:00+00:00",
+      "home_id": "fiction-2-A",
+      "away_id": "fiction-2-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-5",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-06T14:00:00+00:00",
+      "home_id": "fiction-2-A",
+      "away_id": "fiction-2-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-6",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-07T14:00:00+00:00",
+      "home_id": "fiction-2-D",
+      "away_id": "fiction-2-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-7",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-08T14:00:00+00:00",
+      "home_id": "fiction-2-D",
+      "away_id": "fiction-2-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-8",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-09T14:00:00+00:00",
+      "home_id": "fiction-2-D",
+      "away_id": "fiction-2-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-9",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-10T14:00:00+00:00",
+      "home_id": "fiction-2-D",
+      "away_id": "fiction-2-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-10",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-11T14:00:00+00:00",
+      "home_id": "fiction-2-D",
+      "away_id": "fiction-2-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-2-11",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-12T14:00:00+00:00",
+      "home_id": "fiction-2-D",
+      "away_id": "fiction-2-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "target-2",
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "kickoff_utc": "2026-05-10T15:00:00+00:00",
+      "home_id": "fiction-2-A",
+      "away_id": "fiction-2-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      }
+    },
+    {
+      "source_match_id": "history-3-0",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-01T14:00:00+00:00",
+      "home_id": "fiction-3-A",
+      "away_id": "fiction-3-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {
+        "home": {
+          "shots": 10,
+          "shots_on_target": 4
+        }
+      }
+    },
+    {
+      "source_match_id": "history-3-1",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-02T14:00:00+00:00",
+      "home_id": "fiction-3-A",
+      "away_id": "fiction-3-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-2",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-03T14:00:00+00:00",
+      "home_id": "fiction-3-A",
+      "away_id": "fiction-3-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-3",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-04T14:00:00+00:00",
+      "home_id": "fiction-3-A",
+      "away_id": "fiction-3-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-4",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-05T14:00:00+00:00",
+      "home_id": "fiction-3-A",
+      "away_id": "fiction-3-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-5",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-06T14:00:00+00:00",
+      "home_id": "fiction-3-A",
+      "away_id": "fiction-3-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-6",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-07T14:00:00+00:00",
+      "home_id": "fiction-3-D",
+      "away_id": "fiction-3-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-7",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-08T14:00:00+00:00",
+      "home_id": "fiction-3-D",
+      "away_id": "fiction-3-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-8",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-09T14:00:00+00:00",
+      "home_id": "fiction-3-D",
+      "away_id": "fiction-3-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-9",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-10T14:00:00+00:00",
+      "home_id": "fiction-3-D",
+      "away_id": "fiction-3-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-10",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-11T14:00:00+00:00",
+      "home_id": "fiction-3-D",
+      "away_id": "fiction-3-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-3-11",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-12T14:00:00+00:00",
+      "home_id": "fiction-3-D",
+      "away_id": "fiction-3-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "target-3",
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "kickoff_utc": "2026-05-10T15:00:00+00:00",
+      "home_id": "fiction-3-A",
+      "away_id": "fiction-3-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      }
+    },
+    {
+      "source_match_id": "history-4-0",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-01T14:00:00+00:00",
+      "home_id": "fiction-4-A",
+      "away_id": "fiction-4-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {
+        "home": {
+          "shots": 10,
+          "shots_on_target": 4
+        }
+      }
+    },
+    {
+      "source_match_id": "history-4-1",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-02T14:00:00+00:00",
+      "home_id": "fiction-4-A",
+      "away_id": "fiction-4-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-2",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-03T14:00:00+00:00",
+      "home_id": "fiction-4-A",
+      "away_id": "fiction-4-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-3",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-04T14:00:00+00:00",
+      "home_id": "fiction-4-A",
+      "away_id": "fiction-4-C",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-4",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-05T14:00:00+00:00",
+      "home_id": "fiction-4-A",
+      "away_id": "fiction-4-C",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-5",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-06T14:00:00+00:00",
+      "home_id": "fiction-4-A",
+      "away_id": "fiction-4-C",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.5,
+        "away": 0.9,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-6",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-07T14:00:00+00:00",
+      "home_id": "fiction-4-D",
+      "away_id": "fiction-4-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-7",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-08T14:00:00+00:00",
+      "home_id": "fiction-4-D",
+      "away_id": "fiction-4-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-8",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-09T14:00:00+00:00",
+      "home_id": "fiction-4-D",
+      "away_id": "fiction-4-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-9",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-10T14:00:00+00:00",
+      "home_id": "fiction-4-D",
+      "away_id": "fiction-4-B",
+      "result": {
+        "home_goals": 0,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-10",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-11T14:00:00+00:00",
+      "home_id": "fiction-4-D",
+      "away_id": "fiction-4-B",
+      "result": {
+        "home_goals": 1,
+        "away_goals": 0,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "history-4-11",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-04-12T14:00:00+00:00",
+      "home_id": "fiction-4-D",
+      "away_id": "fiction-4-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      },
+      "xg": {
+        "home": 1.2,
+        "away": 1.1,
+        "method": "fictional_test_method_v1",
+        "period": "FT90"
+      },
+      "stats": {}
+    },
+    {
+      "source_match_id": "target-4",
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "kickoff_utc": "2026-05-10T15:00:00+00:00",
+      "home_id": "fiction-4-A",
+      "away_id": "fiction-4-B",
+      "result": {
+        "home_goals": 2,
+        "away_goals": 1,
+        "period": "FT90",
+        "status": "final"
+      }
+    }
+  ],
+  "odds": [
+    {
+      "source_quote_id": "target-0-2.5-over",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-2.5-under",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-2.75-over",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-2.75-under",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-3-over",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-3-under",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-3.25-over",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-3.25-under",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-3.5-over",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-3.5-under",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-ah-home",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "home",
+      "line": -0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-0-ah-away",
+      "match_id": "target-0",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "away",
+      "line": 0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-2.5-over",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-2.5-under",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-2.75-over",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-2.75-under",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-3-over",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-3-under",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-3.25-over",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-3.25-under",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-3.5-over",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-3.5-under",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-ah-home",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "home",
+      "line": -0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-1-ah-away",
+      "match_id": "target-1",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "away",
+      "line": 0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-2.5-over",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-2.5-under",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-2.75-over",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-2.75-under",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-3-over",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-3-under",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-3.25-over",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-3.25-under",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-3.5-over",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-3.5-under",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-ah-home",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "home",
+      "line": -0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-2-ah-away",
+      "match_id": "target-2",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "away",
+      "line": 0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-2.5-over",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-2.5-under",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-2.75-over",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-2.75-under",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-3-over",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-3-under",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-3.25-over",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-3.25-under",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-3.5-over",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-3.5-under",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-ah-home",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "home",
+      "line": -0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-3-ah-away",
+      "match_id": "target-3",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "away",
+      "line": 0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-2.5-over",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-2.5-under",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-2.75-over",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-2.75-under",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 2.75,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-3-over",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-3-under",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-3.25-over",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-3.25-under",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-3.5-over",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "over",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-3.5-under",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Over/Under",
+      "side": "under",
+      "line": 3.5,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-ah-home",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "home",
+      "line": -0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    },
+    {
+      "source_quote_id": "target-4-ah-away",
+      "match_id": "target-4",
+      "bookmaker": "Fictional Test Book",
+      "market": "Asian Handicap",
+      "side": "away",
+      "line": 0.25,
+      "odds": 1.95,
+      "period": "FT90",
+      "captured_at": "2026-05-10T12:00:00+00:00"
+    }
+  ]
+}

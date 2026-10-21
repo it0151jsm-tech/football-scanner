@@ -1,0 +1,104 @@
+{
+  "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361",
+  "mode": "research",
+  "input_matches": 15,
+  "leagues": [
+    {
+      "league": "soccer_epl",
+      "season": "2025-26",
+      "input_matches": 3,
+      "converted_matches": 0,
+      "quarantined_matches": 3,
+      "reasons": {
+        "timezone_unverified": 3
+      },
+      "accepted_matches": 0
+    },
+    {
+      "league": "soccer_spain_la_liga",
+      "season": "2025-26",
+      "input_matches": 3,
+      "converted_matches": 0,
+      "quarantined_matches": 3,
+      "reasons": {
+        "timezone_unverified": 3
+      },
+      "accepted_matches": 0
+    },
+    {
+      "league": "soccer_italy_serie_a",
+      "season": "2025-26",
+      "input_matches": 3,
+      "converted_matches": 0,
+      "quarantined_matches": 3,
+      "reasons": {
+        "timezone_unverified": 3
+      },
+      "accepted_matches": 0
+    },
+    {
+      "league": "soccer_germany_bundesliga",
+      "season": "2025-26",
+      "input_matches": 3,
+      "converted_matches": 0,
+      "quarantined_matches": 3,
+      "reasons": {
+        "timezone_unverified": 3
+      },
+      "accepted_matches": 0
+    },
+    {
+      "league": "soccer_france_ligue_one",
+      "season": "2025-26",
+      "input_matches": 3,
+      "converted_matches": 0,
+      "quarantined_matches": 3,
+      "reasons": {
+        "timezone_unverified": 3
+      },
+      "accepted_matches": 0
+    }
+  ],
+  "accepted_match_provenance": [],
+  "missing": [
+    "verified kickoff timezone",
+    "xG/xGA",
+    "shots",
+    "AH/OU odds snapshots"
+  ],
+  "team_id_policy": "Adapter-local, league-scoped IDs from exact source names; not official provider IDs or cross-provider club identities",
+  "accuracy_claim_permitted": false,
+  "calibrated": false,
+  "accepted_matches": 0,
+  "accepted_teams": 30,
+  "quarantined_matches": 15,
+  "quarantine_reasons": {
+    "timezone_unverified": 15
+  },
+  "actual_ingested_at": "2026-10-21T10:16:09.268735+00:00",
+  "source_id": "openfootball-e6744429ee39-8f6c6141d9c2",
+  "foundation_import": {
+    "run_id": 1,
+    "duplicate_batch": false,
+    "accepted": 30,
+    "quarantined": 15,
+    "ingested_at": "2026-10-21T10:16:09.268735+00:00"
+  },
+  "source_recorded_at": "2026-10-21T10:08:28+00:00",
+  "sample_sha256": "8f6c6141d9c2ccebf12c71efce69cca52da10c17b28c9b2837add86766fc8053",
+  "rights_evidence_sha256": "de42cd007a42abc76299f0ae064b663ed34ff31da4e8803538f9e284bc9d054a",
+  "backup": {
+    "source": "/workspace/football-scanner/foundation-data/openfootball-pilot/football_foundation.db",
+    "destination": "/workspace/football-scanner/reports/openfootball-pilot/openfootball.foundation-backup.db",
+    "integrity": "ok",
+    "all_tables_equal": true
+  },
+  "restore": {
+    "source": "/workspace/football-scanner/reports/openfootball-pilot/openfootball.foundation-backup.db",
+    "destination": "/workspace/football-scanner/reports/openfootball-pilot/restored/football_foundation.db",
+    "integrity": "ok",
+    "all_tables_equal": true
+  },
+  "coverage_scope": "15 original Openfootball rows, 2025/26, first 3 per league; not full-season coverage",
+  "results_status": "source-reported results; not independently verified against an official league feed"
+}

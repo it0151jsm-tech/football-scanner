@@ -1,0 +1,29 @@
+{
+  "provider": "openfootball/football.json",
+  "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361",
+  "reviewed_at": "2026-10-21T10:08:28+00:00",
+  "reviewed_by": "Codex: public-domain declaration and CC0-1.0 source review; user-approved isolated research pilot",
+  "license": "CC0-1.0",
+  "rights_status": "verified",
+  "allowed_uses": [
+    "storage",
+    "research",
+    "model_training"
+  ],
+  "evidence": "fixtures/openfootball/evidence/rights.txt",
+  "evidence_sha256": "de42cd007a42abc76299f0ae064b663ed34ff31da4e8803538f9e284bc9d054a",
+  "sample_sha256": "8f6c6141d9c2ccebf12c71efce69cca52da10c17b28c9b2837add86766fc8053",
+  "registry_sha256": "404875fba9b3bade13a09fb3940c23105302043627368ec964197c61efde13cc",
+  "files": {
+    "README.md": {
+      "url": "https://github.com/openfootball/football.json/blob/e6744429ee395bc86f247348c6184bb08d4eb361/README.md",
+      "sha256": "aadc464ae476ba4d5467785f6f2be435d1a583f589f4b2b0617fdf86fc18e29c",
+      "git_blob_sha1": "81a70d4a7df63ec019c77b33e98fff8b51b4196a"
+    },
+    "LICENSE.md": {
+      "url": "https://github.com/openfootball/football.json/blob/e6744429ee395bc86f247348c6184bb08d4eb361/LICENSE.md",
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673",
+      "git_blob_sha1": "670154e3538863b2d9891fd5483160fbdfc89164"
+    }
+  }
+}
