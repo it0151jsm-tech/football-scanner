@@ -44,7 +44,7 @@ def import_file(path,db_path):
 
 
 def import_dataset(dataset,db_path):
-    require_keys(dataset,('manifest','teams','matches','odds'))
+    require_keys(dataset,('manifest','teams','matches','odds','quarantine'))
     manifest=dataset['manifest']
     require_keys(manifest,('source_id','name','dataset_kind','license','evidence','rights_status','allowed_uses','reviewed_by','reviewed_at','evidence_sha256'))
     if manifest.get('rights_status')!='verified' or not {'storage','research','model_training'}<=set(manifest.get('allowed_uses',[])):
@@ -60,9 +60,17 @@ def import_dataset(dataset,db_path):
         raise ValueError('permission review cannot be in the future')
     if manifest.get('dataset_kind') not in ('test_sample','research'):
         raise ValueError('explicit test_sample or research provenance required')
-    for key in ('teams','matches','odds'):
+    for key in ('teams','matches','odds','quarantine'):
         if not isinstance(dataset.get(key,[]),list):
             raise ValueError(key+' must be a list')
+    # Adapter rejections retain raw records without inventing mandatory match fields.
+    # Validate their envelope before registering a source or storing any payload.
+    for row in dataset.get('quarantine',[]):
+        require_keys(row,('entity','source_row_id','reason','payload'))
+        if row.get('entity')!='match' or not isinstance(row.get('payload'),dict):
+            raise ValueError('invalid adapter quarantine envelope')
+        for field in ('source_row_id','reason'):
+            text(row.get(field),field)
     source=manifest['source_id']; batch_hash=digest(dataset)
     accepted=quarantined=0
     with connect(db_path) as con:
@@ -239,6 +247,9 @@ def import_dataset(dataset,db_path):
             con.execute('INSERT INTO odds_snapshots(source_id,run_id,source_quote_id,match_id,bookmaker,market,side,line_quarters,odds,period,captured_at,observed_at,quality) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                         (source,run,qid,*values,now,'accepted'))
             return True
+        for row in dataset.get('quarantine',[]):
+            rejected('match',dict(source_match_id=row['source_row_id'],adapter_rejection=row['payload']),
+                     QualityError(row['reason']))
         process('team',dataset.get('teams',[]),team)
         process('match',dataset.get('matches',[]),match)
         process('quote',dataset.get('odds',[]),odds)

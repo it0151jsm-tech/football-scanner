@@ -8,6 +8,7 @@ from pathlib import Path
 from .ingest import import_file
 from .store import DEFAULT_DB, backup, initialize
 from .validate import quality_report, validate
+from .openfootball import import_openfootball
 
 
 def main(argv=None):
@@ -16,6 +17,7 @@ def main(argv=None):
     sub=parser.add_subparsers(dest='command',required=True)
     sub.add_parser('init')
     imp=sub.add_parser('import');imp.add_argument('file',type=Path)
+    of=sub.add_parser('import-openfootball');of.add_argument('file',type=Path)
     sub.add_parser('quality')
     val=sub.add_parser('validate');val.add_argument('--mode',choices=['observed','research','sample'],default='observed');val.add_argument('--source')
     b=sub.add_parser('backup');b.add_argument('destination',type=Path)
@@ -24,6 +26,7 @@ def main(argv=None):
     try:
         if args.command=='init': result={'database':str(initialize(args.db)),'status':'initialized'}
         elif args.command=='import': result=import_file(args.file,args.db)
+        elif args.command=='import-openfootball': result=import_openfootball(args.file,args.db)
         elif args.command=='quality': result=quality_report(args.db)
         elif args.command=='validate': result=validate(args.db,args.mode,args.source)
         elif args.command=='backup': result=backup(args.db,args.destination)

@@ -14,9 +14,11 @@ jobs:
       - run: python scripts/run_offline_tests.py
         env:
           DASHBOARD_SCREENSHOTS: test-artifacts
-      - run: python -m py_compile app.py mobile_dashboard.py market_recommendations.py history_data.py ou_market.py manual_quotes.py data_health.py scripts/check_e2_history.py scripts/audit_leagues.py foundation/*.py scripts/foundation_smoke.py scripts/run_offline_tests.py
+      - run: python -m py_compile app.py mobile_dashboard.py market_recommendations.py history_data.py ou_market.py manual_quotes.py data_health.py scripts/check_e2_history.py scripts/audit_leagues.py foundation/*.py scripts/foundation_smoke.py scripts/openfootball_pilot.py scripts/run_offline_tests.py
       - name: Offline foundation import, validation and restore
         run: python scripts/foundation_smoke.py
+      - name: Reviewed real Openfootball fixtures and backup restore (no downloads)
+        run: python scripts/openfootball_pilot.py --output test-artifacts/openfootball-real-pilot
       - uses: actions/upload-artifact@v4
         if: always()
         with:

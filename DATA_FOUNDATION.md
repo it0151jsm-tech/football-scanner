@@ -16,11 +16,18 @@ byte-for-byte unchanged. No production/bill database is read or migrated.
 - Offline replay of the unchanged xG estimator, Poisson, EV and settlement.
 - Quality, sample, research and observed-mode JSON reports; backup/restore checks.
 
-No real football dataset is shipped. The included CC0 dataset is **fictional test
+The original CC0 demonstration dataset is **fictional test
 input**: 20 fictional teams, 65 matches, 60 xG observations, 60 quotes, five
 competitions and five target fixtures. It does not establish actual league
 coverage, model accuracy, calibration, CLV or profitability. The 60 evaluated
 contracts are correlated observations on only five fictional target fixtures.
+
+An approved Openfootball pilot now ships 15 real CC0 source excerpts from
+2025/26, three per main league. All 15 are quarantined because clock times lack
+a verified timezone; accepted real matches remain zero. It uses its own database,
+provenance, exact-name registry and backup/restore reports. See
+[OPENFOOTBALL_PILOT.md](OPENFOOTBALL_PILOT.md); these excerpts are not model-ready
+history and do not change the fictional demonstration above.
 
 ## Run locally (from repository root)
 
@@ -101,8 +108,9 @@ so restore retains it. Unknown/unverified permissions, future review dates and
 missing/mismatched evidence reject the entire import before storing the payload.
 
 **`verified` is a supplied rights-review declaration, not legal permission
-obtained or independently authenticated by this program.** Only the authored
-CC0 fixture is reviewed/shipped here. Third-party input needs a genuine license
+obtained or independently authenticated by this program.** The authored CC0
+fixture and pinned Openfootball CC0 pilot are reviewed/shipped here.
+Other third-party input needs a genuine license
 review first. Permission for display/redistribution would need separate review
 before any app integration; this lab does not expose raw datasets publicly.
 

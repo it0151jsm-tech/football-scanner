@@ -1,0 +1,487 @@
+{
+  "provider": "openfootball/football.json",
+  "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361",
+  "id_policy": "Adapter-local, league-scoped IDs from exact source names; not official provider IDs or cross-provider club identities",
+  "teams": [
+    {
+      "source_team_id": "of-local-2d943178987926239b693ea6",
+      "name": "AFC Bournemouth",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/en.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-4caa713ccdc6b6937041400d",
+      "name": "Aston Villa FC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/en.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-39aa8792058f909e6a54b859",
+      "name": "Brighton & Hove Albion FC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/en.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-2d0ccde3650afa48995694fa",
+      "name": "Fulham FC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/en.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-5c09d267f256f77bdeafa193",
+      "name": "Liverpool FC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/en.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-eeffc6e951b5771ac18a466b",
+      "name": "Newcastle United FC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_epl",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/en.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-43300c8f9d172ff7cca7a5de",
+      "name": "FC Barcelona",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/es.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-520151f85e193f50222ae2fb",
+      "name": "Girona FC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/es.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-f11e8a85959507b3802e13c7",
+      "name": "RCD Mallorca",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/es.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-42c5513422ed6710bfd1faa1",
+      "name": "Rayo Vallecano de Madrid",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/es.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-c6b53bcf7c7f862a0e806106",
+      "name": "Real Oviedo",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/es.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-05f1697739d828c46154b0a8",
+      "name": "Villarreal CF",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_spain_la_liga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/es.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-3668ba998ddda7daf0a0bede",
+      "name": "AC Milan",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/it.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-700994f793b9c381bb8ebf91",
+      "name": "Genoa CFC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/it.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-73b742fdfa9fb4b086c1ddad",
+      "name": "SSC Napoli",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/it.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-db5de05a138215b2b16c0bf9",
+      "name": "US Cremonese",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/it.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-15afc06d5b2a78392d8bca69",
+      "name": "US Lecce",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/it.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-5ff8fdbd48408caa68a44fc8",
+      "name": "US Sassuolo Calcio",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_italy_serie_a",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/it.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-7f1bf7a189fd2c7ef14f9d8a",
+      "name": "Bayer 04 Leverkusen",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/de.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-0118186f5c473b03cde24048",
+      "name": "Eintracht Frankfurt",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/de.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-f12b80701fc58c43f6eb1582",
+      "name": "FC Bayern München",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/de.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-526f4771ec8e8d8045247740",
+      "name": "RB Leipzig",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/de.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-eaff8b30e2a1152d201531e3",
+      "name": "SV Werder Bremen",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/de.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-0c9974bce1618824556d1a7a",
+      "name": "TSG 1899 Hoffenheim",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_germany_bundesliga",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/de.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-661ac5d2608ebe1058ef592e",
+      "name": "AS Monaco FC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/fr.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-2179f827048ab5c927baf22e",
+      "name": "Le Havre AC",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/fr.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-f88aa72d8f8eb20aef58bc8d",
+      "name": "Olympique Lyonnais",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/fr.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-6229b41d196202d76446a47a",
+      "name": "Olympique de Marseille",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/fr.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-426bbcc452c4275ccb6edd74",
+      "name": "Racing Club de Lens",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/fr.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    },
+    {
+      "source_team_id": "of-local-0c9df881f7ff0304d9d33660",
+      "name": "Stade Rennais FC 1901",
+      "country": "unknown",
+      "category": "men_first",
+      "memberships": [
+        {
+          "league": "soccer_france_ligue_one",
+          "season": "2025-26"
+        }
+      ],
+      "evidence": {
+        "source_path": "2025-26/fr.1.json",
+        "source_commit": "e6744429ee395bc86f247348c6184bb08d4eb361"
+      }
+    }
+  ]
+}
