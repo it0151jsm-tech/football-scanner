@@ -1,3 +1,10 @@
+Data Foundation experimental branch: run `python scripts/run_offline_tests.py`
+and `python scripts/foundation_smoke.py`. All tests use local fixtures/mocks;
+CI no longer downloads E2/all-league data on each PR. New fixture rights,
+provenance, database isolation, replay modes and backup checks are documented in
+[DATA_FOUNDATION.md](DATA_FOUNDATION.md). The app/UI and baseline formulas remain
+pinned to PR #2. The following sections describe the retained regression suite.
+
 Run the offline regression suite and Streamlit smoke tests with:
 
 ```sh
