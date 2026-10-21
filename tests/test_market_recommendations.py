@@ -142,6 +142,7 @@ class MarketRecommendationsTests(unittest.TestCase):
             row = quote()
             row.pop("received_at", None)
             row.pop("source_updated_at", None)
+            row.pop("bookmaker_key", None)
             with self.f['db']() as con:
                 for market, book, point, at in [('Over/Under', 'OU Book', 2.5, '2026-10-20T11:00:00+07:00'),
                                                ('Asian Handicap', 'OU Book', 2.5, '2026-10-20T11:30:00+07:00'),

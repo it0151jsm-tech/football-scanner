@@ -12,6 +12,7 @@ from difflib import get_close_matches
 import pandas as pd
 import requests
 import streamlit as st
+from streamlit import cache_data
 
 # ============================================================
 # VALUE BET PRO — safer baseline
@@ -302,9 +303,9 @@ def save_picks(rows, snapshot_rows=None):
             # For recommendations (not actual placed bets), update the latest pending quote
             # instead of counting every rescan as a separate bet. Keep settled records unchanged.
             existing = con.execute("""SELECT id FROM picks
-                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point IS ? AND status!='ตรวจแล้ว'
+                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point IS ? AND bookmaker_key IS ? AND status!='ตรวจแล้ว'
                 ORDER BY id DESC LIMIT 1""",
-                (values["event_id"], values["market"], values["side"], values["bookmaker"], values["point"])).fetchone()
+                (values["event_id"], values["market"], values["side"], values["bookmaker"], values["point"],values["bookmaker_key"])).fetchone()
             # If damaged JSON hides references, append quotes rather than risk
             # overwriting an existing pick. The damaged bill itself stays intact.
             if existing and not uncertain_references and existing["id"] not in locked_ids:
@@ -324,9 +325,9 @@ def save_picks(rows, snapshot_rows=None):
             if r.get('received_at'):
                 duplicate = con.execute("""SELECT 1 FROM odds_snapshots
                     WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
-                    AND received_at=? AND source_updated_at IS ? LIMIT 1""", (
+                    AND received_at=? AND source_updated_at IS ? AND bookmaker_key IS ? LIMIT 1""", (
                     r.get('event_id'),r.get('market'),r.get('side'),r.get('bookmaker'),r.get('point'),r.get('odds'),
-                    r.get('received_at'),r.get('source_updated_at'))).fetchone()
+                    r.get('received_at'),r.get('source_updated_at'),r.get('bookmaker_key'))).fetchone()
             else:
                 duplicate = con.execute("""SELECT 1 FROM odds_snapshots
                     WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
@@ -646,6 +647,7 @@ def fetch_understat_history(sport_key):
             if rows:
                 season_frame = pd.DataFrame(rows)
                 season_frame["source_league"] = league_code
+                season_frame['_history_season'] = f'{season%100:02d}{(season+1)%100:02d}'
                 frames.append(season_frame)
         except Exception:
             # A blocked or changed upstream page means no model, not synthetic values.
@@ -1064,9 +1066,10 @@ def first_observed_quotes(event_ids):
             marks = ",".join("?" for _ in batch)
             rows = con.execute(f"""SELECT * FROM odds_snapshots WHERE id IN (
                 SELECT MIN(id) FROM odds_snapshots WHERE event_id IN ({marks})
-                GROUP BY event_id,market,side,bookmaker)""", batch).fetchall()
+                GROUP BY event_id,market,side,bookmaker,bookmaker_key)""", batch).fetchall()
             for row in rows:
-                out[(row["event_id"], row["market"], row["side"], row["bookmaker"])] = dict(row)
+                key=(row['event_id'],row['market'],row['side'],row['bookmaker'])
+                out[key+(row['bookmaker_key'],) if row['bookmaker_key'] else key]=dict(row)
     return out
 
 
@@ -1181,11 +1184,11 @@ def lookup_quote_snapshot(row):
         snapshot = con.execute("""SELECT id,captured_at,received_at,source_updated_at FROM odds_snapshots
             WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND point=? AND odds=?
               AND julianday(captured_at)<=julianday(?)
-              AND (? IS NULL OR (received_at=? AND source_updated_at IS ?))
+              AND (? IS NULL OR (received_at=? AND source_updated_at IS ?)) AND bookmaker_key IS ?
             ORDER BY julianday(captured_at) DESC,id DESC LIMIT 1""",
             (row.get("event_id"), row.get("market"), row.get("side"), row.get("bookmaker"),
              row.get("point"), row.get("odds"), row.get("received_at") or row.get("scanned_at") or "",
-             row.get("received_at"),row.get("received_at"),row.get("source_updated_at"))).fetchone()
+             row.get("received_at"),row.get("received_at"),row.get("source_updated_at"),row.get("bookmaker_key"))).fetchone()
     return dict(snapshot) if snapshot else None
 
 
@@ -1298,6 +1301,8 @@ def latest_saved_quotes(df):
     """OU retains each actual line; AH keeps its existing latest-side policy."""
     latest = df.sort_values("id",ascending=False)
     keys = ["event_id","market","side","bookmaker"]
+    if 'bookmaker_key' in df.columns:
+        keys.append('bookmaker_key')
     ou = latest[latest["market"] == "Over/Under"].drop_duplicates(subset=keys+["point"],keep="first")
     other = latest[latest["market"] != "Over/Under"].drop_duplicates(subset=keys,keep="first")
     return pd.concat([other,ou],ignore_index=True,sort=False)
@@ -1319,44 +1324,207 @@ def analysis_display_rows(df):
     return view
 
 
+def domestic_league_definitions():
+    """Existing supported sources only; source selection is roster evidence, not nationality."""
+    return {key: {'csv_code': LEAGUES[key][1], 'label': LEAGUES[key][0], 'understat': UNDERSTAT_LEAGUES[key]}
+            for key in ('soccer_epl','soccer_spain_la_liga','soccer_italy_serie_a','soccer_germany_bundesliga','soccer_france_ligue_one')}
+
+
+@cache_data(ttl=21600, show_spinner=False)
+def fetch_domestic_rosters(season):
+    """One current-season CSV per supported league, cached; only called on explicit cup scan."""
+    from history_data import load_history
+    return {key: load_history(info['csv_code'], requests.get, timeout=HISTORY_TIMEOUT, seasons=(season,))
+            for key, info in domestic_league_definitions().items()}
+
+
+def load_cup_sources(matches, now, hours_limit):
+    from domestic_data import resolve_domestic_sources
+    from readiness import instant
+    packs, rosters, scores, xgs = {}, {}, {}, {}
+    definitions = domestic_league_definitions()
+    for match in matches:
+        kickoff = instant(match.get('commence_time'))
+        if kickoff is None or not now < kickoff <= now+timedelta(hours=min(hours_limit,24)):
+            continue
+        year=kickoff.year if kickoff.month>=7 else kickoff.year-1
+        season=f'{year%100:02d}{(year+1)%100:02d}'
+        if season not in rosters:
+            rosters[season]=fetch_domestic_rosters(season)
+        names=[match.get('home_team',''),match.get('away_team','')]
+        resolved=resolve_domestic_sources(names,rosters[season],kickoff,definitions)
+        for name in names:
+            source=resolved[name]
+            if source['status']!='matched':continue
+            key=source['sport_key']
+            if key not in scores:
+                try:
+                    scores[key]=fetch_history(source['csv_code'])
+                except Exception as exc:
+                    scores[key]=pd.DataFrame()
+                    scores[key].attrs['history_diagnostics']={'status':'download_error','error':type(exc).__name__}
+                try:
+                    xgs[key]=fetch_understat_history(key)
+                except Exception as exc:
+                    xgs[key]=pd.DataFrame()
+                    xgs[key].attrs['history_diagnostics']={'status':'download_error','error':type(exc).__name__}
+        identity=(match.get('id'),*names,kickoff.isoformat())
+        packs[identity]={'home':resolved[names[0]],'away':resolved[names[1]],'scores':scores,'xgs':xgs}
+    return packs
+
+
+def cup_fixture_data(pack, home, away, kickoff):
+    """Route evidence only. Never pool domestic league baselines into a cup model."""
+    from domestic_data import build_domestic_history, safe_match_team
+    score_frame=build_domestic_history(pack['home'],pack['away'],pack['scores'])
+    for side in ('home','away'):
+        pack[side]=score_frame.attrs['domestic_sources'][side]
+        report=score_frame.attrs.get('domestic_source_reports',{}).get(pack[side].get('sport_key'),{})
+        pack[side]['history_status']=report.get('status')
+        pack[side]['history_diagnostics']=report
+    xg_sources={};xg_resolutions={};statuses={}
+    for side in ('home','away'):
+        resolution=dict(pack[side]);key=resolution.get('sport_key')
+        frame=pack['xgs'].get(key,pd.DataFrame())
+        reason=resolution.get('reason','ไม่ทราบแหล่งข้อมูล')
+        if resolution['status']=='matched':
+            if frame.empty:
+                reason='Understat โหลดไม่ได้/ไม่มี xG จริงในลีกที่ยืนยัน — ไม่ใช้ประตูจริงทดแทน'
+                resolution['status']='source_error'
+            else:
+                required={'Date_dt','HomeTeam','AwayTeam','FTHG','FTAG','xG_home','xG_away'}
+                if not required.issubset(frame.columns):
+                    resolution['status']='source_error';reason='Understat ขาดคอลัมน์ xG/xGA จริง'
+                else:
+                    candidate,method=safe_match_team(resolution['input_name'],list(set(frame.HomeTeam)|set(frame.AwayTeam)))
+                    if candidate is None:
+                        resolution['status']='unmatched';reason='จับคู่ชื่อกับ Understat ในลีกที่ยืนยันไม่ได้ — ไม่เดาชื่อทีม'
+                    else:
+                        clean=frame.copy()
+                        for col in ('xG_home','xG_away'):
+                            clean[col]=pd.to_numeric(clean[col],errors='coerce')
+                        clean=clean[clean[['xG_home','xG_away']].notna().all(axis=1) &
+                                    (clean[['xG_home','xG_away']]>=0).all(axis=1) &
+                                    (clean[['xG_home','xG_away']]<float('inf')).all(axis=1)]
+                        resolution.update(csv_name=candidate,mapping=method)
+                        xg_sources[key]=clean
+                        reason='Understat xG จริงจาก '+str(key)
+        resolution['reason']=reason;xg_resolutions[side]=resolution;statuses[side]=reason
+    xg_frame=build_domestic_history(xg_resolutions['home'],xg_resolutions['away'],xg_sources)
+    evidence=actual_xg_evidence(xg_frame,home,away,kickoff)
+    for side in ('home','away'):
+        if evidence.get(side) is None and xg_resolutions[side]['status']=='matched':
+            statuses[side]='xG เก่าเกิน 120 วัน หรือไม่มีเกมตามสนามก่อนวันแข่งขัน'
+        value=evidence.get(side)
+        if isinstance(value,dict):
+            value.update(source='Understat',sport_key=pack[side].get('sport_key'),source_name=xg_resolutions[side].get('csv_name'),scope='domestic_league_context')
+    evidence['status']='xG ลีกในประเทศเพื่อประกอบถ้วยเท่านั้น · เจ้าบ้าน: '+statuses['home']+' · ทีมเยือน: '+statuses['away']
+    evidence['diagnostics']=xg_resolutions
+    return score_frame,xg_frame,evidence
+
+
+def annotate_cup_profile(profile, resolution, xg):
+    """Populate existing diagnostic/summary fields without changing any UI template."""
+    diagnostic=dict(profile.get('diagnostics',{}))
+    prefix='ฟอร์มลีกในประเทศ '+str(resolution.get('sport_key') or '')+' · '+str(resolution.get('source_season') or '')+' · '
+    reason=resolution.get('reason','ไม่มีแหล่งข้อมูลที่ยืนยัน')
+    failed=resolution.get('history_status') not in (None,'ok')
+    if failed:
+        reason='โหลดข้อมูลไม่สำเร็จ/ประวัติใช้ไม่ได้: '+str(resolution['history_status'])+' · '+reason
+    diagnostic.update(domestic_source=resolution,scope='domestic_league_context')
+    diagnostic['message']=prefix+(str(diagnostic.get('message','')) if resolution.get('status')=='matched' and not failed else reason)
+    profile['diagnostics']=diagnostic
+    profile['summary']=prefix+str(profile.get('summary',''))+' · '+reason
+    return profile
+
+
+def cup_model_status(xg):
+    present=any(xg.get(side) is not None for side in ('home','away'))
+    return ('มี xG ลีกในประเทศจริง แต่ยังไม่มีโมเดล UCL/ถ้วยข้ามลีกที่ตรวจสอบแล้ว — ไม่คำนวณ EV ถ้วยจากการรวมลีก'
+            if present else 'ข้อมูล xG ลีกในประเทศไม่พร้อม และยังไม่มีโมเดล UCL/ถ้วยข้ามลีกที่ตรวจสอบแล้ว — ไม่สร้าง EV ทดแทน')
+
+
+def cup_health(packs, label, key, now):
+    teams={}
+    for pack in packs.values():
+        for side in ('home','away'):
+            r=pack[side];name=r['input_name']
+            from data_health import check_source
+            frame=pack['xgs'].get(r.get('sport_key'))
+            xg=check_source(frame,name,r['status']=='matched',now)
+            if r['status']=='matched' and frame is not None and not frame.empty:
+                from domestic_data import safe_match_team
+                mapped,method=safe_match_team(name,set(frame.HomeTeam)|set(frame.AwayTeam))
+                if mapped is None:
+                    xg.update(status='unmatched',message='จับคู่ชื่อกับ Understat ไม่ผ่านการยืนยัน',matched_name=None,method=method)
+            csv=dict(status=r['status'],message='domestic context: '+r['reason'],matched_name=r.get('csv_name'),sport_key=r.get('sport_key'),season=r.get('source_season'))
+            xg.update(scope='domestic_context',sport_key=r.get('sport_key'))
+            teams[name]={'api_name':name,'csv':csv,'understat':xg}
+    values=list(teams.values())
+    return dict(key=key,league=label,checked_at=now.isoformat(),teams_checked=len(values),
+                teams_with_problems=sum(any(t[s]['status']!='matched' for s in ('csv','understat')) for t in values),teams=values,
+                csv_supported=False,understat_supported=False,
+                scope='ไม่มีแหล่ง UCL โดยตรง; ตรวจฟอร์ม/xG ลีกในประเทศของแต่ละทีมจาก 5 ลีกที่รองรับเท่านั้น ไม่ใช่โมเดล EV ถ้วย')
+
+
 # -------------------- SCAN --------------------
 def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
     matches, remaining, used = fetch_odds(sport_key, regions, api_key)
     receipt = getattr(matches, 'received_at', None) or (matches[0].get('_received_at') if matches else None)
     record_api_receipt(sport_key, receipt)
-    history = fetch_understat_history(sport_key)
-    score_history = fetch_history(csv_code)
-    domestic_context = fetch_understat_all_history() if sport_key in EUROPEAN_CUPS else pd.DataFrame()
     now = datetime.now(UTC)
+    is_cup = sport_key in EUROPEAN_CUPS
+    cup_packs = load_cup_sources(matches,now,hours_limit) if is_cup else {}
+    history = pd.DataFrame() if is_cup else fetch_understat_history(sport_key)
+    score_history = pd.DataFrame() if is_cup else fetch_history(csv_code)
     from data_health import observe_league
     health = observe_league(
         sport_key, league_name, csv_code, sport_key in UNDERSTAT_LEAGUES, score_history, history, matches, now)
+    if is_cup:
+        health=cup_health(cup_packs,league_name,sport_key,now)
     record_data_health(sport_key, health)
     target = now + timedelta(hours=min(hours_limit, 24))
     rows, snapshot_rows = [], []
     first_prices = first_observed_quotes([m.get("id", "") for m in matches])
     for match in matches:
         try:
-            kickoff = datetime.fromisoformat(match["commence_time"].replace("Z", "+00:00")).astimezone(UTC)
+            from readiness import instant
+            kickoff = instant(match.get('commence_time'))
+            if kickoff is None:
+                continue
         except Exception:
             continue
         if not (now <= kickoff <= target):
             continue
         home, away = match.get("home_team", ""), match.get("away_team", "")
         kickoff_th = kickoff.astimezone(TH_TZ)
+        if is_cup:
+            identity=(match.get('id'),home,away,kickoff.isoformat())
+            pack=cup_packs.get(identity)
+            if pack is None:
+                continue
+            score_history,domestic_context,xg_evidence=cup_fixture_data(pack,home,away,kickoff)
         h2h = get_h2h_history(score_history, home, away, kickoff, limit=5)
         metrics = estimate_goals(history, home, away, kickoff) if not history.empty else None
         context = estimate_domestic_context(domestic_context, home, away, kickoff) if sport_key in EUROPEAN_CUPS else {}
-        if sport_key in EUROPEAN_CUPS:
+        if is_cup:
+            for side in ('home','away'):
+                if xg_evidence.get(side) is None:
+                    context[side+'_context_xg']=None
+                    context[side+'_context_xga']=None
+                    context[side+'_context_matches']=0
+            context['context_status']=xg_evidence['status']
             metrics = None
         matrix = score_matrix(metrics["home_lambda"], metrics["away_lambda"]) if metrics else None
         home_profile = team_form_profile(score_history, home, kickoff, venue="home")
         away_profile = team_form_profile(score_history, away, kickoff, venue="away")
         opponents = {"home": opponent_quality(score_history, home, kickoff, "home"),
                      "away": opponent_quality(score_history, away, kickoff, "away")}
-        xg_evidence = actual_xg_evidence(domestic_context if sport_key in EUROPEAN_CUPS else history, home, away, kickoff)
-        if sport_key in EUROPEAN_CUPS:
-            xg_evidence["status"] += " — ลีกในประเทศเพื่อประกอบถ้วยเท่านั้น"
+        if not is_cup:
+            xg_evidence = actual_xg_evidence(history,home,away,kickoff)
+        else:
+            annotate_cup_profile(home_profile,pack['home'],xg_evidence)
+            annotate_cup_profile(away_profile,pack['away'],xg_evidence)
         rows_before_match = len(rows)
         for bm in match.get("bookmakers", []):
             book_name = bm.get("title", "Unknown")
@@ -1399,24 +1567,27 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     form5 = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=5)
                     form10 = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=10)
                     formseason = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=None)
-                    price = price_evidence(first_prices.get((match.get("id", ""), market_label, side, book_name)),
+                    price = price_evidence(first_prices.get((match.get("id", ""),market_label,side,book_name,provenance["bookmaker_key"]) if provenance["bookmaker_key"] else (match.get("id", ""),market_label,side,book_name)),
                                            line, odds, provenance["received_at"] or now.astimezone(TH_TZ).isoformat(timespec="seconds"))
                     analysis_a = system_a_analysis(form5, form10, formseason, home_profile, away_profile,
                                                    opponents, xg_evidence, price)
                     ou_line = line if m_key == "totals" else 2.5
                     analysis_b = system_b_analysis(metrics, matrix, eval_res, split_line(ou_line), ou_line)
+                    if is_cup:
+                        analysis_a['domestic_sources']={'home':pack['home'],'away':pack['away']}
+                        analysis_b.update(status=cup_model_status(xg_evidence),scope='domestic_context_only',domestic_xg_available=any(xg_evidence.get(s) is not None for s in ('home','away')))
                     confidence = analysis_a["score"]
                     confidence_label, source_label = analysis_a["result"], "ระบบ A: หลักฐานเท่านั้น"
                     ev_pct = eval_res.get("ev_pct") if eval_res else None
                     recommendation = choose_recommendation(confidence, ev_pct, odds_in_range, confidence is not None)
-                    reason_parts = [f"รับข้อมูล UTC: {provenance['received_at'] or 'ไม่ทราบ'} · เจ้ามืออัปเดตตลาด: {provenance['source_updated_at'] or 'ไม่ทราบ'}"]
+                    reason_parts = ([cup_model_status(xg_evidence)] if is_cup else []) + [f"รับข้อมูล UTC: {provenance['received_at'] or 'ไม่ทราบ'} · เจ้ามืออัปเดตตลาด: {provenance['source_updated_at'] or 'ไม่ทราบ'}"]
                     if metrics:
                         reason_parts.append(f"xG คาดการณ์ {metrics['home_lambda']:.2f}-{metrics['away_lambda']:.2f}")
                     reason_parts.append(f"ผลย้อนหลังเทียบเส้น: 5 นัด {form5.get('form_rate') if form5.get('form_rate') is not None else 'n/a'}%, 10 นัด {form10.get('form_rate') if form10.get('form_rate') is not None else 'n/a'}%, ช่วงข้อมูลทั้งหมด {formseason.get('form_rate') if formseason.get('form_rate') is not None else 'n/a'}%")
                     if ev_pct is not None:
                         reason_parts.append(f"EV {ev_pct:+.2f}%")
                     else:
-                        reason_parts.append("ยังคำนวณ EV ไม่ได้ เพราะไม่มี xG ที่รองรับเพียงพอ")
+                        reason_parts.append(cup_model_status(xg_evidence) if is_cup else "ยังคำนวณ EV ไม่ได้ เพราะไม่มี xG ที่รองรับเพียงพอ")
                     if not odds_in_range:
                         reason_parts.append(f"ค่าน้ำ {odds:.2f} อยู่นอกช่วง {min_odds:.2f}-{max_odds:.2f}")
                     rows.append({
@@ -1436,7 +1607,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         "away_context_xg": context.get("away_context_xg"), "away_context_xga": context.get("away_context_xga"),
                         "home_context_matches": context.get("home_context_matches", 0), "away_context_matches": context.get("away_context_matches", 0),
                         "context_status": context.get("context_status", ""),
-                        "model_status": ("ถ้วยยุโรป: xG ลีกในประเทศเป็นข้อมูลประกอบเท่านั้น — ไม่มี EV เฉพาะถ้วย" if sport_key in EUROPEAN_CUPS else
+                        "model_status": (cup_model_status(xg_evidence) if is_cup else
                             ("Poisson จาก xG/xGA จริง (Understat)" if metrics else
                             ("ลีกนี้ไม่มี xG จากแหล่งที่ตั้งไว้ — ใช้ฟอร์มอย่างระมัดระวัง" if sport_key not in UNDERSTAT_LEAGUES else "xG ย้อนหลังไม่พอ/แหล่งข้อมูลไม่พร้อม — ใช้ฟอร์มอย่างระมัดระวัง"))),
                         "ev_pct": ev_pct, "p_win": eval_res.get("p_win") if eval_res else None,
@@ -1756,14 +1927,14 @@ with tab_history:
     st.subheader("📈 ประวัติราคาและตรวจผล")
     with db() as con:
         keys = pd.read_sql_query("""SELECT event_id, MAX(match_name) AS match_name, market, side, bookmaker,
-            MAX(captured_at) AS last_seen FROM odds_snapshots
-            GROUP BY event_id, market, side, bookmaker
+            MAX(captured_at) AS last_seen,bookmaker_key FROM odds_snapshots
+            GROUP BY event_id, market, side, bookmaker,bookmaker_key
             ORDER BY last_seen DESC LIMIT 500""", con)
         movement_rows = []
         for _, keyrow in keys.iterrows():
             rows = con.execute("""SELECT point, odds, captured_at FROM odds_snapshots
-                WHERE event_id=? AND market=? AND side=? AND bookmaker=?
-                ORDER BY julianday(captured_at) ASC, id ASC""", (keyrow["event_id"], keyrow["market"], keyrow["side"], keyrow["bookmaker"])).fetchall()
+                WHERE event_id=? AND market=? AND side=? AND bookmaker=? AND bookmaker_key IS ?
+                ORDER BY julianday(captured_at) ASC, id ASC""", (keyrow["event_id"],keyrow["market"],keyrow["side"],keyrow["bookmaker"],keyrow["bookmaker_key"])).fetchall()
             if not rows:
                 continue
             first, latest = rows[0], rows[-1]
