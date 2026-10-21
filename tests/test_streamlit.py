@@ -175,7 +175,7 @@ class StreamlitSmokeTests(unittest.TestCase):
         for row in [ah, ou, other, under]:
             row['kickoff_utc'] = (datetime.now(timezone.utc)+timedelta(hours=5)).replace(second=0,microsecond=0).isoformat()
         f['save_picks']([ah, ou, other, under], [dict(event_id='event', market=ou['market'], side=ou['side'],
-                                            point=ou['point'], odds=ou['odds'], bookmaker=ou['bookmaker'])])
+                                            point=ou['point'], odds=ou['odds'], bookmaker=ou['bookmaker'], bookmaker_key=ou['bookmaker_key'])])
         with f['db']() as con:
             before = {table: [tuple(r) for r in con.execute('SELECT * FROM '+table)] for table in ['picks', 'slips', 'odds_snapshots']}
         with patch('requests.get', side_effect=AssertionError('views must remain offline')) as get:

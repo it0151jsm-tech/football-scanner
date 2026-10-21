@@ -55,7 +55,7 @@ def assess(row, choose_c):
     sample = max([obj(a.get(k)).get('form_sample', 0) if finite(obj(a.get(k)).get('form_sample', 0)) else 0 for k in ('form5', 'form10')])
     support = finite(score) and score >= 55 and sample >= 5
     valid = model_ready(b)
-    reason = '' if valid else 'ข้อมูลโมเดลไม่เพียงพอ หรือยังไม่มีผล B ที่บันทึกไว้'
+    reason = '' if valid else (b.get('status') or 'ข้อมูลโมเดลไม่เพียงพอ หรือยังไม่มีผล B ที่บันทึกไว้')
     # A model reference of 2.5 from an AH row is never a market OU quote.
     if row['market'] == 'Over/Under' and (not finite(b.get('ou_line')) or abs(b['ou_line'] - row['point']) > 1e-9):
         valid, reason = False, 'ผล OU ไม่ตรงเส้นตลาดที่บันทึกไว้ — ไม่ใช้เปอร์เซ็นต์จากเส้นอื่น'
@@ -131,7 +131,7 @@ def group_fixture_recommendations(rows, choose_c):
                     continue
                 if not row.get('bookmaker') or not finite(row.get('point')) or not finite(row.get('odds')) or row['odds'] <= 1:
                     continue
-                key = (row['side'], row['bookmaker'], row['point']) if market == 'Over/Under' else (row['side'], row['bookmaker'])
+                key = (row['side'],row.get('bookmaker_key'),row['bookmaker'],row['point']) if market == 'Over/Under' else (row['side'],row.get('bookmaker_key'),row['bookmaker'])
                 if key not in latest or (timestamp(row), row_id(row)) > (timestamp(latest[key]), row_id(latest[key])):
                     latest[key] = row
             choices = sorted((assess(row, choose_c) for row in latest.values()), key=lambda item: item['rank'], reverse=True)
@@ -141,9 +141,9 @@ def group_fixture_recommendations(rows, choose_c):
                 from ou_market import select_main_line, compare_sides
                 newest = {}
                 for entry in choices:
-                    book = entry['row']['bookmaker']
+                    book = (entry['row'].get('bookmaker_key'),entry['row']['bookmaker'])
                     newest[book] = max(newest.get(book,0),timestamp(entry['row']))
-                choices = [e for e in choices if timestamp(e['row']) == newest[e['row']['bookmaker']]]
+                choices = [e for e in choices if timestamp(e['row']) == newest[(e['row'].get('bookmaker_key'),e['row']['bookmaker'])]]
                 main = select_main_line(choices)
                 chosen,side_reason = compare_sides(main)
                 # Keep a saved row only as a presentation anchor, never as an
