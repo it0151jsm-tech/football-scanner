@@ -44,7 +44,10 @@ def import_file(path,db_path):
 
 
 def import_dataset(dataset,db_path):
-    require_keys(dataset,('manifest','teams','matches','odds','quarantine'))
+    require_keys(dataset,('manifest','teams','matches','odds','quarantine','provenance'))
+    # Immutable adapter evidence is stored in raw_json only, never used as a clock override.
+    if 'provenance' in dataset and not isinstance(dataset['provenance'],dict):
+        raise ValueError('adapter provenance must be an object')
     manifest=dataset['manifest']
     require_keys(manifest,('source_id','name','dataset_kind','license','evidence','rights_status','allowed_uses','reviewed_by','reviewed_at','evidence_sha256'))
     if manifest.get('rights_status')!='verified' or not {'storage','research','model_training'}<=set(manifest.get('allowed_uses',[])):

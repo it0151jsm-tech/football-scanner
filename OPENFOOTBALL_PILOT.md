@@ -1,5 +1,9 @@
 # Openfootball real-data pilot — 2026-10-21
 
+This document preserves the **original quarantine-only checkpoint**. The later
+[timezone revision](TIMEZONE_REVISION.md) confirms 15/15 using explicit offsets
+in primary full records, while retaining all original quarantine rows unchanged.
+
 **15 real source records retained in quarantine; 0 accepted matches; 30 exact-name
 team entries.** All 15 dates have naive clock times without an evidenced timezone.
 No xG, shots, odds, forecasts or accuracy claims. This is a backend-only pilot;

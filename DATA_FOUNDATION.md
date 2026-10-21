@@ -22,12 +22,15 @@ competitions and five target fixtures. It does not establish actual league
 coverage, model accuracy, calibration, CLV or profitability. The 60 evaluated
 contracts are correlated observations on only five fictional target fixtures.
 
-An approved Openfootball pilot now ships 15 real CC0 source excerpts from
-2025/26, three per main league. All 15 are quarantined because clock times lack
-a verified timezone; accepted real matches remain zero. It uses its own database,
-provenance, exact-name registry and backup/restore reports. See
-[OPENFOOTBALL_PILOT.md](OPENFOOTBALL_PILOT.md); these excerpts are not model-ready
-history and do not change the fictional demonstration above.
+An approved Openfootball pilot ships 15 real CC0 source excerpts from 2025/26,
+three per main league. The initial batch quarantined all 15 naive clock times.
+A later append-only timezone revision uses explicit per-game offsets in licensed
+primary full records: 15 accepted result fixtures, zero unresolved, all 15 old
+quarantine rows retained unchanged. It uses its own database, exact-name registry,
+evidence and backup/restore. See [OPENFOOTBALL_PILOT.md](OPENFOOTBALL_PILOT.md)
+and [TIMEZONE_REVISION.md](TIMEZONE_REVISION.md). No xG/odds/form history is
+filled; these are still insufficient for model validation and do not change the
+fictional demonstration above.
 
 ## Run locally (from repository root)
 

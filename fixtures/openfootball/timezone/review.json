@@ -1,0 +1,13 @@
+{
+  "mode": "research",
+  "rights_status": "verified",
+  "verification_basis": "provider_explicit_per_match_offset",
+  "independent_provider_verification": false,
+  "reviewed_by": "Codex: user-authorized original 15-game timezone resolution; primary explicit offsets and CC0 source review",
+  "reviewed_at": "2026-10-21T11:10:07.672437+00:00",
+  "files": {
+    "collection.json": "1c063ae4870c91d8ab79da6b72b95257d0fc23f3941002e163b65dc90249e06f",
+    "identity-map.json": "38badb6e1430133fe95f5c155821cbd46580a59272e5e30ca663954ee9860576",
+    "upstream-rights.json": "83642f2fa320a00d0ec2ccee92d9cc5a7ea7a43079f36b64e594a33c9669813c"
+  }
+}

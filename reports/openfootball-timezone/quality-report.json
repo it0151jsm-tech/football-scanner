@@ -1,0 +1,152 @@
+{
+  "generated_at": "2026-10-21T11:13:18.032293+00:00",
+  "sources": [
+    {
+      "id": "openfootball-e6744429ee39-8f6c6141d9c2",
+      "dataset_kind": "research",
+      "rights_status": "verified",
+      "registered_at": "2026-10-21T10:16:09.268735+00:00"
+    }
+  ],
+  "leagues": [
+    {
+      "league": "soccer_epl",
+      "matches": 3,
+      "matches_with_xg": 0,
+      "last_xg_match": null,
+      "stale_for_today": true,
+      "scope": "accepted local imports only"
+    },
+    {
+      "league": "soccer_spain_la_liga",
+      "matches": 3,
+      "matches_with_xg": 0,
+      "last_xg_match": null,
+      "stale_for_today": true,
+      "scope": "accepted local imports only"
+    },
+    {
+      "league": "soccer_italy_serie_a",
+      "matches": 3,
+      "matches_with_xg": 0,
+      "last_xg_match": null,
+      "stale_for_today": true,
+      "scope": "accepted local imports only"
+    },
+    {
+      "league": "soccer_germany_bundesliga",
+      "matches": 3,
+      "matches_with_xg": 0,
+      "last_xg_match": null,
+      "stale_for_today": true,
+      "scope": "accepted local imports only"
+    },
+    {
+      "league": "soccer_france_ligue_one",
+      "matches": 3,
+      "matches_with_xg": 0,
+      "last_xg_match": null,
+      "stale_for_today": true,
+      "scope": "accepted local imports only"
+    }
+  ],
+  "permission_note": "verified means supplied rights attestation; no provider permission inferred or obtained by this tool",
+  "real_matches": 15,
+  "quarantine": [
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/en.1.json#matches[0]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/en.1.json#matches[1]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/en.1.json#matches[2]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/es.1.json#matches[0]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/es.1.json#matches[1]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/es.1.json#matches[2]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/it.1.json#matches[0]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/it.1.json#matches[1]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/it.1.json#matches[2]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/de.1.json#matches[0]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/de.1.json#matches[1]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/de.1.json#matches[2]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/fr.1.json#matches[0]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/fr.1.json#matches[1]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    },
+    {
+      "entity": "match",
+      "source_row_id": "2025-26/fr.1.json#matches[2]",
+      "reason": "timezone_unverified: clock time supplied without an evidenced UTC offset",
+      "observed_at": "2026-10-21T10:16:09.268735+00:00"
+    }
+  ],
+  "missing": [
+    "No verified provider collection enabled",
+    "No real-data coverage claim",
+    "No automatic team alias approval"
+  ]
+}

@@ -1,0 +1,125 @@
+{
+  "reviewed_by": "Codex: exact per-fixture name correspondences checked with league, season, date and FT score; no fuzzy matching",
+  "matches": [
+    {
+      "target_ref": "2025-26/en.1.json#matches[0]",
+      "original_home": "Liverpool FC",
+      "original_away": "AFC Bournemouth",
+      "evidence_home": "Liverpool",
+      "evidence_away": "Bournemouth",
+      "source_line": 3
+    },
+    {
+      "target_ref": "2025-26/en.1.json#matches[1]",
+      "original_home": "Aston Villa FC",
+      "original_away": "Newcastle United FC",
+      "evidence_home": "Aston Villa",
+      "evidence_away": "Newcastle United",
+      "source_line": 78
+    },
+    {
+      "target_ref": "2025-26/en.1.json#matches[2]",
+      "original_home": "Brighton & Hove Albion FC",
+      "original_away": "Fulham FC",
+      "evidence_home": "Brighton & Hove Albion",
+      "evidence_away": "Fulham",
+      "source_line": 192
+    },
+    {
+      "target_ref": "2025-26/de.1.json#matches[0]",
+      "original_home": "FC Bayern München",
+      "original_away": "RB Leipzig",
+      "evidence_home": "FC Bayern München",
+      "evidence_away": "RB Leipzig",
+      "source_line": 3
+    },
+    {
+      "target_ref": "2025-26/de.1.json#matches[1]",
+      "original_home": "Eintracht Frankfurt",
+      "original_away": "SV Werder Bremen",
+      "evidence_home": "Eintracht Frankfurt",
+      "evidence_away": "Werder Bremen",
+      "source_line": 156
+    },
+    {
+      "target_ref": "2025-26/de.1.json#matches[2]",
+      "original_home": "Bayer 04 Leverkusen",
+      "original_away": "TSG 1899 Hoffenheim",
+      "evidence_home": "Bayer Leverkusen",
+      "evidence_away": "TSG 1899 Hoffenheim",
+      "source_line": 300
+    },
+    {
+      "target_ref": "2025-26/es.1.json#matches[0]",
+      "original_home": "Girona FC",
+      "original_away": "Rayo Vallecano de Madrid",
+      "evidence_home": "Girona FC",
+      "evidence_away": "Rayo Vallecano",
+      "source_line": 8
+    },
+    {
+      "target_ref": "2025-26/es.1.json#matches[1]",
+      "original_home": "Villarreal CF",
+      "original_away": "Real Oviedo",
+      "evidence_home": "Villarreal",
+      "evidence_away": "Real Oviedo",
+      "source_line": 28
+    },
+    {
+      "target_ref": "2025-26/es.1.json#matches[2]",
+      "original_home": "RCD Mallorca",
+      "original_away": "FC Barcelona",
+      "evidence_home": "RCD Mallorca",
+      "evidence_away": "Barcelona",
+      "source_line": 48
+    },
+    {
+      "target_ref": "2025-26/it.1.json#matches[0]",
+      "original_home": "Genoa CFC",
+      "original_away": "US Lecce",
+      "evidence_home": "Genoa",
+      "evidence_away": "Lecce",
+      "source_line": 28
+    },
+    {
+      "target_ref": "2025-26/it.1.json#matches[1]",
+      "original_home": "US Sassuolo Calcio",
+      "original_away": "SSC Napoli",
+      "evidence_home": "Sassuolo",
+      "evidence_away": "Napoli",
+      "source_line": 8
+    },
+    {
+      "target_ref": "2025-26/it.1.json#matches[2]",
+      "original_home": "AC Milan",
+      "original_away": "US Cremonese",
+      "evidence_home": "Milan",
+      "evidence_away": "Cremonese",
+      "source_line": 66
+    },
+    {
+      "target_ref": "2025-26/fr.1.json#matches[0]",
+      "original_home": "Stade Rennais FC 1901",
+      "original_away": "Olympique de Marseille",
+      "evidence_home": "Rennes",
+      "evidence_away": "Olympique Marseille",
+      "source_line": 8
+    },
+    {
+      "target_ref": "2025-26/fr.1.json#matches[1]",
+      "original_home": "Racing Club de Lens",
+      "original_away": "Olympique Lyonnais",
+      "evidence_home": "Lens",
+      "evidence_away": "Olympique Lyonnais",
+      "source_line": 30
+    },
+    {
+      "target_ref": "2025-26/fr.1.json#matches[2]",
+      "original_home": "AS Monaco FC",
+      "original_away": "Le Havre AC",
+      "evidence_home": "AS Monaco",
+      "evidence_away": "Le Havre",
+      "source_line": 48
+    }
+  ]
+}
