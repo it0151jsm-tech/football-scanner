@@ -2211,6 +2211,32 @@ with tab_personal:
             st.caption(f"เลือกแล้ว {len(photos)} ภาพ · ภาพยังไม่ถูกบันทึกลงฐานข้อมูล")
             for photo in photos[:8]:
                 st.image(photo, caption=photo.name, use_container_width=True)
+        if photos:
+            vision_key = runtime_setting("OPENAI_API_KEY", "")
+            if not vision_key:
+                st.caption("อ่านภาพอัตโนมัติยังไม่เปิด: ต้องตั้ง OPENAI_API_KEY ใน Secrets ของแอปทดลอง (อาจมีค่าใช้จ่ายแยก)")
+            if st.button("🔎 อ่านสถิติจากภาพ (ต้องตรวจสอบก่อนบันทึก)", disabled=not bool(vision_key), key="personal_vision"):
+                try:
+                    from stats_image_reader import read_images
+                    from stats_quality import missing_fields
+                    with st.spinner("กำลังอ่านภาพ"):
+                        extracted = read_images(photos, vision_key)
+                    st.session_state["personal_extracted"] = extracted
+                except Exception as exc:
+                    st.error(f"อ่านภาพไม่สำเร็จ: {type(exc).__name__} · ตรวจ API key, เครดิต, ขนาดภาพและลองใหม่")
+        if "personal_extracted" in st.session_state:
+            extracted = st.session_state["personal_extracted"]
+            st.warning("ผล AI เป็นเพียงร่าง ต้องตรวจเทียบภาพต้นฉบับทุกช่องก่อนบันทึก")
+            st.json(extracted)
+            from stats_quality import missing_fields
+            gaps = missing_fields(extracted["stats"])
+            if gaps:
+                st.warning("สถิติหลักที่ยังขาด: " + ", ".join(gaps))
+            if extracted.get("warnings"):
+                st.warning("ข้อสงสัย: " + "; ".join(map(str, extracted["warnings"][:10])))
+            if st.button("คัดลอกสถิติที่อ่านได้ไปช่องแก้ไข", key="personal_use_extraction"):
+                st.session_state["personal_raw_stats"] = json.dumps(extracted["stats"], ensure_ascii=False, indent=2)
+                st.rerun()
         with st.form("personal_stats_form"):
             match_key = st.text_input("รหัสแมตช์ไม่ซ้ำ (เช่น event ID)", key="personal_match_key")
             kickoff = st.text_input("วันเวลาแข่ง UTC (เช่น 2026-10-22T19:00:00+00:00)", key="personal_kickoff")
