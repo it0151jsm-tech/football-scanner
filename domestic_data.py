@@ -167,6 +167,11 @@ def resolve_domestic_sources(names, frames_by_sport, kickoff, league_definitions
                 result.update(status='stale', reason='ไม่มีผลฤดูกาลปัจจุบันก่อนวันแข่งขัน — ยังยืนยันลีกไม่ได้')
             else:
                 result.update(status='source_error', reason='โหลดแหล่งข้อมูลไม่ได้/ข้อมูลว่างหรือใช้ไม่ได้ — ยังยืนยันลีกไม่ได้')
+        # A partial provider outage must never be reported as a definitive
+        # absence from all supported domestic rosters.
+        if result['status'] == 'unmatched' and not result['coverage_complete']:
+            result.update(status='source_incomplete',
+                          reason='ตรวจชื่อทีมยังไม่ครบทุกแหล่ง: บางลีกโหลดข้อมูลไม่ได้หรือไม่มีข้อมูลฤดูกาลปัจจุบัน — ยังสรุปว่าไม่พบทีมไม่ได้')
         output[name] = result
     return output
 
