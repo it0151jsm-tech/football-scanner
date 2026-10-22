@@ -1412,11 +1412,16 @@ def load_cup_sources(matches, now, hours_limit):
                 except Exception as exc:
                     scores[key]=pd.DataFrame()
                     scores[key].attrs['history_diagnostics']={'status':'download_error','error':type(exc).__name__}
-                try:
-                    xgs[key]=fetch_understat_history(key)
-                except Exception as exc:
+                if key in UNDERSTAT_LEAGUES:
+                    try:
+                        xgs[key]=fetch_understat_history(key)
+                    except Exception as exc:
+                        xgs[key]=pd.DataFrame()
+                        xgs[key].attrs['history_diagnostics']={'status':'download_error','error':type(exc).__name__}
+                else:
+                    # No supported Understat competition: do not make a futile request.
                     xgs[key]=pd.DataFrame()
-                    xgs[key].attrs['history_diagnostics']={'status':'download_error','error':type(exc).__name__}
+                    xgs[key].attrs['history_diagnostics']={'status':'unsupported_xg'}
         identity=(match.get('id'),*names,kickoff.isoformat())
         packs[identity]={'home':resolved[names[0]],'away':resolved[names[1]],'scores':scores,'xgs':xgs}
     return packs
