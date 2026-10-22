@@ -131,7 +131,7 @@ class UCLScanTests(unittest.TestCase):
         self.f.update(requests=SimpleNamespace(get=get),HISTORY_TIMEOUT=(3,8))
         rosters=self.f['fetch_domestic_rosters'](season)
         expected = len(self.f['domestic_league_definitions']())
-        self.assertEqual(expected, 15)
+        self.assertEqual(expected, 17)
         self.assertEqual(len(rosters), expected)
         self.assertEqual(get.call_count, expected)
         self.assertTrue(all('/'+season+'/' in call.args[0] for call in get.call_args_list))
