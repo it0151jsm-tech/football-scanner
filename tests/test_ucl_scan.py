@@ -96,7 +96,7 @@ class UCLScanTests(unittest.TestCase):
         self.prepare();self.event['away_team']='Arsenal Similar Unverified'
         rows,_,_,_=self.scan();a=json.loads(rows[0]['analysis_a_json'])
         self.assertEqual(a['home_form']['sample5'],5);self.assertEqual(a['away_form']['sample5'],0)
-        self.assertIn('จับคู่ชื่อทีมไม่ได้',a['away_form']['diagnostics']['message']);self.assertIsNone(rows[0]['ev_pct'])
+        self.assertIn('ยังสรุปว่าไม่พบทีมไม่ได้',a['away_form']['diagnostics']['message']);self.assertIsNone(rows[0]['ev_pct'])
         self.prepare();self.f['fetch_history']=Mock(side_effect=RuntimeError('synthetic source failure'))
         rows,_,_,_=self.scan();a=json.loads(rows[0]['analysis_a_json']);self.assertEqual(a['home_form']['sample5'],0)
         self.assertIn('โหลดข้อมูลไม่สำเร็จ',a['home_form']['diagnostics']['message'])
