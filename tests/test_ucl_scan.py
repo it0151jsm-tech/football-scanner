@@ -141,6 +141,10 @@ class UCLScanTests(unittest.TestCase):
         evidence = self.f['price_evidence'](None, 2.5, 1.92, '2026-10-22T10:00:00Z')
         self.assertIsNone(evidence['odds_delta'])
         self.assertIn('ยังยืนยันราคาไหลไม่ได้', evidence['status'])
+        same_scan = {'point': 2.5, 'odds': 1.89, 'captured_at': '2026-10-22T12:29:55.100000Z'}
+        near = self.f['price_evidence'](same_scan, 2.5, 1.90, '2026-10-22T12:29:55.544048Z')
+        self.assertIsNone(near['odds_delta'])
+        self.assertIn('ยังยืนยันราคาไหลไม่ได้', near['status'])
         earlier = {'point': 2.5, 'odds': 1.92, 'captured_at': '2026-10-22T09:00:00Z'}
         later = self.f['price_evidence'](earlier, 2.5, 1.84, '2026-10-22T10:00:00Z')
         self.assertAlmostEqual(later['odds_delta'], -0.08)
