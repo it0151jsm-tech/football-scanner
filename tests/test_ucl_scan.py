@@ -130,15 +130,36 @@ class UCLScanTests(unittest.TestCase):
         get=Mock(return_value=SimpleNamespace(status_code=200,content=content,url='https://example.invalid/synthetic.csv'))
         self.f.update(requests=SimpleNamespace(get=get),HISTORY_TIMEOUT=(3,8))
         rosters=self.f['fetch_domestic_rosters'](season)
-        self.assertEqual(len(rosters),5);self.assertEqual(get.call_count,5)
+        expected = len(self.f['domestic_league_definitions']())
+        self.assertEqual(expected, 17)
+        self.assertEqual(len(rosters), expected)
+        self.assertEqual(get.call_count, expected)
         self.assertTrue(all('/'+season+'/' in call.args[0] for call in get.call_args_list))
         self.assertTrue(all('football-data.co.uk/mmz4281' in call.args[0] for call in get.call_args_list))
+
+    def test_first_observed_price_does_not_claim_movement_from_one_quote(self):
+        evidence = self.f['price_evidence'](None, 2.5, 1.92, '2026-10-22T10:00:00Z')
+        self.assertIsNone(evidence['odds_delta'])
+        self.assertIn('ยังยืนยันราคาไหลไม่ได้', evidence['status'])
+        earlier = {'point': 2.5, 'odds': 1.92, 'captured_at': '2026-10-22T09:00:00Z'}
+        later = self.f['price_evidence'](earlier, 2.5, 1.84, '2026-10-22T10:00:00Z')
+        self.assertAlmostEqual(later['odds_delta'], -0.08)
+        changed_line = self.f['price_evidence'](earlier, 3.0, 1.84, '2026-10-22T10:00:00Z')
+        self.assertIsNone(changed_line['odds_delta'])
 
     def test_single_ah_quote_never_manufactures_ou(self):
         self.prepare(quotes=False);rows,_,_,_=self.scan()
         self.assertEqual(len(rows),1);self.f['save_picks'](rows)
         fixture=group_fixture_recommendations(self.f['load_picks']().to_dict('records'),self.f['choose_recommendation'])[0]
         self.assertEqual(fixture['ou_main']['reason_code'],'missing_market');self.assertIsNone(fixture['ou_main']['line'])
+
+    def test_cup_scan_skips_understat_for_unsupported_domestic_league(self):
+        self.prepare()
+        # Simulate a supported domestic score league without Understat coverage.
+        self.f['UNDERSTAT_LEAGUES'].pop('soccer_germany_bundesliga', None)
+        self.scan()
+        requested = {call.args[0] for call in self.f['fetch_understat_history'].call_args_list}
+        self.assertEqual(requested, {'soccer_epl'})
 
     def test_outside_24h_or_invalid_time_does_not_load_domestic_sources(self):
         for stamp in [(datetime.now(timezone.utc)+timedelta(hours=25)).isoformat(),'2026-10-22T02:00:00','invalid']:

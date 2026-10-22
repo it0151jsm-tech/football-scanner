@@ -37,6 +37,27 @@ class DomesticDataTests(unittest.TestCase):
     def resolve(self,names=('Bayern Munich','Arsenal'),frames=None):
         return resolve_domestic_sources(names,self.frames if frames is None else frames,self.kickoff,LEAGUES)
 
+    def test_supported_secondary_league_roster_is_evidence_only(self):
+        from domestic_data import SUPPORTED_CODES
+        self.assertIn('E1', SUPPORTED_CODES)
+        self.assertIn('N1', SUPPORTED_CODES)
+        self.assertNotIn('SWE', SUPPORTED_CODES)
+        definitions = dict(LEAGUES)
+        definitions['soccer_efl_champ'] = dict(csv_code='E1', label='Championship', understat=None)
+        frames = dict(self.frames)
+        frames['soccer_efl_champ'] = history('Coventry')
+        result = resolve_domestic_sources(['Coventry'], frames, self.kickoff, definitions)['Coventry']
+        self.assertEqual(result['status'], 'matched')
+        self.assertEqual(result['csv_code'], 'E1')
+        self.assertEqual(result['sport_key'], 'soccer_efl_champ')
+
+    def test_missing_secondary_league_source_never_guesses_membership(self):
+        definitions = dict(LEAGUES)
+        definitions['soccer_efl_champ'] = dict(csv_code='E1', label='Championship', understat=None)
+        result = resolve_domestic_sources(['Coventry'], self.frames, self.kickoff, definitions)['Coventry']
+        self.assertNotEqual(result['status'], 'matched')
+        self.assertIsNone(result['sport_key'])
+
     def test_exact_bayern_arsenal_resolve_different_current_leagues(self):
         results=self.resolve()
         self.assertEqual(results['Bayern Munich']['sport_key'],'soccer_germany_bundesliga')
