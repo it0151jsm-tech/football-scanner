@@ -1327,8 +1327,18 @@ def analysis_display_rows(df):
 
 def domestic_league_definitions():
     """Existing supported sources only; source selection is roster evidence, not nationality."""
-    return {key: {'csv_code': LEAGUES[key][1], 'label': LEAGUES[key][0], 'understat': UNDERSTAT_LEAGUES[key]}
-            for key in ('soccer_epl','soccer_spain_la_liga','soccer_italy_serie_a','soccer_germany_bundesliga','soccer_france_ligue_one')}
+    # Verified Football-Data competition codes; never infer a league from nationality.
+    # Secondary divisions and other supported leagues supply domestic score evidence,
+    # but do not magically gain Understat xG or cross-league EV.
+    keys = ('soccer_epl', 'soccer_efl_champ', 'soccer_england_league1',
+            'soccer_england_league2', 'soccer_spain_la_liga',
+            'soccer_italy_serie_a', 'soccer_italy_serie_b',
+            'soccer_germany_bundesliga', 'soccer_germany_bundesliga2',
+            'soccer_france_ligue_one', 'soccer_france_ligue_two',
+            'soccer_netherlands_eredivisie', 'soccer_portugal_primeira_liga',
+            'soccer_spl', 'soccer_belgium_first_div')
+    return {key: {'csv_code': LEAGUES[key][1], 'label': LEAGUES[key][0],
+                  'understat': UNDERSTAT_LEAGUES.get(key)} for key in keys}
 
 
 @cache_data(ttl=21600, show_spinner=False)
