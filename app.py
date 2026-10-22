@@ -1779,7 +1779,11 @@ with st.sidebar:
     scan_btn = st.button("🚀 สแกนราคาและวิเคราะห์", type="primary", use_container_width=True)
 
 api_key = get_api_key()
-tab_scan, tab_slips, tab_history, tab_personal, tab_help = st.tabs(["📊 ผลวิเคราะห์ราคา", "🎟️ ตัวเลือกสเต็ป", "📚 ราคาไหลและตรวจผล", "📸 คลังสถิติ", "ℹ️ วิธีใช้"])
+personal_pilot_enabled = str(runtime_setting("VALUE_BET_PERSONAL_STATS_PILOT", "")).strip().lower() in ("1", "true", "yes")
+if personal_pilot_enabled:
+    tab_scan, tab_slips, tab_history, tab_personal, tab_help = st.tabs(["📊 ผลวิเคราะห์ราคา", "🎟️ ตัวเลือกสเต็ป", "📚 ราคาไหลและตรวจผล", "📸 คลังสถิติ", "ℹ️ วิธีใช้"])
+else:
+    tab_scan, tab_slips, tab_history, tab_help = st.tabs(["📊 ผลวิเคราะห์ราคา", "🎟️ ตัวเลือกสเต็ป", "📚 ราคาไหลและตรวจผล", "ℹ️ วิธีใช้"])
 
 with tab_scan:
     st.subheader("📊 วิเคราะห์ทุกคู่ที่ดึงข้อมูลได้")
@@ -2199,80 +2203,81 @@ with tab_history:
         from bill_backup import backup_bytes
         st.download_button("⬇️ ดาวน์โหลดสำรองฐานข้อมูล SQLite", data=backup_bytes(DB_FILE), file_name=DB_FILE.name, mime="application/octet-stream")
 
-with tab_personal:
-    st.subheader("📸 คลังสถิติส่วนตัว (ทดลอง)")
-    st.caption("แยกข้อมูลหลังแข่งและก่อนแข่ง · ยังไม่เปิดระบบ AI อ่านภาพอัตโนมัติ · ไม่ใช้เครดิต The Odds API")
-    from personal_stats import save_verified, read_history
-    mode = st.radio("โหมด", ["หลังแข่ง · บันทึกสถิติ", "ก่อนแข่ง · ตรวจประวัติ"], horizontal=True, key="personal_mode")
-    if mode.startswith("หลังแข่ง"):
-        st.info("อัปโหลดภาพเพื่อดูต้นฉบับ แล้วกรอกหรือวางข้อมูลที่ตรวจแล้ว ระบบยังไม่อ้างว่าอ่านตัวเลขจากภาพเอง")
-        photos = st.file_uploader("ภาพสถิติ (หลายภาพ)", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True, key="personal_images")
-        if photos:
-            st.caption(f"เลือกแล้ว {len(photos)} ภาพ · ภาพยังไม่ถูกบันทึกลงฐานข้อมูล")
-            for photo in photos[:8]:
-                st.image(photo, caption=photo.name, use_container_width=True)
-        if photos:
-            vision_key = runtime_setting("OPENAI_API_KEY", "")
-            if not vision_key:
-                st.caption("อ่านภาพอัตโนมัติยังไม่เปิด: ต้องตั้ง OPENAI_API_KEY ใน Secrets ของแอปทดลอง (อาจมีค่าใช้จ่ายแยก)")
-            if st.button("🔎 อ่านสถิติจากภาพ (ต้องตรวจสอบก่อนบันทึก)", disabled=not bool(vision_key), key="personal_vision"):
+if personal_pilot_enabled:
+    with tab_personal:
+        st.subheader("📸 คลังสถิติส่วนตัว (ทดลอง)")
+        st.caption("แยกข้อมูลหลังแข่งและก่อนแข่ง · ยังไม่เปิดระบบ AI อ่านภาพอัตโนมัติ · ไม่ใช้เครดิต The Odds API")
+        from personal_stats import save_verified, read_history
+        mode = st.radio("โหมด", ["หลังแข่ง · บันทึกสถิติ", "ก่อนแข่ง · ตรวจประวัติ"], horizontal=True, key="personal_mode")
+        if mode.startswith("หลังแข่ง"):
+            st.info("อัปโหลดภาพเพื่อดูต้นฉบับ แล้วกรอกหรือวางข้อมูลที่ตรวจแล้ว ระบบยังไม่อ้างว่าอ่านตัวเลขจากภาพเอง")
+            photos = st.file_uploader("ภาพสถิติ (หลายภาพ)", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True, key="personal_images")
+            if photos:
+                st.caption(f"เลือกแล้ว {len(photos)} ภาพ · ภาพยังไม่ถูกบันทึกลงฐานข้อมูล")
+                for photo in photos[:8]:
+                    st.image(photo, caption=photo.name, use_container_width=True)
+            if photos:
+                vision_key = runtime_setting("OPENAI_API_KEY", "")
+                if not vision_key:
+                    st.caption("อ่านภาพอัตโนมัติยังไม่เปิด: ต้องตั้ง OPENAI_API_KEY ใน Secrets ของแอปทดลอง (อาจมีค่าใช้จ่ายแยก)")
+                if st.button("🔎 อ่านสถิติจากภาพ (ต้องตรวจสอบก่อนบันทึก)", disabled=not bool(vision_key), key="personal_vision"):
+                    try:
+                        from stats_image_reader import read_images
+                        from stats_quality import missing_fields
+                        with st.spinner("กำลังอ่านภาพ"):
+                            extracted = read_images(photos, vision_key)
+                        st.session_state["personal_extracted"] = extracted
+                    except Exception as exc:
+                        st.error(f"อ่านภาพไม่สำเร็จ: {type(exc).__name__} · ตรวจ API key, เครดิต, ขนาดภาพและลองใหม่")
+            if "personal_extracted" in st.session_state:
+                extracted = st.session_state["personal_extracted"]
+                st.warning("ผล AI เป็นเพียงร่าง ต้องตรวจเทียบภาพต้นฉบับทุกช่องก่อนบันทึก")
+                st.json(extracted)
+                from stats_quality import missing_fields
+                gaps = missing_fields(extracted["stats"])
+                if gaps:
+                    st.warning("สถิติหลักที่ยังขาด: " + ", ".join(gaps))
+                if extracted.get("warnings"):
+                    st.warning("ข้อสงสัย: " + "; ".join(map(str, extracted["warnings"][:10])))
+                if st.button("คัดลอกสถิติที่อ่านได้ไปช่องแก้ไข", key="personal_use_extraction"):
+                    st.session_state["personal_raw_stats"] = json.dumps(extracted["stats"], ensure_ascii=False, indent=2)
+                    st.rerun()
+            with st.form("personal_stats_form"):
+                match_key = st.text_input("รหัสแมตช์ไม่ซ้ำ (เช่น event ID)", key="personal_match_key")
+                kickoff = st.text_input("วันเวลาแข่ง UTC (เช่น 2026-10-22T19:00:00+00:00)", key="personal_kickoff")
+                home = st.text_input("เจ้าบ้าน", key="personal_home")
+                away = st.text_input("ทีมเยือน", key="personal_away")
+                col_h, col_a = st.columns(2)
+                with col_h:
+                    home_goals = st.number_input("ประตูเจ้าบ้าน", min_value=0, step=1, key="personal_hg")
+                with col_a:
+                    away_goals = st.number_input("ประตูทีมเยือน", min_value=0, step=1, key="personal_ag")
+                source = st.text_input("แหล่งข้อมูล (เช่น FotMob)", key="personal_source")
+                raw_stats = st.text_area('สถิติ JSON เช่น {"xG":{"home":2.7,"away":0.74},"shots":{"home":21,"away":10}}', height=130, key="personal_raw_stats")
+                confirmed = st.checkbox("ตรวจตัวเลขและยืนยันว่าเป็นข้อมูลหลังแข่งจริง", key="personal_confirm")
+                submitted = st.form_submit_button("บันทึกสถิติที่ตรวจแล้ว", disabled=not confirmed)
+            if submitted:
                 try:
-                    from stats_image_reader import read_images
-                    from stats_quality import missing_fields
-                    with st.spinner("กำลังอ่านภาพ"):
-                        extracted = read_images(photos, vision_key)
-                    st.session_state["personal_extracted"] = extracted
-                except Exception as exc:
-                    st.error(f"อ่านภาพไม่สำเร็จ: {type(exc).__name__} · ตรวจ API key, เครดิต, ขนาดภาพและลองใหม่")
-        if "personal_extracted" in st.session_state:
-            extracted = st.session_state["personal_extracted"]
-            st.warning("ผล AI เป็นเพียงร่าง ต้องตรวจเทียบภาพต้นฉบับทุกช่องก่อนบันทึก")
-            st.json(extracted)
-            from stats_quality import missing_fields
-            gaps = missing_fields(extracted["stats"])
-            if gaps:
-                st.warning("สถิติหลักที่ยังขาด: " + ", ".join(gaps))
-            if extracted.get("warnings"):
-                st.warning("ข้อสงสัย: " + "; ".join(map(str, extracted["warnings"][:10])))
-            if st.button("คัดลอกสถิติที่อ่านได้ไปช่องแก้ไข", key="personal_use_extraction"):
-                st.session_state["personal_raw_stats"] = json.dumps(extracted["stats"], ensure_ascii=False, indent=2)
-                st.rerun()
-        with st.form("personal_stats_form"):
-            match_key = st.text_input("รหัสแมตช์ไม่ซ้ำ (เช่น event ID)", key="personal_match_key")
-            kickoff = st.text_input("วันเวลาแข่ง UTC (เช่น 2026-10-22T19:00:00+00:00)", key="personal_kickoff")
-            home = st.text_input("เจ้าบ้าน", key="personal_home")
-            away = st.text_input("ทีมเยือน", key="personal_away")
-            col_h, col_a = st.columns(2)
-            with col_h:
-                home_goals = st.number_input("ประตูเจ้าบ้าน", min_value=0, step=1, key="personal_hg")
-            with col_a:
-                away_goals = st.number_input("ประตูทีมเยือน", min_value=0, step=1, key="personal_ag")
-            source = st.text_input("แหล่งข้อมูล (เช่น FotMob)", key="personal_source")
-            raw_stats = st.text_area('สถิติ JSON เช่น {"xG":{"home":2.7,"away":0.74},"shots":{"home":21,"away":10}}', height=130, key="personal_raw_stats")
-            confirmed = st.checkbox("ตรวจตัวเลขและยืนยันว่าเป็นข้อมูลหลังแข่งจริง", key="personal_confirm")
-            submitted = st.form_submit_button("บันทึกสถิติที่ตรวจแล้ว", disabled=not confirmed)
-        if submitted:
-            try:
-                parsed = json.loads(raw_stats)
-                with db() as con:
-                    save_verified(con, match_key=match_key, kickoff_utc=kickoff,
-                                  home_team=home, away_team=away,
-                                  home_goals=int(home_goals), away_goals=int(away_goals),
-                                  source=source, stats=parsed)
-                st.success("บันทึกข้อมูลที่ตรวจแล้วเรียบร้อย (ยังไม่เชื่อมคำนวณ EV)")
-            except (ValueError, TypeError, json.JSONDecodeError) as exc:
-                st.error(f"ตรวจข้อมูลไม่ผ่าน: {exc}")
-    else:
-        st.info("อ่านเฉพาะแมตช์ที่บันทึกแล้ว · ยังไม่เชื่อม A/B/C จนกว่าจะทดสอบข้อมูลและการป้องกันข้อมูลอนาคต")
-        team_filter = st.text_input("ค้นหาชื่อทีม (ตรงกับชื่อที่บันทึก)", key="personal_team_filter")
-        with db() as con:
-            records = read_history(con, team=team_filter.strip() or None)
-        st.caption(f"พบ {len(records)} แมตช์ที่ยืนยันแล้ว")
-        for record in records[:30]:
-            with st.expander(f"{record['home_team']} {record['home_goals']}–{record['away_goals']} {record['away_team']} · {record['kickoff_utc']}"):
-                st.caption(f"แหล่งข้อมูล: {record['source']} · บันทึกเมื่อ {record['recorded_at']}")
-                st.json(json.loads(record['stats_json']))
-    st.warning("SQLite บน Streamlit Cloud อาจสูญหายหลังรีสตาร์ต ควรดาวน์โหลดสำรองจากแท็บประวัติทุกครั้งหลังบันทึก")
+                    parsed = json.loads(raw_stats)
+                    with db() as con:
+                        save_verified(con, match_key=match_key, kickoff_utc=kickoff,
+                                      home_team=home, away_team=away,
+                                      home_goals=int(home_goals), away_goals=int(away_goals),
+                                      source=source, stats=parsed)
+                    st.success("บันทึกข้อมูลที่ตรวจแล้วเรียบร้อย (ยังไม่เชื่อมคำนวณ EV)")
+                except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                    st.error(f"ตรวจข้อมูลไม่ผ่าน: {exc}")
+        else:
+            st.info("อ่านเฉพาะแมตช์ที่บันทึกแล้ว · ยังไม่เชื่อม A/B/C จนกว่าจะทดสอบข้อมูลและการป้องกันข้อมูลอนาคต")
+            team_filter = st.text_input("ค้นหาชื่อทีม (ตรงกับชื่อที่บันทึก)", key="personal_team_filter")
+            with db() as con:
+                records = read_history(con, team=team_filter.strip() or None)
+            st.caption(f"พบ {len(records)} แมตช์ที่ยืนยันแล้ว")
+            for record in records[:30]:
+                with st.expander(f"{record['home_team']} {record['home_goals']}–{record['away_goals']} {record['away_team']} · {record['kickoff_utc']}"):
+                    st.caption(f"แหล่งข้อมูล: {record['source']} · บันทึกเมื่อ {record['recorded_at']}")
+                    st.json(json.loads(record['stats_json']))
+        st.warning("SQLite บน Streamlit Cloud อาจสูญหายหลังรีสตาร์ต ควรดาวน์โหลดสำรองจากแท็บประวัติทุกครั้งหลังบันทึก")
 
 with tab_help:
     st.subheader("ℹ️ วิธีใช้และข้อจำกัด")
