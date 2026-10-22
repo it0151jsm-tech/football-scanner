@@ -67,8 +67,10 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(price['label'], 'First Observed Price')
         self.assertFalse(price['opening_odds_available'])
         self.assertIsNone(price['odds_delta'])
-        same = self.f['price_evidence'](dict(point=2.5, odds=1.8, captured_at='first'), 2.5, 2., 'now')
+        same = self.f['price_evidence'](dict(point=2.5, odds=1.8, captured_at='2026-10-22T09:00:00Z'), 2.5, 2., '2026-10-22T09:05:00Z')
         self.assertEqual(same['odds_delta'], .2)
+        invalid = self.f['price_evidence'](dict(point=2.5, odds=1.8, captured_at='first'), 2.5, 2., 'now')
+        self.assertIsNone(invalid['odds_delta'])
 
     def test_first_observed_database_lookup_is_partitioned_by_bookmaker(self):
         for book, odds in [('A', 1.8), ('B', 1.9), ('A', 2.)]:
