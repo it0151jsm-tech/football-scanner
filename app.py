@@ -1254,6 +1254,34 @@ def render_data_health():
             problems = [team for team in audit["teams"] if any(team[s]["status"] not in ("matched","unsupported") for s in ("csv","understat"))]
             if problems:
                 st.write(audit["league"],problems)
+        # Cup coverage from already saved analysis, with no new network calls.
+        # Count unique fixture sides rather than every AH/OU market quote.
+        saved = load_picks(limit=None)
+        cup_statuses = {}
+        seen_sides = set()
+        if not saved.empty and "analysis_a_json" in saved.columns:
+            for row in saved.to_dict("records"):
+                evidence = saved_analysis(row.get("analysis_a_json")).get("domestic_sources")
+                if not isinstance(evidence, dict):
+                    continue
+                for side in ("home", "away"):
+                    source = evidence.get(side)
+                    if not isinstance(source, dict):
+                        continue
+                    identity = (str(row.get("event_id")), side)
+                    if identity in seen_sides:
+                        continue
+                    seen_sides.add(identity)
+                    status = str(source.get("status") or "unknown")
+                    cup_statuses[status] = cup_statuses.get(status, 0) + 1
+        st.markdown("**ความครอบคลุมฟอร์มในประเทศของบอลถ้วยที่เคยบันทึก**")
+        if cup_statuses:
+            st.caption("นับทีมเจ้าบ้าน/เยือนที่ไม่ซ้ำต่อคู่จากประวัติ SQLite เท่านั้น ไม่ใช่ผลสแกนปัจจุบัน")
+            st.dataframe(pd.DataFrame([{"สถานะ": key, "จำนวนทีม": value}
+                                       for key, value in sorted(cup_statuses.items())]),
+                         hide_index=True, use_container_width=True)
+        else:
+            st.info("ยังไม่มีหลักฐานการจับคู่ลีกในประเทศของบอลถ้วยที่บันทึกไว้")
         st.caption("ชื่อใหม่ในชุดข้อมูลฤดูกาลใหม่ต้องตรวจ identity เพิ่ม ไม่ถือว่าเลื่อนชั้นสำเร็จหรือจับคู่จากชื่อคล้าย")
         for league in source.get("leagues",[]):
             unresolved = [r for r in league.get("cross_source_results",[]) if r["status"]!="matched"]
