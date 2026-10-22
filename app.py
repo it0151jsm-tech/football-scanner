@@ -1075,15 +1075,24 @@ def first_observed_quotes(event_ids):
 
 
 def price_evidence(first, point, odds, observed_at):
+    """Compare observed quotes only when separate observation times exist."""
     if first is None:
         first = {"point": point, "odds": odds, "captured_at": observed_at}
     same_line = abs(float(first["point"]) - point) < 1e-9
+    first_at = first["captured_at"]
+    has_second_observation = bool(first_at and observed_at and str(first_at) != str(observed_at))
+    comparable = same_line and has_second_observation
+    if not has_second_observation:
+        status = "มีเพียงเวลาสังเกตเดียว — ยังยืนยันราคาไหลไม่ได้"
+    elif not same_line:
+        status = "เส้นเปลี่ยน: ห้ามเทียบค่าน้ำตรง ๆ"
+    else:
+        status = "เส้นเดิม: เทียบค่าน้ำระหว่างเวลาสังเกตได้"
     return {"label": "First Observed Price", "first_odds": float(first["odds"]),
-            "first_point": float(first["point"]), "first_at": first["captured_at"],
+            "first_point": float(first["point"]), "first_at": first_at,
             "current_odds": odds, "current_point": point, "current_at": observed_at,
-            "odds_delta": round(odds - float(first["odds"]), 3) if same_line else None,
-            "status": "เส้นเดิม: เทียบค่าน้ำได้" if same_line else "เส้นเปลี่ยน: ห้ามเทียบค่าน้ำตรง ๆ",
-            "opening_odds_available": False}
+            "odds_delta": round(odds - float(first["odds"]), 3) if comparable else None,
+            "status": status, "opening_odds_available": False}
 
 
 def system_a_analysis(form5, form10, form_all, home_profile, away_profile, opponents, xg, price):
