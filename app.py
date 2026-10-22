@@ -1080,10 +1080,19 @@ def price_evidence(first, point, odds, observed_at):
         first = {"point": point, "odds": odds, "captured_at": observed_at}
     same_line = abs(float(first["point"]) - point) < 1e-9
     first_at = first["captured_at"]
-    has_second_observation = bool(first_at and observed_at and str(first_at) != str(observed_at))
-    comparable = same_line and has_second_observation
-    if not has_second_observation:
-        status = "มีเพียงเวลาสังเกตเดียว — ยังยืนยันราคาไหลไม่ได้"
+    # A few milliseconds apart can be two quotes in the *same* scan, not a
+    # meaningful before/after market observation. Require >= 60 seconds.
+    try:
+        first_time = pd.Timestamp(first_at)
+        current_time = pd.Timestamp(observed_at)
+        elapsed_seconds = (current_time - first_time).total_seconds()
+        separate_scan = (first_time.tzinfo is not None and current_time.tzinfo is not None
+                         and elapsed_seconds >= 60)
+    except (ValueError, TypeError, OverflowError):
+        separate_scan = False
+    comparable = same_line and separate_scan
+    if not separate_scan:
+        status = "เวลาสังเกตใกล้กันเกินไปหรือไม่ถูกต้อง — ยังยืนยันราคาไหลไม่ได้"
     elif not same_line:
         status = "เส้นเปลี่ยน: ห้ามเทียบค่าน้ำตรง ๆ"
     else:
