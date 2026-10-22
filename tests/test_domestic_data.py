@@ -133,6 +133,18 @@ class DomesticDataTests(unittest.TestCase):
         self.assertEqual(self.resolve(frames={})['Arsenal']['status'],'source_error')
         self.assertEqual(self.resolve(names=['Unknown Club'])['Unknown Club']['status'],'unmatched')
 
+    def test_partial_coverage_does_not_claim_club_absent(self):
+        failed = pd.DataFrame()
+        failed.attrs['history_diagnostics'] = {'status': 'http_error'}
+        frames = dict(self.frames)
+        frames['soccer_epl'] = failed
+        result = self.resolve(names=['Panathinaikos FC'], frames=frames)['Panathinaikos FC']
+        self.assertEqual(result['status'], 'source_incomplete')
+        self.assertFalse(result['coverage_complete'])
+        self.assertIn('ยังสรุปว่าไม่พบทีมไม่ได้', result['reason'])
+        complete = self.resolve(names=['Panathinaikos FC'])['Panathinaikos FC']
+        self.assertEqual(complete['status'], 'unmatched')
+
     def test_current_membership_can_be_too_old(self):
         frames={k:history('Arsenal',dates=['2026-07-01']) for k in ('soccer_epl',)}
         kickoff=datetime(2027,1,15,tzinfo=timezone.utc)
