@@ -1775,6 +1775,14 @@ with tab_scan:
             archive_cols = [col for col in archive_cols if col in archived.columns]
             if archive_cols:
                 st.dataframe(archived[archive_cols], use_container_width=True, hide_index=True)
+                # Show the actual saved A/B evidence without re-fetching football or odds.
+                # Limit rendering on mobile; this view does not recompute EV.
+                if "event_id" in archived.columns:
+                    st.caption("รายละเอียด A/B ที่เคยบันทึกไว้ (สูงสุด 20 คู่ล่าสุด)")
+                    for event_id, group in list(archived.groupby("event_id", sort=False))[:20]:
+                        row = group.iloc[0].to_dict()
+                        st.markdown("**" + str(row.get("match") or event_id).replace("*", "") + "**")
+                        st.text("\n".join(mobile_card_lines(row)))
             else:
                 st.info("มีข้อมูลที่บันทึกไว้ แต่ไม่พบคอลัมน์ที่รองรับการแสดงย้อนหลัง")
 
@@ -1974,7 +1982,10 @@ with tab_history:
             point_changed = abs(latest_point - first_point) > 1e-9
             # Odds are comparable only if the handicap/total line stayed the same.
             odds_delta = round(latest_odds - first_odds, 3) if not point_changed else None
-            if point_changed:
+            if len(rows) < 2:
+                trend = "มีเพียง 1 snapshot — ยังยืนยันราคาไหลไม่ได้"
+                odds_delta = None
+            elif point_changed:
                 trend = "แต้มต่อ/สูงต่ำเปลี่ยน — เทียบน้ำตรง ๆ ไม่ได้"
             else:
                 trend = "ราคาเพิ่ม" if odds_delta > 0 else ("ราคาลด" if odds_delta < 0 else "ราคาน้ำคงที่")
