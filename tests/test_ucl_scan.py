@@ -153,6 +153,14 @@ class UCLScanTests(unittest.TestCase):
         fixture=group_fixture_recommendations(self.f['load_picks']().to_dict('records'),self.f['choose_recommendation'])[0]
         self.assertEqual(fixture['ou_main']['reason_code'],'missing_market');self.assertIsNone(fixture['ou_main']['line'])
 
+    def test_cup_scan_skips_understat_for_unsupported_domestic_league(self):
+        self.prepare()
+        # Simulate a supported domestic score league without Understat coverage.
+        self.f['UNDERSTAT_LEAGUES'].pop('soccer_germany_bundesliga', None)
+        self.scan()
+        requested = {call.args[0] for call in self.f['fetch_understat_history'].call_args_list}
+        self.assertEqual(requested, {'soccer_epl'})
+
     def test_outside_24h_or_invalid_time_does_not_load_domestic_sources(self):
         for stamp in [(datetime.now(timezone.utc)+timedelta(hours=25)).isoformat(),'2026-10-22T02:00:00','invalid']:
             self.prepare();self.event['commence_time']=stamp;rows,_,_,_=self.scan()
