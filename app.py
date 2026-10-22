@@ -1372,6 +1372,7 @@ def domestic_league_definitions():
             'soccer_italy_serie_a', 'soccer_italy_serie_b',
             'soccer_germany_bundesliga', 'soccer_germany_bundesliga2',
             'soccer_france_ligue_one', 'soccer_france_ligue_two',
+            'soccer_turkey_super_league', 'soccer_greece_super_league',
             'soccer_netherlands_eredivisie', 'soccer_portugal_primeira_liga',
             'soccer_spl', 'soccer_belgium_first_div')
     return {key: {'csv_code': LEAGUES[key][1], 'label': LEAGUES[key][0],
