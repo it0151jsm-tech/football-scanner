@@ -137,6 +137,16 @@ class UCLScanTests(unittest.TestCase):
         self.assertTrue(all('/'+season+'/' in call.args[0] for call in get.call_args_list))
         self.assertTrue(all('football-data.co.uk/mmz4281' in call.args[0] for call in get.call_args_list))
 
+    def test_first_observed_price_does_not_claim_movement_from_one_quote(self):
+        evidence = self.f['price_evidence'](None, 2.5, 1.92, '2026-10-22T10:00:00Z')
+        self.assertIsNone(evidence['odds_delta'])
+        self.assertIn('ยังยืนยันราคาไหลไม่ได้', evidence['status'])
+        earlier = {'point': 2.5, 'odds': 1.92, 'captured_at': '2026-10-22T09:00:00Z'}
+        later = self.f['price_evidence'](earlier, 2.5, 1.84, '2026-10-22T10:00:00Z')
+        self.assertAlmostEqual(later['odds_delta'], -0.08)
+        changed_line = self.f['price_evidence'](earlier, 3.0, 1.84, '2026-10-22T10:00:00Z')
+        self.assertIsNone(changed_line['odds_delta'])
+
     def test_single_ah_quote_never_manufactures_ou(self):
         self.prepare(quotes=False);rows,_,_,_=self.scan()
         self.assertEqual(len(rows),1);self.f['save_picks'](rows)
