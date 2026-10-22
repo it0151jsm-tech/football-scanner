@@ -1761,6 +1761,23 @@ with tab_scan:
             for err in errors:
                 st.warning(err)
 
+    # Read-only recovery of persisted scans, including fixtures that have kicked off.
+    # Never present archived prices as live quotes or as new betting recommendations.
+    with st.expander("📁 ผลสแกนที่บันทึกไว้ (ย้อนหลัง · ไม่เรียก API)", expanded=False):
+        archived = load_picks(limit=None)
+        if archived.empty:
+            st.info("ยังไม่มีผลสแกนที่บันทึกไว้ในฐานข้อมูลนี้")
+        else:
+            st.warning("ข้อมูลย้อนหลังเท่านั้น ไม่ใช่ราคาปัจจุบัน ห้ามใช้เป็นสัญญาณเดิมพันใหม่")
+            st.caption("แสดงรายการที่ฐานข้อมูลยังเก็บไว้ แม้ปิด Safari หรือคู่เริ่มแข่งไปแล้ว")
+            archive_cols = ["kickoff_th", "league", "match", "market", "selection",
+                            "odds", "bookmaker", "status"]
+            archive_cols = [col for col in archive_cols if col in archived.columns]
+            if archive_cols:
+                st.dataframe(archived[archive_cols], use_container_width=True, hide_index=True)
+            else:
+                st.info("มีข้อมูลที่บันทึกไว้ แต่ไม่พบคอลัมน์ที่รองรับการแสดงย้อนหลัง")
+
     from readiness import analysis_scope
     df = analysis_display_rows(analysis_scope(load_picks(limit=None), [LEAGUES[k][0] for k in selected_leagues], latest_receipts=latest_api_receipts()))
     if df.empty:
