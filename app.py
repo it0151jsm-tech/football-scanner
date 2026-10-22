@@ -1775,14 +1775,20 @@ with tab_scan:
             archive_cols = [col for col in archive_cols if col in archived.columns]
             if archive_cols:
                 st.dataframe(archived[archive_cols], use_container_width=True, hide_index=True)
-                # Show the actual saved A/B evidence without re-fetching football or odds.
-                # Limit rendering on mobile; this view does not recompute EV.
+                # Read-only recovery: keep every saved market selection for each
+                # fixture instead of silently displaying only its first quote.
+                # Expand one fixture at a time on mobile; never refresh the API.
                 if "event_id" in archived.columns:
-                    st.caption("รายละเอียด A/B ที่เคยบันทึกไว้ (สูงสุด 20 คู่ล่าสุด)")
-                    for event_id, group in list(archived.groupby("event_id", sort=False))[:20]:
-                        row = group.iloc[0].to_dict()
-                        st.markdown("**" + str(row.get("match") or event_id).replace("*", "") + "**")
-                        st.text("\n".join(mobile_card_lines(row)))
+                    st.caption("รายละเอียด A/B ที่บันทึกไว้ (20 คู่ล่าสุด; ทุกตัวเลือกที่เก็บไว้)")
+                    for event_id, group in list(archived.groupby("event_id", sort=False, dropna=False))[:20]:
+                        first = group.iloc[0]
+                        fixture_label = str(first.get("match") or event_id or "ไม่ทราบคู่")
+                        with st.expander(f"{fixture_label} · {len(group)} รายการตลาด", expanded=False):
+                            st.caption("หลักฐาน ณ เวลาสแกนเท่านั้น ไม่ใช่ราคาปัจจุบัน")
+                            for _, saved_row in group.iterrows():
+                                row = saved_row.to_dict()
+                                st.text("\n".join(mobile_card_lines(row)))
+                                st.divider()
             else:
                 st.info("มีข้อมูลที่บันทึกไว้ แต่ไม่พบคอลัมน์ที่รองรับการแสดงย้อนหลัง")
 
