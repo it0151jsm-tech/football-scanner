@@ -15,7 +15,7 @@ from history_data import match_team, validate_rows
 # Verified July-to-June Football-Data competition codes. Calendar-year leagues
 # are excluded until their season validation is implemented separately.
 SUPPORTED_CODES = frozenset({'E0', 'E1', 'E2', 'E3', 'SP1', 'I1', 'I2',
-                             'D1', 'D2', 'F1', 'F2', 'N1', 'P1', 'SC0', 'B1'})
+                             'D1', 'D2', 'F1', 'F2', 'N1', 'P1', 'SC0', 'B1', 'T1', 'G1'})
 MAX_ROSTER_AGE_DAYS = 120
 
 
