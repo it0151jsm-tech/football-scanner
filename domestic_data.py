@@ -12,8 +12,10 @@ import pandas as pd
 from history_data import match_team, validate_rows
 
 
-# These five Football-Data competitions use a July-to-June season identifier.
-SUPPORTED_CODES = frozenset({'E0', 'SP1', 'I1', 'D1', 'F1'})
+# Verified July-to-June Football-Data competition codes. Calendar-year leagues
+# are excluded until their season validation is implemented separately.
+SUPPORTED_CODES = frozenset({'E0', 'E1', 'E2', 'E3', 'SP1', 'I1', 'I2',
+                             'D1', 'D2', 'F1', 'F2', 'N1', 'P1', 'SC0', 'B1'})
 MAX_ROSTER_AGE_DAYS = 120
 
 
@@ -143,7 +145,7 @@ def resolve_domestic_sources(names, frames_by_sport, kickoff, league_definitions
                       source_season=season, reason='จับคู่ชื่อทีมไม่ได้ในแหล่งลีกภายในประเทศที่ตรวจได้ — ไม่เดาจากชื่อคล้าย',
                       source_diagnostics=diagnostics,
                       coverage_complete=all(r['status'] in {'matched','stale','name_unmatched','lossy_normalization','ambiguous'} for r in diagnostics.values()),
-                      scope='ตรวจเฉพาะ 5 ลีกหลักจากผลฤดูกาลปัจจุบันที่โหลดได้; ไม่ยืนยันทีมครบทุกลีก')
+                      scope='ตรวจเฉพาะลีกที่รองรับจากผลฤดูกาลปัจจุบันที่โหลดได้; ไม่ยืนยันทีมครบทุกลีก')
         if len(candidates) > 1 or ambiguities:
             result.update(status='ambiguous', reason='ชื่อทีมตรงกับหลายลีกหรือหลายชื่อ — ยังไม่ยืนยันแหล่งลีกภายในประเทศ')
         elif len(candidates) == 1:
