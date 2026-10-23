@@ -542,7 +542,7 @@ def fetch_history(csv_code):
     return load_history(csv_code, requests.get, timeout=HISTORY_TIMEOUT)
 
 
-@st.cache_data(ttl=21600, show_spinner=False)
+@cache_data(ttl=21600, show_spinner=False)
 def fetch_api_football_form(sport_key, season, api_key):
     """Optional cached score source; at most one API call per league/season per cache TTL."""
     from api_football_data import fetch_finished_fixtures
@@ -550,15 +550,16 @@ def fetch_api_football_form(sport_key, season, api_key):
 
 
 def optional_api_football_fallback(sport_key, score_history, matches, now):
-    """Replace unusable CSV form only when the paid/free provider matches BOTH fixture clubs.
-
-    Never blend histories from two providers or alter Understat/EV inputs.
-    """
+    """Replace unusable CSV form only when provider matches both fixture clubs."""
     from api_football_data import LEAGUE_IDS
     from history_data import match_team
     if sport_key not in LEAGUE_IDS:
         return score_history
-    key = runtime_setting("API_FOOTBALL_KEY", "")
+    import os
+    try:
+        key = os.environ.get("API_FOOTBALL_KEY") or st.secrets.get("API_FOOTBALL_KEY", "")
+    except Exception:
+        key = os.environ.get("API_FOOTBALL_KEY", "")
     if not key:
         return score_history
     current = [m for m in matches if m.get("home_team") and m.get("away_team")]
