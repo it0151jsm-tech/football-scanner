@@ -1594,7 +1594,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     if is_cup:
         health=cup_health(cup_packs,league_name,sport_key,now)
     record_data_health(sport_key, health)
-    target = now + timedelta(hours=min(hours_limit, 24))
+    target = now + timedelta(hours=hours_limit)
     rows, snapshot_rows = [], []
     first_prices = first_observed_quotes([m.get("id", "") for m in matches])
     for match in matches:
