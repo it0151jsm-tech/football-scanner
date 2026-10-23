@@ -1530,6 +1530,20 @@ def cup_health(packs, label, key, now):
                 scope='ไม่มีแหล่ง UCL โดยตรง; ตรวจฟอร์ม/xG ลีกในประเทศของแต่ละทีมจาก 5 ลีกที่รองรับเท่านั้น ไม่ใช่โมเดล EV ถ้วย')
 
 
+# -------------------- PERSONAL EVIDENCE (EXPLICIT PILOT ONLY) --------------------
+def reviewed_personal_context(home, away, kickoff, sport_key, event_id, now, team_sources=None):
+    if not globals().get('personal_pilot_enabled', False):
+        return None, pd.DataFrame()
+    from personal_context import fixture_context
+    try:
+        with db() as con:
+            return fixture_context(con, home=home, away=away, kickoff=kickoff,
+                sport_key=sport_key, event_id=event_id, analysis_at=now, team_sources=team_sources)
+    except (ValueError, TypeError, sqlite3.DatabaseError):
+        return {'available':False, 'status':'personal_evidence_unavailable',
+            'model_enabled':False, 'model_reason':'คลังสถิติยังตรวจสอบไม่ได้ — ไม่ใช้แทนข้อมูลโมเดล'}, pd.DataFrame()
+
+
 # -------------------- SCAN --------------------
 def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
     matches, remaining, used = fetch_odds(sport_key, regions, api_key)
@@ -1540,6 +1554,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     cup_packs = load_cup_sources(matches,now,hours_limit) if is_cup else {}
     history = pd.DataFrame() if is_cup else fetch_understat_history(sport_key)
     score_history = pd.DataFrame() if is_cup else fetch_history(csv_code)
+    league_score_history = score_history
     from data_health import observe_league
     health = observe_league(
         sport_key, league_name, csv_code, sport_key in UNDERSTAT_LEAGUES, score_history, history, matches, now)
@@ -1567,6 +1582,13 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
             if pack is None:
                 continue
             score_history,domestic_context,xg_evidence=cup_fixture_data(pack,home,away,kickoff)
+        else:
+            score_history=league_score_history
+        personal, personal_frame = reviewed_personal_context(home, away, kickoff, sport_key,
+            match.get('id'), now, {s:pack[s].get('sport_key') for s in ('home','away')} if is_cup else None)
+        if personal is not None and not personal_frame.empty:
+            from personal_context import supplement_form_history
+            score_history = supplement_form_history(score_history, personal_frame, personal)
         h2h = get_h2h_history(score_history, home, away, kickoff, limit=5)
         metrics = estimate_goals(history, home, away, kickoff) if not history.empty else None
         context = estimate_domestic_context(domestic_context, home, away, kickoff) if sport_key in EUROPEAN_CUPS else {}
@@ -1642,6 +1664,10 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                                                    opponents, xg_evidence, price)
                     ou_line = line if m_key == "totals" else 2.5
                     analysis_b = system_b_analysis(metrics, matrix, eval_res, split_line(ou_line), ou_line)
+                    if personal is not None:
+                        analysis_a['personal_stats']=personal
+                        analysis_b['personal_stats']={'available':personal.get('available',False),
+                            'model_enabled':False, 'reason':personal['model_reason']}
                     if is_cup:
                         analysis_a['domestic_sources']={'home':pack['home'],'away':pack['away']}
                         analysis_a['form_audit']=form_audit
@@ -1651,6 +1677,8 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     ev_pct = eval_res.get("ev_pct") if eval_res else None
                     recommendation = choose_recommendation(confidence, ev_pct, odds_in_range, confidence is not None)
                     reason_parts = ([cup_model_status(xg_evidence)] if is_cup else []) + [f"รับข้อมูล UTC: {provenance['received_at'] or 'ไม่ทราบ'} · เจ้ามืออัปเดตตลาด: {provenance['source_updated_at'] or 'ไม่ทราบ'}"]
+                    if personal is not None:
+                        reason_parts.append('คลังสถิติส่วนตัว: '+str(personal.get('status'))+' · '+personal['model_reason'])
                     if metrics:
                         reason_parts.append(f"xG คาดการณ์ {metrics['home_lambda']:.2f}-{metrics['away_lambda']:.2f}")
                     reason_parts.append(f"ผลย้อนหลังเทียบเส้น: 5 นัด {form5.get('form_rate') if form5.get('form_rate') is not None else 'n/a'}%, 10 นัด {form10.get('form_rate') if form10.get('form_rate') is not None else 'n/a'}%, ช่วงข้อมูลทั้งหมด {formseason.get('form_rate') if formseason.get('form_rate') is not None else 'n/a'}%")
@@ -1698,6 +1726,8 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
         # Keep a fixture visible even when API has not supplied usable spreads/totals outcomes.
         if len(rows) == rows_before_match:
             no_price_a = system_a_analysis({}, {}, {}, home_profile, away_profile, opponents, xg_evidence, {})
+            if personal is not None:
+                no_price_a['personal_stats']=personal
             if is_cup:
                 no_price_a.update(form_audit=form_audit, domestic_sources={'home':pack['home'],'away':pack['away']})
             rows.append({"event_id": match.get("id", ""), "kickoff_utc": kickoff.isoformat(),
@@ -2206,41 +2236,64 @@ with tab_history:
 if personal_pilot_enabled:
     with tab_personal:
         st.subheader("📸 คลังสถิติส่วนตัว (ทดลอง)")
-        st.caption("แยกข้อมูลหลังแข่งและก่อนแข่ง · ยังไม่เปิดระบบ AI อ่านภาพอัตโนมัติ · ไม่ใช้เครดิต The Odds API")
+        st.caption("รับข้อมูลและยืนยัน ณ เวลาจริง · ไม่อ้างว่าข้อมูลมีอยู่ก่อนเกมย้อนหลัง · ไม่ใช้เครดิต The Odds API")
         from personal_stats import save_verified, read_history
+        from stats_image_reader import prepare_images, read_images
+        from stats_quality import missing_fields, validate_stats
         mode = st.radio("โหมด", ["หลังแข่ง · บันทึกสถิติ", "ก่อนแข่ง · ตรวจประวัติ"], horizontal=True, key="personal_mode")
         if mode.startswith("หลังแข่ง"):
-            st.info("อัปโหลดภาพเพื่อดูต้นฉบับ แล้วกรอกหรือวางข้อมูลที่ตรวจแล้ว ระบบยังไม่อ้างว่าอ่านตัวเลขจากภาพเอง")
+            st.info("อัปโหลดภาพเพื่ออ่านเป็นร่าง หรือกรอกสถิติเอง ต้องตรวจข้อมูลและยืนยันผลหลังแข่งก่อนบันทึก")
             photos = st.file_uploader("ภาพสถิติ (หลายภาพ)", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True, key="personal_images")
+            prepared = None
             if photos:
-                st.caption(f"เลือกแล้ว {len(photos)} ภาพ · ภาพยังไม่ถูกบันทึกลงฐานข้อมูล")
-                for photo in photos[:8]:
-                    st.image(photo, caption=photo.name, use_container_width=True)
-            if photos:
+                try:
+                    prepared = prepare_images(photos)
+                except ValueError:
+                    st.error("ภาพไม่ผ่านการตรวจสอบ: ใช้ 1–6 ภาพ PNG/JPEG/WebP ที่เปิดได้ และขนาดอยู่ในเกณฑ์")
+            batch = prepared["batch_fingerprint"] if prepared else None
+            if st.session_state.get("personal_batch") != batch:
+                st.session_state["personal_batch"] = batch
+                st.session_state.pop("personal_extracted", None)
+                st.session_state["personal_confirm"] = False
+                if st.session_state.pop("personal_draft_applied", False):
+                    for field in ("personal_raw_stats", "personal_home", "personal_away"):
+                        st.session_state[field] = ""
+                    st.session_state["personal_hg"] = 0
+                    st.session_state["personal_ag"] = 0
+            if prepared:
+                st.caption(f"เลือกแล้ว {len(photos)} ภาพ · ภาพต้นฉบับยังไม่ถูกบันทึกลงฐานข้อมูล")
+                for photo in photos:
+                    st.image(photo.getvalue(), caption=photo.name, use_container_width=True)
                 vision_key = runtime_setting("OPENAI_API_KEY", "")
                 if not vision_key:
                     st.caption("อ่านภาพอัตโนมัติยังไม่เปิด: ต้องตั้ง OPENAI_API_KEY ใน Secrets ของแอปทดลอง (อาจมีค่าใช้จ่ายแยก)")
                 if st.button("🔎 อ่านสถิติจากภาพ (ต้องตรวจสอบก่อนบันทึก)", disabled=not bool(vision_key), key="personal_vision"):
                     try:
-                        from stats_image_reader import read_images
-                        from stats_quality import missing_fields
                         with st.spinner("กำลังอ่านภาพ"):
-                            extracted = read_images(photos, vision_key)
+                            extracted = read_images(photos, vision_key, user_requested=True)
+                        if extracted["extraction"]["batch_fingerprint"] != batch:
+                            raise ValueError("image batch changed")
                         st.session_state["personal_extracted"] = extracted
-                    except Exception as exc:
-                        st.error(f"อ่านภาพไม่สำเร็จ: {type(exc).__name__} · ตรวจ API key, เครดิต, ขนาดภาพและลองใหม่")
-            if "personal_extracted" in st.session_state:
-                extracted = st.session_state["personal_extracted"]
-                st.warning("ผล AI เป็นเพียงร่าง ต้องตรวจเทียบภาพต้นฉบับทุกช่องก่อนบันทึก")
+                        st.session_state["personal_confirm"] = False
+                    except Exception:
+                        st.error("อ่านภาพไม่สำเร็จ · ตรวจการตั้งค่าและขนาดภาพ แล้วลองใหม่; ยังไม่มีการบันทึกข้อมูล")
+            extracted = st.session_state.get("personal_extracted")
+            if extracted and prepared and extracted.get("extraction", {}).get("batch_fingerprint") == batch:
+                st.warning("ผล AI เป็นเพียงร่าง ต้องตรวจเทียบภาพต้นฉบับทุกช่อง รวมชื่อทีมและสกอร์ ก่อนบันทึก")
                 st.json(extracted)
-                from stats_quality import missing_fields
                 gaps = missing_fields(extracted["stats"])
                 if gaps:
                     st.warning("สถิติหลักที่ยังขาด: " + ", ".join(gaps))
                 if extracted.get("warnings"):
-                    st.warning("ข้อสงสัย: " + "; ".join(map(str, extracted["warnings"][:10])))
+                    st.warning("ข้อสงสัย: " + "; ".join(extracted["warnings"][:10]))
                 if st.button("คัดลอกสถิติที่อ่านได้ไปช่องแก้ไข", key="personal_use_extraction"):
                     st.session_state["personal_raw_stats"] = json.dumps(extracted["stats"], ensure_ascii=False, indent=2)
+                    for name, field in (("home_team", "personal_home"), ("away_team", "personal_away"),
+                                        ("home_goals", "personal_hg"), ("away_goals", "personal_ag")):
+                        if extracted.get(name) is not None:
+                            st.session_state[field] = extracted[name]
+                    st.session_state["personal_confirm"] = False
+                    st.session_state["personal_draft_applied"] = True
                     st.rerun()
             with st.form("personal_stats_form"):
                 match_key = st.text_input("รหัสแมตช์ไม่ซ้ำ (เช่น event ID)", key="personal_match_key")
@@ -2252,32 +2305,44 @@ if personal_pilot_enabled:
                     home_goals = st.number_input("ประตูเจ้าบ้าน", min_value=0, step=1, key="personal_hg")
                 with col_a:
                     away_goals = st.number_input("ประตูทีมเยือน", min_value=0, step=1, key="personal_ag")
+                league = st.selectbox("ลีกของแมตช์", list(LEAGUES), format_func=lambda k: LEAGUES[k][0], key="personal_league")
+                season = st.text_input("ฤดูกาลตามแหล่งข้อมูล (เช่น 2627)", key="personal_season")
                 source = st.text_input("แหล่งข้อมูล (เช่น FotMob)", key="personal_source")
+                source_url = st.text_input("URL หลักฐาน (ถ้ามี)", key="personal_source_url")
                 raw_stats = st.text_area('สถิติ JSON เช่น {"xG":{"home":2.7,"away":0.74},"shots":{"home":21,"away":10}}', height=130, key="personal_raw_stats")
                 confirmed = st.checkbox("ตรวจตัวเลขและยืนยันว่าเป็นข้อมูลหลังแข่งจริง", key="personal_confirm")
-                submitted = st.form_submit_button("บันทึกสถิติที่ตรวจแล้ว", disabled=not confirmed)
+                submitted = st.form_submit_button("บันทึกสถิติที่ตรวจแล้ว")
             if submitted:
                 try:
-                    parsed = json.loads(raw_stats)
+                    if not confirmed or (photos and not prepared):
+                        raise ValueError("ต้องตรวจภาพและยืนยันข้อมูลหลังแข่งก่อนบันทึก")
+                    parsed = validate_stats(json.loads(raw_stats))
+                    metadata = {"images":prepared["images"], "batch_fingerprint":batch} if prepared else {"entry_method":"manual"}
+                    if extracted and extracted.get("extraction", {}).get("batch_fingerprint") == batch:
+                        metadata["extraction"] = extracted["extraction"]
                     with db() as con:
                         save_verified(con, match_key=match_key, kickoff_utc=kickoff,
-                                      home_team=home, away_team=away,
-                                      home_goals=int(home_goals), away_goals=int(away_goals),
-                                      source=source, stats=parsed)
-                    st.success("บันทึกข้อมูลที่ตรวจแล้วเรียบร้อย (ยังไม่เชื่อมคำนวณ EV)")
-                except (ValueError, TypeError, json.JSONDecodeError) as exc:
-                    st.error(f"ตรวจข้อมูลไม่ผ่าน: {exc}")
+                            home_team=home, away_team=away, home_goals=int(home_goals), away_goals=int(away_goals),
+                            source=source, stats=parsed, league=league, season=season,
+                            source_url=source_url.strip() or None, reviewed=True, completed=True,
+                            evidence_mode="observed", metadata=metadata)
+                    st.success("บันทึก revision ที่ตรวจแล้ว ณ เวลารับจริง · ใช้ฟอร์ม A ได้เมื่อผ่านเกณฑ์เวลา/ลีก · ไม่สร้าง EV จากสถิติส่วนตัว")
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    st.error("ตรวจข้อมูลไม่ผ่าน: ต้องยืนยันผลหลังแข่ง ชื่อทีม เวลา UTC ลีก ฤดูกาล แหล่งข้อมูล และตัวเลขที่ถูกต้อง")
         else:
-            st.info("อ่านเฉพาะแมตช์ที่บันทึกแล้ว · ยังไม่เชื่อม A/B/C จนกว่าจะทดสอบข้อมูลและการป้องกันข้อมูลอนาคต")
+            st.info("A ใช้ผลที่ตรวจแล้วได้เฉพาะก่อนเวลาวิเคราะห์และลีกที่รองรับ; xG ส่วนตัวเป็นหลักฐานประกอบ B/C ยังไม่สร้าง EV ทดแทน")
             team_filter = st.text_input("ค้นหาชื่อทีม (ตรงกับชื่อที่บันทึก)", key="personal_team_filter")
             with db() as con:
                 records = read_history(con, team=team_filter.strip() or None)
-            st.caption(f"พบ {len(records)} แมตช์ที่ยืนยันแล้ว")
+            st.caption(f"พบ {len(records)} แมตช์ในคลัง · การเห็นในคลังไม่ได้แปลว่าผ่านเกณฑ์โมเดล")
             for record in records[:30]:
                 with st.expander(f"{record['home_team']} {record['home_goals']}–{record['away_goals']} {record['away_team']} · {record['kickoff_utc']}"):
                     st.caption(f"แหล่งข้อมูล: {record['source']} · บันทึกเมื่อ {record['recorded_at']}")
-                    st.json(json.loads(record['stats_json']))
-        st.warning("SQLite บน Streamlit Cloud อาจสูญหายหลังรีสตาร์ต ควรดาวน์โหลดสำรองจากแท็บประวัติทุกครั้งหลังบันทึก")
+                    try:
+                        st.json(json.loads(record['stats_json']))
+                    except (TypeError, ValueError):
+                        st.warning("สถิติเดิมอ่านไม่ได้ — เก็บต้นฉบับไว้รอตรวจ ไม่ใช้เป็นข้อมูลโมเดล")
+        st.warning("SQLite บน Streamlit Cloud อาจสูญหายหลังรีสตาร์ต ควรดาวน์โหลดสำรองจากแท็บประวัติทุกครั้งหลังบันทึก; ใช้แอปส่วนตัวที่จำกัดสิทธิ์เท่านั้น")
 
 with tab_help:
     st.subheader("ℹ️ วิธีใช้และข้อจำกัด")

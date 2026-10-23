@@ -22,6 +22,8 @@ def backup_bytes(source):
 
 def restore_new(payload, target):
     """Never overwrite an existing database; verify before publishing the new copy."""
+    if not isinstance(payload, (bytes, bytearray)) or len(payload) < 100 or not payload.startswith(b'SQLite format 3\x00'):
+        raise sqlite3.DatabaseError('Invalid SQLite backup payload')
     target = Path(target)
     with tempfile.TemporaryDirectory() as tmp:
         candidate = Path(tmp)/'candidate.db';candidate.write_bytes(payload)
