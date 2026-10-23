@@ -542,6 +542,51 @@ def fetch_history(csv_code):
     return load_history(csv_code, requests.get, timeout=HISTORY_TIMEOUT)
 
 
+@st.cache_data(ttl=21600, show_spinner=False)
+def fetch_api_football_form(sport_key, season, api_key):
+    """Optional cached score source; at most one API call per league/season per cache TTL."""
+    from api_football_data import fetch_finished_fixtures
+    return fetch_finished_fixtures(sport_key, season, api_key, requests.get, timeout=HISTORY_TIMEOUT)
+
+
+def optional_api_football_fallback(sport_key, score_history, matches, now):
+    """Replace unusable CSV form only when the paid/free provider matches BOTH fixture clubs.
+
+    Never blend histories from two providers or alter Understat/EV inputs.
+    """
+    from api_football_data import LEAGUE_IDS
+    from history_data import match_team
+    if sport_key not in LEAGUE_IDS:
+        return score_history
+    key = runtime_setting("API_FOOTBALL_KEY", "")
+    if not key:
+        return score_history
+    current = [m for m in matches if m.get("home_team") and m.get("away_team")]
+    if not current:
+        return score_history
+    csv_names = set()
+    if score_history is not None and not score_history.empty:
+        csv_names = set(score_history["HomeTeam"].dropna()) | set(score_history["AwayTeam"].dropna())
+    # Preserve the existing source if all scanned teams can be identified there.
+    if csv_names and all(match_team(name, csv_names)[0] is not None
+                         for m in current for name in (m["home_team"], m["away_team"])):
+        return score_history
+    season = now.year if now.month >= 7 else now.year - 1
+    candidate, diagnostic = fetch_api_football_form(sport_key, season, key)
+    if candidate.empty:
+        return score_history
+    provider_names = set(candidate["HomeTeam"]) | set(candidate["AwayTeam"])
+    if all(match_team(name, provider_names)[0] is not None
+           for m in current for name in (m["home_team"], m["away_team"])):
+        candidate.attrs["history_diagnostics"] = {
+            **candidate.attrs.get("history_diagnostics", {}),
+            "fallback_from": "football-data",
+            "fallback_reason": "csv_missing_or_unmatched",
+        }
+        return candidate
+    return score_history
+
+
 def get_h2h_history(score_history, home_api, away_api, kickoff, limit=5):
     """Display-only H2H from the selected league's Football-Data results.
     Never feeds H2H into xG, Poisson, EV, or recommendation ranking.
@@ -1540,6 +1585,8 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     cup_packs = load_cup_sources(matches,now,hours_limit) if is_cup else {}
     history = pd.DataFrame() if is_cup else fetch_understat_history(sport_key)
     score_history = pd.DataFrame() if is_cup else fetch_history(csv_code)
+    if not is_cup:
+        score_history = optional_api_football_fallback(sport_key, score_history, matches, now)
     from data_health import observe_league
     health = observe_league(
         sport_key, league_name, csv_code, sport_key in UNDERSTAT_LEAGUES, score_history, history, matches, now)
