@@ -9,6 +9,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
 from pathlib import Path
+from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pandas as pd
 
@@ -16,6 +18,7 @@ import pandas as pd
 def load_functions(path):
     tree = ast.parse(path.read_text())
     ns = dict(pd=pd, math=math, re=re, json=json, sqlite3=sqlite3,
+              st=SimpleNamespace(caption=Mock(), secrets={}),
               datetime=datetime, timedelta=timedelta, timezone=timezone,
               get_close_matches=get_close_matches, TH_TZ=timezone(timedelta(hours=7)),
               UTC=timezone.utc, MAX_XG_AGE_DAYS=120)

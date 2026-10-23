@@ -1,6 +1,7 @@
 """Validated Football-Data scores and explicit diagnostics; never creates xG."""
 import re
 import hashlib
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from io import BytesIO
@@ -13,8 +14,31 @@ REQUIRED = {'Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG'}
 # Direct E2 CSV audit, 2026-10-20, Actions run 39432169259:
 # 2627/2324 contain "Oxford" and all four seasons contain "Wigan".
 # The full names are the supplied Odds API fixture labels, not guessed spellings.
-TEAM_ALIASES = (frozenset({'oxfordunited', 'oxford'}), frozenset({'wiganathletic', 'wigan'}))
 ALIAS_SOURCE = 'https://www.football-data.co.uk/mmz4281/2627/E2.csv'
+_ISSUE9_SOURCE = 'https://github.com/it0151jsm-tech/football-scanner/issues/9'
+_UNDERSTAT_AUDIT = 'https://github.com/it0151jsm-tech/football-scanner/actions/runs/39448791254/artifacts/12275769505'
+# These are reviewed provider labels, not suffix-removal or fuzzy-match rules.
+# The four Issue #9 groups have current CSV HTTP/hash/receipt evidence in
+# fixtures/team_identity_evidence.json. That file separately records the three
+# evidenced Understat labels; Ipswich Understat coverage is not asserted. An
+# alias establishes identity only: callers still check league/season membership.
+TEAM_ALIAS_RECORDS = (
+    {'id': 'oxford-united', 'aliases': ('Oxford United', 'Oxford'), 'csv_source': ALIAS_SOURCE},
+    {'id': 'wigan-athletic', 'aliases': ('Wigan Athletic', 'Wigan'), 'csv_source': ALIAS_SOURCE},
+    {'id': 'vfb-stuttgart', 'aliases': ('VfB Stuttgart', 'Stuttgart'),
+     'csv_source': 'https://www.football-data.co.uk/mmz4281/2627/D1.csv',
+     'api_evidence': _ISSUE9_SOURCE, 'understat_evidence': _UNDERSTAT_AUDIT},
+    {'id': 'borussia-monchengladbach',
+     'aliases': ('Borussia Monchengladbach', "M'gladbach", 'Borussia M.Gladbach'),
+     'csv_source': 'https://www.football-data.co.uk/mmz4281/2627/D1.csv',
+     'api_evidence': _ISSUE9_SOURCE, 'understat_evidence': _UNDERSTAT_AUDIT},
+    {'id': 'ipswich-town', 'aliases': ('Ipswich Town', 'Ipswich'),
+     'csv_source': 'https://www.football-data.co.uk/mmz4281/2627/E0.csv',
+     'api_evidence': _ISSUE9_SOURCE},
+    {'id': 'nottingham-forest', 'aliases': ('Nottingham Forest', "Nott'm Forest"),
+     'csv_source': 'https://www.football-data.co.uk/mmz4281/2627/E0.csv',
+     'api_evidence': _ISSUE9_SOURCE, 'understat_evidence': _UNDERSTAT_AUDIT},
+)
 MESSAGES = {
     'download_error': 'โหลดข้อมูลไม่สำเร็จ', 'http_error': 'แหล่ง CSV ตอบ HTTP ไม่สำเร็จ',
     'empty_file': 'ไฟล์ CSV ว่าง', 'empty_history': 'ไม่มีแถวผลย้อนหลังที่ใช้ได้',
@@ -23,6 +47,7 @@ MESSAGES = {
     'conflicting_scores': 'พบสกอร์ขัดแย้ง — แยกออกจากการคำนวณรอตรวจ',
     'invalid_season': 'วันที่ไม่ตรงฤดูกาลต้นทาง — แยกออกจากการคำนวณรอตรวจ',
     'name_unmatched': 'จับคู่ชื่อทีมไม่สำเร็จ', 'name_ambiguous': 'ชื่อทีมกำกวม — ไม่เดาจากชื่อคล้าย',
+    'lossy_normalization': 'ชื่อทีมตรงกันเฉพาะหลังตัดอักขระ — ยังไม่ยืนยันว่าเป็นทีมเดียวกัน',
     'no_history_before_kickoff': 'ไม่มีผลก่อนวันแข่งขัน', 'insufficient_history': 'มีผลย้อนหลังตามสนามไม่ถึง 5 นัด',
     'invalid_kickoff': 'วันแข่งขันไม่ถูกต้องหรือไม่มีเขตเวลา', 'unsupported_source': 'ลีกนี้ไม่มีรหัสแหล่งผลย้อนหลัง',
     'ok': 'ข้อมูลฟอร์มพร้อมใช้',
@@ -33,20 +58,52 @@ def normalize(name):
     return re.sub(r'[^a-z0-9]', '', str(name or '').lower().replace('&', 'and'))
 
 
+def _team_identity(name):
+    """Keep accented letters: ASCII deletion is not identity evidence."""
+    value = unicodedata.normalize('NFKC', str(name or '')).casefold().replace('&', 'and')
+    return ''.join(char for char in value if char.isalnum())
+
+
+# Kept for existing integrations; matching uses Unicode-preserving identities.
+TEAM_ALIASES = tuple(frozenset(normalize(label) for label in record['aliases'])
+                     for record in TEAM_ALIAS_RECORDS)
+
+
+def alias_evidence(name, matched_name):
+    """Return the reviewed club/source evidence, never another club's CSV URL."""
+    first, second = _team_identity(name), _team_identity(matched_name)
+    for record in TEAM_ALIAS_RECORDS:
+        identities = {_team_identity(label) for label in record['aliases']}
+        if first in identities and second in identities:
+            evidence = dict(record)
+            evidence['aliases'] = list(record['aliases'])
+            if record.get('api_evidence') == _ISSUE9_SOURCE:
+                evidence['evidence_file'] = 'fixtures/team_identity_evidence.json'
+            return evidence
+    return None
+
+
 def match_team(name, candidates):
-    normalized = normalize(name)
-    exact = [c for c in set(candidates) if normalized and normalize(c) == normalized]
+    identity = _team_identity(name)
+    candidates = set(candidates)
+    exact = [c for c in candidates if identity and _team_identity(c) == identity]
+    # Multiple distinct provider labels in one history cannot be silently treated
+    # as one team. This also rejects an exact label plus another reviewed alias.
+    for record in TEAM_ALIAS_RECORDS:
+        identities = {_team_identity(label) for label in record['aliases']}
+        if identity in identities:
+            matches = [c for c in candidates if _team_identity(c) in identities]
+            if len(matches) > 1:
+                return None, 'name_ambiguous'
+            if len(matches) == 1:
+                return matches[0], 'exact' if _team_identity(matches[0]) == identity else 'verified_alias'
     if len(exact) == 1:
         return exact[0], 'exact'
     if len(exact) > 1:
         return None, 'name_ambiguous'
-    for group in TEAM_ALIASES:
-        if normalized in group:
-            matches = [c for c in set(candidates) if normalize(c) in group]
-            if len(matches) == 1:
-                return matches[0], 'verified_alias'
-            if len(matches) > 1:
-                return None, 'name_ambiguous'
+    normalized = normalize(name)
+    if normalized and any(normalize(c) == normalized for c in candidates):
+        return None, 'lossy_normalization'
     return None, 'name_unmatched'
 
 
@@ -197,7 +254,9 @@ def team_history(df, name, kickoff, venue=None):
     team, method = match_team(name, names)
     report.update(matched_name=team, mapping=method, cutoff_date=str(cutoff.date()))
     if method == 'verified_alias':
-        report['alias_source'] = ALIAS_SOURCE
+        evidence = alias_evidence(name, team)
+        report['alias_source'] = evidence['csv_source'] if evidence else None
+        report['alias_evidence'] = evidence
     if team is None:
         return done(pd.DataFrame(), method)
     hist = hist[hist['Date_dt'] < cutoff]
