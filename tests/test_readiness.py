@@ -244,6 +244,16 @@ class ReadinessTests(unittest.TestCase):
         original_ui = [entry for entry in ui
                        if not archive_first_line <= entry[0] < archive_last_line
                        and not coverage_first_line <= entry[0] < coverage_last_line]
+        # PR13/current request explicitly authorizes one scan-count diagnostic.
+        # Check its exact single call independently; every original control stays
+        # protected by the original PR2 contract rather than regenerating it.
+        scan = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'scan_league')
+        diagnostics = [n for n in ast.walk(scan) if isinstance(n, ast.Call)
+                       and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+                       and n.func.value.id == 'st']
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(ast.unparse(diagnostics[0]), 'st.caption(scan_report_text(scan_report))')
+        original_ui = [entry for entry in original_ui if entry[0] != diagnostics[0].lineno]
         self.assertEqual([list(x[1:]) for x in sorted(original_ui)],contract['ui_calls'])
         for n in tree.body:
             if isinstance(n,ast.FunctionDef) and n.name in contract['formula_source_sha256']:
