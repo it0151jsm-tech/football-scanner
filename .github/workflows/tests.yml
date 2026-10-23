@@ -14,7 +14,7 @@ jobs:
       - run: python scripts/run_offline_tests.py
         env:
           DASHBOARD_SCREENSHOTS: test-artifacts
-      - run: python -m py_compile app.py mobile_dashboard.py market_recommendations.py history_data.py ou_market.py manual_quotes.py data_health.py scripts/check_e2_history.py scripts/audit_leagues.py readiness.py odds_budget.py bill_backup.py credential_redaction.py domestic_data.py form_audit.py personal_stats.py personal_context.py stats_image_reader.py stats_quality.py
+      - run: python -m py_compile app.py mobile_dashboard.py market_recommendations.py history_data.py ou_market.py manual_quotes.py data_health.py scripts/check_e2_history.py scripts/audit_leagues.py readiness.py odds_budget.py bill_backup.py credential_redaction.py domestic_data.py form_audit.py personal_stats.py personal_context.py stats_image_reader.py stats_quality.py understat_history.py source_diagnostics.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

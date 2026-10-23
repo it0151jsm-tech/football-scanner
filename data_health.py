@@ -10,7 +10,13 @@ def check_source(frame,name,supported,as_of):
     if not supported:
         return dict(status='unsupported',message='ไม่มีแหล่งข้อมูลรองรับ',matched_name=None)
     if frame is None or frame.empty:
-        return dict(status='load_error',message='ไม่มีข้อมูลที่โหลดสำเร็จสำหรับตรวจชื่อ',matched_name=None)
+        report=getattr(frame,'attrs',{}).get('xg_diagnostics') or getattr(frame,'attrs',{}).get('history_diagnostics',{})
+        codes=sorted({str(source['http_status']) for source in report.get('sources',[])
+                      if source.get('http_status') not in (None,200)})
+        reason=report.get('status')
+        return dict(status='load_error',message='ไม่มีข้อมูลที่โหลดสำเร็จสำหรับตรวจชื่อ'+
+                    (' · '+str(reason) if reason else '')+(' · HTTP '+', '.join(codes) if codes else ''),
+                    reason_code=reason,source=report,matched_name=None)
     names = sorted(set(frame['HomeTeam'].dropna())|set(frame['AwayTeam'].dropna()))
     mapped,method = match_team(name,names)
     if not mapped:
