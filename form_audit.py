@@ -15,7 +15,7 @@ from history_data import validate_rows
 
 _HIGH_MEAN_GF = 5.0
 _HIGH_MATCH_GF = 8
-_NAMESPACE = re.compile(r'^__domestic__\[[^\]]+\]::(.*)$', re.S)
+_NAMESPACE = re.compile(r'^__(?:domestic|personal|foreign)__\[[^\]]+\]::(.*)$', re.S)
 
 
 def _number(value):
@@ -71,6 +71,12 @@ def _row_record(row, team, venue, attrs, side):
                  opponent=opponent, venue=venue, score=f"{int(row['FTHG'])}-{int(row['FTAG'])}",
                  gf=gf, ga=ga, season=season, review_flags=[])
     value.update(_source_info(attrs, side, sport, season))
+    personal_source=row.get('_personal_source')
+    if isinstance(personal_source,str) and personal_source.strip():
+        value.update(source='Personal reviewed: '+personal_source,source_urls=[],
+                     provenance_status='personal_reviewed_receipt',csv_code=None)
+        revision=row.get('_personal_revision_id')
+        value['personal_revision_id']=int(revision) if pd.notna(revision) else None
     for field in ('source_url','received_at','payload_sha256'):
         raw=row.get('_history_'+field)
         value[field]=str(raw) if raw is not None and pd.notna(raw) else None

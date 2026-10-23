@@ -226,9 +226,44 @@ class ReadinessTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(ast.get_source_segment(mobile_source,protected[name]).encode()).hexdigest(),digest,name)
         source=(ROOT/'app.py').read_text()
         tree=ast.parse(source);ui=[]
+        # PR8 authorizes a separately gated personal-data pilot only. Verify the
+        # exact gate/branches before excluding that new region from the original
+        # four-tab contract; unrelated UI calls remain protected by PR2 hashes.
+        pilot_guards=[node for node in tree.body if isinstance(node,ast.If)
+                      and isinstance(node.test,ast.Name) and node.test.id=='personal_pilot_enabled']
+        self.assertEqual(len(pilot_guards),2,'pilot must have only the tab declaration and isolated panel')
+        tab_gate,panel_gate=pilot_guards
+        self.assertEqual(len(tab_gate.body),1)
+        self.assertEqual(len(tab_gate.orelse),1)
+        original_tabs=next(call[1] for call in contract['ui_calls'] if call[0]=='tabs')
+        original_targets=['tab_scan','tab_slips','tab_history','tab_help']
+        for branch,names,labels in [
+                (tab_gate.orelse,original_targets,original_tabs),
+                (tab_gate.body,original_targets[:-1]+['tab_personal','tab_help'],
+                 original_tabs[:-1]+['📸 คลังสถิติ',original_tabs[-1]])]:
+            assignment=branch[0]
+            self.assertIsInstance(assignment,ast.Assign)
+            self.assertEqual(len(assignment.targets),1)
+            self.assertIsInstance(assignment.targets[0],ast.Tuple)
+            self.assertEqual([name.id for name in assignment.targets[0].elts],names)
+            call=assignment.value
+            self.assertIsInstance(call,ast.Call)
+            self.assertEqual(ast.dump(call.func),ast.dump(ast.parse('st.tabs',mode='eval').body))
+            self.assertEqual(len(call.args),1)
+            self.assertEqual(call.keywords,[])
+            self.assertEqual(ast.literal_eval(call.args[0]),labels)
+        self.assertEqual(panel_gate.orelse,[])
+        self.assertEqual(len(panel_gate.body),1)
+        self.assertIsInstance(panel_gate.body[0],ast.With)
+        self.assertEqual(len(panel_gate.body[0].items),1)
+        self.assertEqual(ast.dump(panel_gate.body[0].items[0].context_expr),
+                         ast.dump(ast.Name(id='tab_personal',ctx=ast.Load())))
+        pilot_only_nodes={id(node) for region in (tab_gate.body[0],panel_gate.body[0])
+                          for node in ast.walk(region)}
         for n in ast.walk(tree):
             if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and isinstance(n.func.value,ast.Name) and n.func.value.id=='st':
-                ui.append((n.lineno,n.func.attr,[v.value for v in ast.walk(n) if isinstance(v,ast.Constant) and isinstance(v.value,(str,int,float,bool,type(None)))]))
+                if id(n) not in pilot_only_nodes:
+                    ui.append((n.lineno,n.func.attr,[v.value for v in ast.walk(n) if isinstance(v,ast.Constant) and isinstance(v.value,(str,int,float,bool,type(None)))]))
         # PR7 adds one explicitly isolated, read-only archive panel; preserve
         # the original PR2 UI contract for every pre-existing control.
         archive_start = source.index('    # Read-only recovery of persisted scans')

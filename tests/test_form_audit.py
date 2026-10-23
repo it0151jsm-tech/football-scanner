@@ -38,6 +38,17 @@ def fixture(home=None,away=None):
 
 
 class FormAuditTests(unittest.TestCase):
+    def test_personal_fallback_keeps_its_own_provider_and_revision(self):
+        frame=fixture()
+        frame['_personal_source']='owner supplied screenshot'
+        frame['_personal_revision_id']=123
+        frame['AwayTeam']=frame.AwayTeam.str.replace('__domestic__','__personal__',regex=False)
+        result=audit_fixture_forms(frame,'Bayern Munich','Arsenal',KICKOFF)['home']['windows']['5']['rows'][0]
+        self.assertEqual(result['source'],'Personal reviewed: owner supplied screenshot')
+        self.assertEqual(result['personal_revision_id'],123)
+        self.assertIsNone(result['csv_code'])
+        self.assertEqual(result['opponent'],'Opponent 5')
+
     def audit(self,frame=None,expected=None,kickoff=KICKOFF):
         return audit_fixture_forms(fixture() if frame is None else frame,'Bayern Munich','Arsenal',kickoff,expected)
 
