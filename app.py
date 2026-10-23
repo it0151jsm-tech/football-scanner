@@ -605,66 +605,30 @@ def get_h2h_history(score_history, home_api, away_api, kickoff, limit=5):
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_understat_history(sport_key):
-    """Fetch actual Understat match xG/xGA. Returns empty data on unsupported/blocked pages."""
-    league_code = UNDERSTAT_LEAGUES.get(sport_key)
-    if not league_code:
-        return pd.DataFrame()
-    frames = []
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "X-Requested-With": "XMLHttpRequest",
-    }
-    for season in UNDERSTAT_SEASONS:
-        url = f"https://understat.com/getLeagueData/{league_code}/{season}"
-        try:
-            response = requests.get(url, headers={**headers, "Referer": f"https://understat.com/league/{league_code}/{season}"}, timeout=TIMEOUT)
-            if response.status_code != 200 or not response.content:
-                continue
-            payload = response.json()
-            # Understat's league data endpoint returns match-level rows under `dates`.
-            dates = payload.get("dates", []) if isinstance(payload, dict) else []
-            rows = []
-            for item in dates:
-                if not item.get("isResult", True):
-                    continue
-                home_obj, away_obj = item.get("h") or {}, item.get("a") or {}
-                try:
-                    dt = pd.to_datetime(item.get("datetime"), utc=True, errors="coerce")
-                    hg, ag = float(item.get("goals", {}).get("h")), float(item.get("goals", {}).get("a"))
-                    xgh, xga = float(item.get("xG", {}).get("h")), float(item.get("xG", {}).get("a"))
-                except (TypeError, ValueError):
-                    continue
-                if pd.isna(dt) or not home_obj.get("title") or not away_obj.get("title"):
-                    continue
-                if not all(math.isfinite(v) for v in (hg, ag, xgh, xga)):
-                    continue
-                rows.append({
-                    "Date_dt": dt.tz_convert(None),
-                    "HomeTeam": str(home_obj.get("title")),
-                    "AwayTeam": str(away_obj.get("title")),
-                    "FTHG": hg, "FTAG": ag, "xG_home": xgh, "xG_away": xga,
-                })
-            if rows:
-                season_frame = pd.DataFrame(rows)
-                season_frame["source_league"] = league_code
-                season_frame['_history_season'] = f'{season%100:02d}{(season+1)%100:02d}'
-                frames.append(season_frame)
-        except Exception:
-            # A blocked or changed upstream page means no model, not synthetic values.
-            continue
-    if not frames:
-        return pd.DataFrame()
-    out = pd.concat(frames, ignore_index=True)
-    out = out.drop_duplicates(subset=["Date_dt", "HomeTeam", "AwayTeam"], keep="last")
-    return out.sort_values("Date_dt").reset_index(drop=True)
+    """Cache successful xG histories for six hours; failures retain safe diagnostics."""
+    from understat_history import load_understat_history, UnderstatUnavailable
+    frame = load_understat_history(sport_key, UNDERSTAT_LEAGUES.get(sport_key),
+                                  UNDERSTAT_SEASONS, requests.get, timeout=TIMEOUT)
+    if frame.empty or frame.attrs.get('xg_diagnostics',{}).get('status') != 'ok':
+        raise UnderstatUnavailable(frame)
+    return frame
+
+
+@cache_data(ttl=900, show_spinner=False)
+def fetch_understat_with_diagnostics(sport_key):
+    """Short failure cache; explicit scans only. Never re-date cached receipts."""
+    from understat_history import UnderstatUnavailable
+    try:
+        return fetch_understat_history(sport_key)
+    except UnderstatUnavailable as error:
+        return error.frame
 
 @st.cache_data(ttl=21600, show_spinner=False)
 def fetch_understat_all_history():
     """Collect only real Understat data for supported domestic leagues, for context display."""
     frames = []
     for sport_key in UNDERSTAT_LEAGUES:
-        frame = fetch_understat_history(sport_key)
+        frame = fetch_understat_with_diagnostics(sport_key)
         if frame is not None and not frame.empty:
             frame = frame.copy()
             if "source_league" not in frame.columns:
@@ -1423,7 +1387,7 @@ def load_cup_sources(matches, now, hours_limit):
                     scores[key].attrs['history_diagnostics']={'status':'download_error','error':type(exc).__name__}
                 if key in UNDERSTAT_LEAGUES:
                     try:
-                        xgs[key]=fetch_understat_history(key)
+                        xgs[key]=fetch_understat_with_diagnostics(key)
                     except Exception as exc:
                         xgs[key]=pd.DataFrame()
                         xgs[key].attrs['history_diagnostics']={'status':'download_error','error':type(exc).__name__}
@@ -1449,10 +1413,16 @@ def cup_fixture_data(pack, home, away, kickoff):
     for side in ('home','away'):
         resolution=dict(pack[side]);key=resolution.get('sport_key')
         frame=pack['xgs'].get(key,pd.DataFrame())
+        from understat_history import eligible_xg_history
+        frame=eligible_xg_history(frame,kickoff,datetime.now(UTC))
+        from source_diagnostics import xg_diagnostics
+        provider=xg_diagnostics(frame,resolution['input_name'],resolution['input_name'],kickoff,
+            supported=key in UNDERSTAT_LEAGUES)
+        resolution['xg_provider']=provider
         reason=resolution.get('reason','ไม่ทราบแหล่งข้อมูล')
         if resolution['status']=='matched':
             if frame.empty:
-                reason='Understat โหลดไม่ได้/ไม่มี xG จริงในลีกที่ยืนยัน — ไม่ใช้ประตูจริงทดแทน'
+                reason='Understat โหลดไม่ได้/ไม่มี xG จริงในลีกที่ยืนยัน — ไม่ใช้ประตูจริงทดแทน · '+provider['details']
                 resolution['status']='source_error'
             else:
                 required={'Date_dt','HomeTeam','AwayTeam','FTHG','FTAG','xG_home','xG_away'}
@@ -1552,9 +1522,10 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     now = datetime.now(UTC)
     is_cup = sport_key in EUROPEAN_CUPS
     cup_packs = load_cup_sources(matches,now,hours_limit) if is_cup else {}
-    history = pd.DataFrame() if is_cup else fetch_understat_history(sport_key)
+    history = pd.DataFrame() if is_cup else fetch_understat_with_diagnostics(sport_key)
     score_history = pd.DataFrame() if is_cup else fetch_history(csv_code)
     league_score_history = score_history
+    league_xg_history = history
     from data_health import observe_league
     health = observe_league(
         sport_key, league_name, csv_code, sport_key in UNDERSTAT_LEAGUES, score_history, history, matches, now)
@@ -1589,6 +1560,9 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
         if personal is not None and not personal_frame.empty:
             from personal_context import supplement_form_history
             score_history = supplement_form_history(score_history, personal_frame, personal)
+        if not is_cup:
+            from understat_history import eligible_xg_history
+            history=eligible_xg_history(league_xg_history,kickoff,datetime.now(UTC))
         h2h = get_h2h_history(score_history, home, away, kickoff, limit=5)
         metrics = estimate_goals(history, home, away, kickoff) if not history.empty else None
         context = estimate_domestic_context(domestic_context, home, away, kickoff) if sport_key in EUROPEAN_CUPS else {}
@@ -1610,6 +1584,13 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
         else:
             annotate_cup_profile(home_profile,pack['home'],xg_evidence)
             annotate_cup_profile(away_profile,pack['away'],xg_evidence)
+        from source_diagnostics import xg_diagnostics, annotate_form_source
+        if not is_cup:
+            provider_diagnostics=xg_diagnostics(history,home,away,kickoff,supported=sport_key in UNDERSTAT_LEAGUES)
+            xg_evidence['diagnostics']=provider_diagnostics
+            xg_evidence['status']=provider_diagnostics['details']
+            annotate_form_source(home_profile,score_history,home,kickoff,sport_key)
+            annotate_form_source(away_profile,score_history,away,kickoff,sport_key)
         form_audit = None
         if is_cup:
             from form_audit import audit_fixture_forms
@@ -1664,6 +1645,8 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                                                    opponents, xg_evidence, price)
                     ou_line = line if m_key == "totals" else 2.5
                     analysis_b = system_b_analysis(metrics, matrix, eval_res, split_line(ou_line), ou_line)
+                    if not is_cup and metrics is None:
+                        analysis_b['status']=provider_diagnostics['summary']+' — ยังไม่มี xG ที่เชื่อถือได้เพียงพอสำหรับ Poisson/EV'
                     if personal is not None:
                         analysis_a['personal_stats']=personal
                         analysis_b['personal_stats']={'available':personal.get('available',False),
@@ -1707,7 +1690,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                         "context_status": context.get("context_status", ""),
                         "model_status": (cup_model_status(xg_evidence) if is_cup else
                             ("Poisson จาก xG/xGA จริง (Understat)" if metrics else
-                            ("ลีกนี้ไม่มี xG จากแหล่งที่ตั้งไว้ — ใช้ฟอร์มอย่างระมัดระวัง" if sport_key not in UNDERSTAT_LEAGUES else "xG ย้อนหลังไม่พอ/แหล่งข้อมูลไม่พร้อม — ใช้ฟอร์มอย่างระมัดระวัง"))),
+                            (provider_diagnostics["summary"]+" — ไม่สร้าง EV ทดแทน"))),
                         "ev_pct": ev_pct, "p_win": eval_res.get("p_win") if eval_res else None,
                         "p_partial": eval_res.get("p_partial") if eval_res else None,
                         "p_loss": eval_res.get("p_loss") if eval_res else None,
