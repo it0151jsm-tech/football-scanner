@@ -1595,6 +1595,17 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
         health=cup_health(cup_packs,league_name,sport_key,now)
     record_data_health(sport_key, health)
     target = now + timedelta(hours=hours_limit)
+    # Counts are independent of market filters and never expose credentials.
+    in_window = 0
+    for event in matches:
+        try:
+            from readiness import instant
+            event_time = instant(event.get("commence_time"))
+            if event_time is not None and now <= event_time <= target:
+                in_window += 1
+        except (ValueError, TypeError):
+            pass
+    st.caption(f"ตรวจราคา {league_name}: API ส่ง {len(matches)} คู่ | ในช่วง {hours_limit} ชั่วโมง {in_window} คู่")
     rows, snapshot_rows = [], []
     first_prices = first_observed_quotes([m.get("id", "") for m in matches])
     for match in matches:

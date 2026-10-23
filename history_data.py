@@ -13,7 +13,20 @@ REQUIRED = {'Date', 'HomeTeam', 'AwayTeam', 'FTHG', 'FTAG'}
 # Direct E2 CSV audit, 2026-10-20, Actions run 39432169259:
 # 2627/2324 contain "Oxford" and all four seasons contain "Wigan".
 # The full names are the supplied Odds API fixture labels, not guessed spellings.
-TEAM_ALIASES = (frozenset({'oxfordunited', 'oxford'}), frozenset({'wiganathletic', 'wigan'}))
+TEAM_ALIASES = (
+    frozenset({'oxfordunited', 'oxford'}),
+    frozenset({'wiganathletic', 'wigan'}),
+    # Explicit known provider/Football-Data naming variants. A match is accepted
+    # only when exactly one candidate exists; never fuzzy-match clubs.
+    frozenset({'manchesterunited', 'manunited'}),
+    frozenset({'manchestercity', 'mancity'}),
+    frozenset({'newcastleunited', 'newcastle'}),
+    frozenset({'nottinghamforest', 'nottmforest'}),
+    frozenset({'tottenhamhotspur', 'tottenham', 'spurs'}),
+    frozenset({'westhamunited', 'westham'}),
+    frozenset({'brightonandhovealbion', 'brighton'}),
+    frozenset({'wolverhamptonwanderers', 'wolves', 'wolverhampton'}),
+)
 ALIAS_SOURCE = 'https://www.football-data.co.uk/mmz4281/2627/E2.csv'
 MESSAGES = {
     'download_error': 'โหลดข้อมูลไม่สำเร็จ', 'http_error': 'แหล่ง CSV ตอบ HTTP ไม่สำเร็จ',
