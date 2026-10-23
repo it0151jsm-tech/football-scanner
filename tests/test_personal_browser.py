@@ -120,7 +120,8 @@ class PersonalBrowserTests(unittest.TestCase):
                         expect(personal).to_be_visible(timeout=30000)
                         self.assertEqual(page.get_by_role('tab').count(), 5)
                         personal.click()
-                        panel = page.get_by_role('tabpanel').nth(3)
+                        panel = page.get_by_role('tabpanel', name='📸 คลังสถิติ', exact=True)
+                        expect(panel).to_be_visible()
                         upload = panel.locator('input[type="file"]')
                         expect(upload).to_have_attribute('multiple', '')
                         upload.set_input_files([self.image_upload('offline-home.png', 'green'),
