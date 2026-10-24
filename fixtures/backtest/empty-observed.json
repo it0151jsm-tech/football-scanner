@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "data_mode": "observed",
+  "description": "Empty availability audit input. No qualifying observed match/price/xG archive is committed; this file contains no invented football records.",
+  "source_catalog": {},
+  "evidence_payloads": {},
+  "events": [],
+  "decisions": [],
+  "score_history": [],
+  "xg_history": [],
+  "quotes": [],
+  "results": []
+}
