@@ -64,8 +64,17 @@ def api_football_status_text(diagnostic):
         "provider_metadata_unverified": "หลักฐานลีก ฤดูกาล หรือรหัสทีมไม่ครบ — ยังไม่ใช้คำนวณฟอร์ม",
         "incomplete_pagination": "ข้อมูลหลายหน้าไม่ครบ — ไม่เรียกหน้าถัดไปอัตโนมัติ",
         "conflicting_results": "ผลหรืออัตลักษณ์ทีมขัดแย้ง — ไม่ใช้ข้อมูล",
+        "disabled_by_owner": "ปิด API-Football ตามการตั้งค่า — ไม่ใช้เครดิต",
+        "plan_backoff": "พักการเรียกหลังแพ็กเกจไม่รองรับ — ไม่ใช้เครดิตซ้ำ",
+        "auth_backoff": "พักการเรียกหลังปัญหาสิทธิ์เข้าถึง — ไม่ใช้เครดิตซ้ำ",
+        "quota_backoff": "พักการเรียกหลังถูกจำกัดโควตา — ไม่ใช้เครดิตซ้ำ",
+        "failure_backoff": "พักการเรียกหลังแหล่งข้อมูลล้มเหลว",
+        "request_in_progress": "มีคำขอสำหรับลีกและฤดูกาลนี้กำลังทำงาน — ไม่เรียกซ้ำ",
+        "backoff_store_unavailable": "ตรวจข้อจำกัดการเรียกไม่ได้ — หยุดเรียกเพื่อป้องกันเครดิต",
+        "invalid_clock": "เวลาอ้างอิงไม่ถูกต้อง — หยุดเรียก",
+        "invalid_backoff_policy": "การตั้งค่าช่วงพักไม่ถูกต้อง — หยุดเรียก",
     }
-    reason_code = report.get("reason")
+    reason_code = report.get("reason") or report.get("reason_code")
     reason = reasons.get(reason_code) if isinstance(reason_code, str) else None
     if reason:
         detail += " — " + reason
@@ -75,6 +84,21 @@ def api_football_status_text(diagnostic):
     count = report.get("usable_rows")
     if state in {"success", "ok"} and isinstance(count, int) and not isinstance(count, bool) and count >= 0:
         detail += " (" + str(count) + " เกม)"
+    if state == "not_called" and report.get("backoff_active") is True:
+        previous = report.get("provider_state")
+        previous_text = messages.get(previous) if isinstance(previous, str) else None
+        if previous_text:
+            detail += " — ผลจากครั้งก่อน: " + previous_text
+            if previous == "http_error" and isinstance(http_status, int) and not isinstance(http_status, bool) and 100 <= http_status <= 599:
+                detail += " " + str(http_status)
+    next_retry = report.get("next_retry_at")
+    if isinstance(next_retry, str) and len(next_retry) <= 64:
+        try:
+            when = datetime.fromisoformat(next_retry.replace("Z", "+00:00"))
+            if when.tzinfo is not None:
+                detail += " · ลองใหม่ได้ UTC: " + when.astimezone(timezone.utc).isoformat()
+        except (ValueError, TypeError, OverflowError):
+            pass
     quarantined = sum(v for v in (report.get("rejected_rows", 0), report.get("conflicting_rows", 0))
                       if isinstance(v, int) and not isinstance(v, bool) and v > 0)
     if quarantined:

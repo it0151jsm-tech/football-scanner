@@ -38,6 +38,18 @@ TEAM_ALIAS_RECORDS = (
     {'id': 'nottingham-forest', 'aliases': ('Nottingham Forest', "Nott'm Forest"),
      'csv_source': 'https://www.football-data.co.uk/mmz4281/2627/E0.csv',
      'api_evidence': _ISSUE9_SOURCE, 'understat_evidence': _UNDERSTAT_AUDIT},
+    # Historical CSV labels + official club naming evidence, reviewed for Issue15.
+    # This establishes identity, never current league/season or Odds API coverage.
+    {'id': 'manchester-city', 'aliases': ('Manchester City', 'Man City'),
+     'csv_source': 'https://api.github.com/repos/datasets/football-datasets/git/blobs/080a33fc535bf75e4c3baeca32ce425760985758',
+     'identity_evidence': 'https://www.mancity.com/terms-of-use',
+     'evidence_file': 'fixtures/issue15_identity_evidence.json',
+     'understat_evidence': _UNDERSTAT_AUDIT},
+    {'id': 'manchester-united', 'aliases': ('Manchester United', 'Man United'),
+     'csv_source': 'https://api.github.com/repos/datasets/football-datasets/git/blobs/080a33fc535bf75e4c3baeca32ce425760985758',
+     'identity_evidence': 'https://www.manutd.com/en/news/focus-on-man-utd-supporters-clubs-in-china-seattle-switzerland',
+     'evidence_file': 'fixtures/issue15_identity_evidence.json',
+     'understat_evidence': _UNDERSTAT_AUDIT},
 )
 MESSAGES = {
     'download_error': 'โหลดข้อมูลไม่สำเร็จ', 'http_error': 'แหล่ง CSV ตอบ HTTP ไม่สำเร็จ',

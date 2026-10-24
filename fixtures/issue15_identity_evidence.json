@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "issue_url": "https://github.com/it0151jsm-tech/football-scanner/issues/15",
+  "evidence_recorded_at": "2026-10-24T01:07:52.726577+00:00",
+  "mode": "source_access_audit",
+  "source_payloads_observed": 0,
+  "scope": "One bounded public web-connector open batch (four E0 CSV URLs and one current EPL Understat URL). No raw source body or provider headers were returned. Connector statuses are not verified provider HTTP statuses. No Odds API request, API key or football statistics were used.",
+  "cancelled_shell_attempt": {
+    "executed": false,
+    "outcome": "network-permission command was cancelled before execution; no output directory or received metadata exists"
+  },
+  "sources": [
+    {
+      "provider": "Football-Data",
+      "season": "2627",
+      "url": "https://www.football-data.co.uk/mmz4281/2627/E0.csv",
+      "access_method": "web_connector_open",
+      "connector_status": 429,
+      "access_status": "connector_rate_limited",
+      "connector_message": "Failed to fetch URL: (429) Too Many Requests",
+      "evidence_recorded_at": "2026-10-24T01:07:52.726577+00:00",
+      "provider_http_status": null,
+      "source_received_at": null,
+      "source_payload_sha256": null,
+      "error_evidence_sha256": "f79d803d2b08e1c8ce14943e86dde899547f627d4a1ce8d81124657bcf651cdb",
+      "checksum_scope": "UTF-8 connector_message only; not source payload",
+      "valid_rows": null,
+      "invalid_dates": null,
+      "invalid_scores": null,
+      "labels": []
+    },
+    {
+      "provider": "Football-Data",
+      "season": "2526",
+      "url": "https://www.football-data.co.uk/mmz4281/2526/E0.csv",
+      "access_method": "web_connector_open",
+      "connector_status": 500,
+      "access_status": "connector_redirect_inaccessible",
+      "connector_message": "Redirected to https://football-data.co.uk/mmz4281/2526/E0.csv which is not accessible via this tool. (non-retryable error)",
+      "evidence_recorded_at": "2026-10-24T01:07:52.726577+00:00",
+      "provider_http_status": null,
+      "source_received_at": null,
+      "source_payload_sha256": null,
+      "error_evidence_sha256": "57af982cf830388b6a6cb3f998ffb64b2486114f212a5b844b81e9453cdc0471",
+      "checksum_scope": "UTF-8 connector_message only; not source payload",
+      "valid_rows": null,
+      "invalid_dates": null,
+      "invalid_scores": null,
+      "labels": []
+    },
+    {
+      "provider": "Football-Data",
+      "season": "2425",
+      "url": "https://www.football-data.co.uk/mmz4281/2425/E0.csv",
+      "access_method": "web_connector_open",
+      "connector_status": 500,
+      "access_status": "connector_redirect_inaccessible",
+      "connector_message": "Redirected to https://football-data.co.uk/mmz4281/2425/E0.csv which is not accessible via this tool. (non-retryable error)",
+      "evidence_recorded_at": "2026-10-24T01:07:52.726577+00:00",
+      "provider_http_status": null,
+      "source_received_at": null,
+      "source_payload_sha256": null,
+      "error_evidence_sha256": "82839fa99a4fbb7be68cc0fa0f3f52832b2826e5e1e969092e1a574ba4cde968",
+      "checksum_scope": "UTF-8 connector_message only; not source payload",
+      "valid_rows": null,
+      "invalid_dates": null,
+      "invalid_scores": null,
+      "labels": []
+    },
+    {
+      "provider": "Football-Data",
+      "season": "2324",
+      "url": "https://www.football-data.co.uk/mmz4281/2324/E0.csv",
+      "access_method": "web_connector_open",
+      "connector_status": 400,
+      "access_status": "connector_unsupported_content_type",
+      "connector_message": "Unsupported content-type: text/csv",
+      "evidence_recorded_at": "2026-10-24T01:07:52.726577+00:00",
+      "provider_http_status": null,
+      "source_received_at": null,
+      "source_payload_sha256": null,
+      "error_evidence_sha256": "7952b8ba16383d3f40aa479c4c9e20a3feb8ee11814a31a5173106b25b18cf63",
+      "checksum_scope": "UTF-8 connector_message only; not source payload",
+      "valid_rows": null,
+      "invalid_dates": null,
+      "invalid_scores": null,
+      "labels": []
+    },
+    {
+      "provider": "Understat",
+      "season": "2026",
+      "url": "https://understat.com/getLeagueData/EPL/2026",
+      "access_method": "web_connector_open",
+      "connector_status": null,
+      "access_status": "connector_inaccessible",
+      "connector_message": "URL is not accessible via this tool.",
+      "evidence_recorded_at": "2026-10-24T01:07:52.726577+00:00",
+      "provider_http_status": null,
+      "source_received_at": null,
+      "source_payload_sha256": null,
+      "error_evidence_sha256": "55d6ee709044e577d9236a44bfcb9a68d2349b2b39df85b8858d75f8e0845793",
+      "checksum_scope": "UTF-8 connector_message only; not source payload",
+      "valid_rows": null,
+      "invalid_dates": null,
+      "invalid_scores": null,
+      "labels": []
+    }
+  ],
+  "current_epl_roster": {
+    "verified": false,
+    "labels": [],
+    "teams_checked": 0,
+    "reason": "Current CSV payload inaccessible in this environment; no current 20-team roster asserted."
+  },
+  "cross_provider_identities_added": [
+    {
+      "club_id": "manchester-city",
+      "full_name": "Manchester City",
+      "csv_label": "Man City",
+      "official_url": "https://www.mancity.com/terms-of-use",
+      "historical_csv_url": "https://api.github.com/repos/datasets/football-datasets/git/blobs/080a33fc535bf75e4c3baeca32ce425760985758",
+      "understat_label_report": "reports/league-source-audit.json",
+      "evidence_scope": "Club identity only, not current league, current-season availability or observed Odds API roster"
+    },
+    {
+      "club_id": "manchester-united",
+      "full_name": "Manchester United",
+      "csv_label": "Man United",
+      "official_url": "https://www.manutd.com/en/news/focus-on-man-utd-supporters-clubs-in-china-seattle-switzerland",
+      "historical_csv_url": "https://api.github.com/repos/datasets/football-datasets/git/blobs/080a33fc535bf75e4c3baeca32ce425760985758",
+      "understat_label_report": "reports/league-source-audit.json",
+      "evidence_scope": "Club identity only, not current league, current-season availability or observed Odds API roster"
+    }
+  ],
+  "limitations": [
+    "Issue #15 provides aggregate scan counts, not the exact 20 API labels or failed-team labels. These cannot be reconstructed from counts.",
+    "Existing reports/league-source-audit.json and fixtures/team_identity_evidence.json are prior evidence; they do not establish current source availability.",
+    "No alias or xG value is inferred from a similar spelling, old membership, access error or missing data."
+  ],
+  "mirror_identity_evidence": {
+    "provider": "datasets/football-datasets (third-party mirror; not direct provider)",
+    "url": "https://api.github.com/repos/datasets/football-datasets/git/blobs/080a33fc535bf75e4c3baeca32ce425760985758",
+    "path": "datasets/premier-league/season-2324.csv",
+    "season": "2324",
+    "received_at": "2026-10-24T01:09:38.561Z",
+    "bytes": 30383,
+    "sha256": "f64a0999d037a8d1bcd0346f5d7532bbc3d2ec3434f9a46591713ea23c47aa15",
+    "git_blob_sha": "080a33fc535bf75e4c3baeca32ce425760985758",
+    "rows": 380,
+    "labels": [
+      "Arsenal",
+      "Aston Villa",
+      "Bournemouth",
+      "Brentford",
+      "Brighton",
+      "Burnley",
+      "Chelsea",
+      "Crystal Palace",
+      "Everton",
+      "Fulham",
+      "Liverpool",
+      "Luton",
+      "Man City",
+      "Man United",
+      "Newcastle",
+      "Nott'm Forest",
+      "Sheffield United",
+      "Tottenham",
+      "West Ham",
+      "Wolves"
+    ],
+    "source_attribution_url": "https://github.com/datasets/football-datasets/blob/main/datasets/premier-league/README.md",
+    "attributed_source": "Football Data UK",
+    "scope": "Historical identity-label evidence only. Original-provider payload and current-season coverage are not verified; no match rows are committed or supplied to production."
+  },
+  "official_name_evidence": [
+    {
+      "club_id": "manchester-city",
+      "aliases": [
+        "Manchester City",
+        "Man City"
+      ],
+      "url": "https://www.mancity.com/terms-of-use",
+      "access_method": "web_connector_open",
+      "observed_at": "2026-10-24T01:11:19.335918+00:00",
+      "kind": "official explicit alias definition",
+      "retained_phrases": [
+        "Manchester City Football Club",
+        "Man City"
+      ],
+      "checksum_scope": "UTF-8 JSON retained_phrases only; not raw page payload",
+      "evidence_excerpt_sha256": "862f60e62dda8d99d182de4f2f526bd553f067bf0cae1f19885eaf57f8628255"
+    },
+    {
+      "club_id": "manchester-united",
+      "aliases": [
+        "Manchester United",
+        "Man United"
+      ],
+      "url": "https://www.manutd.com/en/news/focus-on-man-utd-supporters-clubs-in-china-seattle-switzerland",
+      "access_method": "web_connector_search_index_excerpt",
+      "observed_at": "2026-10-24T01:11:19.335918+00:00",
+      "kind": "official club publication associates full club name and short supporter name",
+      "retained_phrases": [
+        "Manchester United Football Club",
+        "glory, glory Man United!"
+      ],
+      "limitation": "The live rendered page returned navigation/footer, not article text. Identity evidence is the search-index excerpt of this official URL, not a complete live article body.",
+      "checksum_scope": "UTF-8 JSON retained_phrases only; not raw page payload",
+      "evidence_excerpt_sha256": "27f468dc1db41e27a9927ee359389ca00d8ffe043d568b933a2ed204d4eeaafa"
+    }
+  ],
+  "newcastle_alias_status": {
+    "status": "not_added",
+    "reason": "Official pages establish Newcastle United but examined short Newcastle references could describe the city; not enough explicit short-name identity evidence."
+  },
+  "additional_sandbox_probe": {
+    "url": "https://www.football-data.co.uk/mmz4281/2627/E0.csv",
+    "executed": true,
+    "error_type": "URLError",
+    "provider_http_status": null,
+    "source_payload_sha256": null,
+    "source_received_at": null,
+    "evidence_recorded_at": "2026-10-24T01:15:12.856810+00:00",
+    "scope": "Default sandbox attempt returned URLError without source body or HTTP response; not a provider status."
+  }
+}
