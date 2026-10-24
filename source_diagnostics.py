@@ -155,10 +155,23 @@ def summarize_export_readiness(frame):
                         'market_rows': market_rows,
                         'a_scored_fixtures': int(subset['_a_ready'].sum()),
                         'b_ev_fixtures': int(subset['_b_ev_present'].sum())})
+    # Exported status is descriptive evidence, not a guarantee of readiness.
+    # Keep one observed reason per fixture to avoid multiplying failures by odds rows.
+    problem_fixtures = []
+    if 'สถานะข้อมูล' in working.columns:
+        for key, subset in grouped:
+            if not (subset['_a_ready'].any() and subset['_b_ev_present'].any()):
+                descriptions = [str(value).strip() for value in subset['สถานะข้อมูล'].dropna().unique()]
+                problem_fixtures.append({
+                    'league': str(key[0]), 'fixture': str(key[1]), 'kickoff': str(key[2]),
+                    'a_scored': bool(subset['_a_ready'].any()),
+                    'b_ev_present': bool(subset['_b_ev_present'].any()),
+                    'observed_status': descriptions[0][:800] if descriptions else 'no_status_exported',
+                })
     return {'status': 'ok', 'market_rows': len(working), 'fixtures': len(fixtures),
             'a_scored_fixtures': int(fixtures['_a_ready'].sum()),
             'b_ev_fixtures': int(fixtures['_b_ev_present'].sum()),
-            'leagues': leagues, 'note': 'EV present is not calibrated or a betting recommendation'}
+            'leagues': leagues, 'problem_fixtures': problem_fixtures,\n            'note': 'EV present is not calibrated or a betting recommendation'}
 
 
 def model_data_readiness(provider, metrics, analysis_b):
