@@ -131,6 +131,36 @@ def xg_diagnostics(frame, home, away, kickoff, *, supported=True):
     return result
 
 
+def summarize_export_readiness(frame):
+    """Audit a saved pick export offline; one fixture may have many market rows.
+
+    This does not imply provider coverage or model accuracy. Never count a
+    missing/uncalibrated EV as a successful recommendation.
+    """
+    required = {'ลีก', 'คู่แข่งขัน', 'เวลาแข่ง (ไทย)', 'คะแนนหลักฐาน A/100', 'EV (%)'}
+    if frame is None or not required.issubset(frame.columns):
+        return {'status': 'missing_columns', 'missing': sorted(required - set(getattr(frame, 'columns', [])))}
+    if frame.empty:
+        return {'status': 'empty', 'market_rows': 0, 'fixtures': 0, 'leagues': []}
+    working = frame.copy()
+    working['_a_ready'] = pd.to_numeric(working['คะแนนหลักฐาน A/100'], errors='coerce').notna()
+    working['_b_ev_present'] = pd.to_numeric(working['EV (%)'], errors='coerce').notna()
+    fixture_keys = ['ลีก', 'คู่แข่งขัน', 'เวลาแข่ง (ไทย)']
+    grouped = working.groupby(fixture_keys, dropna=False, sort=False)
+    fixtures = grouped[['_a_ready', '_b_ev_present']].any().reset_index()
+    leagues = []
+    for league, subset in fixtures.groupby('ลีก', dropna=False, sort=False):
+        market_rows = int((working['ลีก'] == league).sum())
+        leagues.append({'league': str(league), 'fixtures': len(subset),
+                        'market_rows': market_rows,
+                        'a_scored_fixtures': int(subset['_a_ready'].sum()),
+                        'b_ev_fixtures': int(subset['_b_ev_present'].sum())})
+    return {'status': 'ok', 'market_rows': len(working), 'fixtures': len(fixtures),
+            'a_scored_fixtures': int(fixtures['_a_ready'].sum()),
+            'b_ev_fixtures': int(fixtures['_b_ev_present'].sum()),
+            'leagues': leagues, 'note': 'EV present is not calibrated or a betting recommendation'}
+
+
 def model_data_readiness(provider, metrics, analysis_b):
     """Explain the unchanged model's output; calibration is not data availability."""
     info = {'provider': 'Understat', 'calibration_status': 'not_validated',
