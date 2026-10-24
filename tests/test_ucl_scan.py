@@ -45,6 +45,11 @@ class UCLScanTests(unittest.TestCase):
         self.assertEqual((a['home_form']['sample10'],a['away_form']['sample10']),(10,10))
         self.assertIsNotNone(a['score']);self.assertEqual(a['xg']['home']['sample'],10);self.assertEqual(a['xg']['away']['sample'],10)
         self.assertEqual(a['domestic_sources']['home']['csv_code'],'D1');self.assertEqual(a['domestic_sources']['away']['csv_code'],'E0')
+        audit=a['form_audit']
+        self.assertEqual(audit['home']['windows']['5']['sum_gf'],10)
+        self.assertTrue(audit['home']['windows']['5']['matches_profile'])
+        self.assertEqual(audit['away']['windows']['10']['count'],10)
+        self.assertIsNotNone(datetime.fromisoformat(audit['recorded_at']).tzinfo)
         self.assertFalse(b['available']);self.assertEqual(b['scope'],'domestic_context_only');self.assertTrue(b['domestic_xg_available'])
         self.assertIn('มี xG ลีกในประเทศจริง',b['status']);self.assertIsNone(row['ev_pct']);self.assertNotIn('expected_goals',b)
         self.assertEqual({c.args[0] for c in self.f['fetch_history'].call_args_list},{'D1','E0'})
@@ -62,6 +67,22 @@ class UCLScanTests(unittest.TestCase):
         self.assertEqual(a['home_form']['sample5'],5);self.assertIsNone(a['xg']['home']);self.assertIsNone(a['xg']['away'])
         self.assertIn('Understat โหลดไม่ได้',a['xg']['status']);self.assertFalse(b['domestic_xg_available']);self.assertIsNone(rows[0]['ev_pct'])
 
+    def test_form_manifest_persists_without_rewriting_previous_saved_analysis(self):
+        self.prepare();rows,snapshots,_,_=self.scan()
+        self.f['save_picks'](rows,snapshots)
+        saved=self.f['load_picks']().iloc[0].to_dict()
+        audit=json.loads(saved['analysis_a_json'])['form_audit']
+        self.assertEqual(audit['home']['windows']['5']['mean_gf'],2)
+        self.assertEqual(audit['away']['windows']['5']['mean_gf'],2)
+        self.assertEqual(audit['home']['windows']['10']['rows'][0]['season'],season_for_kickoff(self.kickoff))
+        self.assertTrue(all(r['date']<self.kickoff.date().isoformat() for r in audit['home']['windows']['10']['rows']))
+
+    def test_no_price_placeholder_keeps_form_evidence_without_ev(self):
+        self.prepare();self.event['bookmakers']=[]
+        rows,_,_,_=self.scan();a=json.loads(rows[0]['analysis_a_json'])
+        self.assertEqual(a['form_audit']['home']['windows']['5']['count'],5)
+        self.assertEqual(rows[0]['market'],'ยังไม่มีราคา');self.assertIsNone(rows[0]['ev_pct'])
+
     def test_old_xg_is_reported_without_inventing_values(self):
         self.prepare()
         old={k:v.assign(Date_dt=v.Date_dt-pd.DateOffset(years=1),_history_season='2526') for k,v in self.frames.items()}
@@ -75,7 +96,7 @@ class UCLScanTests(unittest.TestCase):
         self.prepare();self.event['away_team']='Arsenal Similar Unverified'
         rows,_,_,_=self.scan();a=json.loads(rows[0]['analysis_a_json'])
         self.assertEqual(a['home_form']['sample5'],5);self.assertEqual(a['away_form']['sample5'],0)
-        self.assertIn('จับคู่ชื่อทีมไม่ได้',a['away_form']['diagnostics']['message']);self.assertIsNone(rows[0]['ev_pct'])
+        self.assertIn('ยังสรุปว่าไม่พบทีมไม่ได้',a['away_form']['diagnostics']['message']);self.assertIsNone(rows[0]['ev_pct'])
         self.prepare();self.f['fetch_history']=Mock(side_effect=RuntimeError('synthetic source failure'))
         rows,_,_,_=self.scan();a=json.loads(rows[0]['analysis_a_json']);self.assertEqual(a['home_form']['sample5'],0)
         self.assertIn('โหลดข้อมูลไม่สำเร็จ',a['home_form']['diagnostics']['message'])
@@ -109,15 +130,40 @@ class UCLScanTests(unittest.TestCase):
         get=Mock(return_value=SimpleNamespace(status_code=200,content=content,url='https://example.invalid/synthetic.csv'))
         self.f.update(requests=SimpleNamespace(get=get),HISTORY_TIMEOUT=(3,8))
         rosters=self.f['fetch_domestic_rosters'](season)
-        self.assertEqual(len(rosters),5);self.assertEqual(get.call_count,5)
+        expected = len(self.f['domestic_league_definitions']())
+        self.assertEqual(expected, 17)
+        self.assertEqual(len(rosters), expected)
+        self.assertEqual(get.call_count, expected)
         self.assertTrue(all('/'+season+'/' in call.args[0] for call in get.call_args_list))
         self.assertTrue(all('football-data.co.uk/mmz4281' in call.args[0] for call in get.call_args_list))
+
+    def test_first_observed_price_does_not_claim_movement_from_one_quote(self):
+        evidence = self.f['price_evidence'](None, 2.5, 1.92, '2026-10-22T10:00:00Z')
+        self.assertIsNone(evidence['odds_delta'])
+        self.assertIn('ยังยืนยันราคาไหลไม่ได้', evidence['status'])
+        same_scan = {'point': 2.5, 'odds': 1.89, 'captured_at': '2026-10-22T12:29:55.100000Z'}
+        near = self.f['price_evidence'](same_scan, 2.5, 1.90, '2026-10-22T12:29:55.544048Z')
+        self.assertIsNone(near['odds_delta'])
+        self.assertIn('ยังยืนยันราคาไหลไม่ได้', near['status'])
+        earlier = {'point': 2.5, 'odds': 1.92, 'captured_at': '2026-10-22T09:00:00Z'}
+        later = self.f['price_evidence'](earlier, 2.5, 1.84, '2026-10-22T10:00:00Z')
+        self.assertAlmostEqual(later['odds_delta'], -0.08)
+        changed_line = self.f['price_evidence'](earlier, 3.0, 1.84, '2026-10-22T10:00:00Z')
+        self.assertIsNone(changed_line['odds_delta'])
 
     def test_single_ah_quote_never_manufactures_ou(self):
         self.prepare(quotes=False);rows,_,_,_=self.scan()
         self.assertEqual(len(rows),1);self.f['save_picks'](rows)
         fixture=group_fixture_recommendations(self.f['load_picks']().to_dict('records'),self.f['choose_recommendation'])[0]
         self.assertEqual(fixture['ou_main']['reason_code'],'missing_market');self.assertIsNone(fixture['ou_main']['line'])
+
+    def test_cup_scan_skips_understat_for_unsupported_domestic_league(self):
+        self.prepare()
+        # Simulate a supported domestic score league without Understat coverage.
+        self.f['UNDERSTAT_LEAGUES'].pop('soccer_germany_bundesliga', None)
+        self.scan()
+        requested = {call.args[0] for call in self.f['fetch_understat_history'].call_args_list}
+        self.assertEqual(requested, {'soccer_epl'})
 
     def test_outside_24h_or_invalid_time_does_not_load_domestic_sources(self):
         for stamp in [(datetime.now(timezone.utc)+timedelta(hours=25)).isoformat(),'2026-10-22T02:00:00','invalid']:

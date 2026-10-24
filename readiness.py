@@ -38,23 +38,28 @@ def quote_freshness(row, now=None, max_age=None):
     return True, ''
 
 
-def analysis_scope(df, league_names, now=None, latest_receipts=None):
+def analysis_scope(df, league_names, now=None, latest_receipts=None, hours_limit=24):
     """Keep historical storage untouched; apply scope before any presentation/ranking."""
     import pandas as pd
     now = now or datetime.now(UTC)
     if df.empty:
         return df.copy()
-    kicks = pd.to_datetime(df['kickoff_utc'], errors='coerce', utc=True)
-    mask = (kicks > now) & (kicks <= now + timedelta(hours=24)) & df['league'].isin(list(league_names))
+    if (isinstance(hours_limit, bool) or hours_limit not in (24, 48)
+            or not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None):
+        return df.iloc[0:0].copy()
+    now = now.astimezone(UTC)
+    kicks = pd.to_datetime(df['kickoff_utc'].map(instant), errors='coerce', utc=True)
+    mask = ((kicks > now) & (kicks <= now + timedelta(hours=hours_limit))
+            & df['league'].isin(list(league_names)))
     result = df[mask].copy()
     if latest_receipts and not result.empty and 'received_at' in result:
-        stamps = pd.to_datetime(result['received_at'], errors='coerce', utc=True)
-        receipts = pd.to_datetime(result['league'].map(latest_receipts), errors='coerce', utc=True)
+        stamps = pd.to_datetime(result['received_at'].map(instant), errors='coerce', utc=True)
+        receipts = pd.to_datetime(result['league'].map(latest_receipts).map(instant), errors='coerce', utc=True)
         obsolete = stamps.notna() & receipts.notna() & (stamps < receipts)
         result = result[~obsolete].copy()
     # A bookmaker removed in the latest observed response must not reappear from history.
     if not result.empty and 'received_at' in result:
-        stamps = pd.to_datetime(result['received_at'], errors='coerce', utc=True)
+        stamps = pd.to_datetime(result['received_at'].map(instant), errors='coerce', utc=True)
         newest = stamps.groupby(result['event_id']).transform('max')
         obsolete = stamps.notna() & newest.notna() & (stamps < newest)
         result = result[~obsolete].copy()

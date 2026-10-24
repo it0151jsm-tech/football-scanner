@@ -37,6 +37,27 @@ class DomesticDataTests(unittest.TestCase):
     def resolve(self,names=('Bayern Munich','Arsenal'),frames=None):
         return resolve_domestic_sources(names,self.frames if frames is None else frames,self.kickoff,LEAGUES)
 
+    def test_supported_secondary_league_roster_is_evidence_only(self):
+        from domestic_data import SUPPORTED_CODES
+        self.assertIn('E1', SUPPORTED_CODES)
+        self.assertIn('N1', SUPPORTED_CODES)
+        self.assertNotIn('SWE', SUPPORTED_CODES)
+        definitions = dict(LEAGUES)
+        definitions['soccer_efl_champ'] = dict(csv_code='E1', label='Championship', understat=None)
+        frames = dict(self.frames)
+        frames['soccer_efl_champ'] = history('Coventry')
+        result = resolve_domestic_sources(['Coventry'], frames, self.kickoff, definitions)['Coventry']
+        self.assertEqual(result['status'], 'matched')
+        self.assertEqual(result['csv_code'], 'E1')
+        self.assertEqual(result['sport_key'], 'soccer_efl_champ')
+
+    def test_missing_secondary_league_source_never_guesses_membership(self):
+        definitions = dict(LEAGUES)
+        definitions['soccer_efl_champ'] = dict(csv_code='E1', label='Championship', understat=None)
+        result = resolve_domestic_sources(['Coventry'], self.frames, self.kickoff, definitions)['Coventry']
+        self.assertNotEqual(result['status'], 'matched')
+        self.assertIsNone(result['sport_key'])
+
     def test_exact_bayern_arsenal_resolve_different_current_leagues(self):
         results=self.resolve()
         self.assertEqual(results['Bayern Munich']['sport_key'],'soccer_germany_bundesliga')
@@ -111,6 +132,18 @@ class DomesticDataTests(unittest.TestCase):
     def test_all_sources_failed_is_reported_separately_from_name_unmatched(self):
         self.assertEqual(self.resolve(frames={})['Arsenal']['status'],'source_error')
         self.assertEqual(self.resolve(names=['Unknown Club'])['Unknown Club']['status'],'unmatched')
+
+    def test_partial_coverage_does_not_claim_club_absent(self):
+        failed = pd.DataFrame()
+        failed.attrs['history_diagnostics'] = {'status': 'http_error'}
+        frames = dict(self.frames)
+        frames['soccer_epl'] = failed
+        result = self.resolve(names=['Panathinaikos FC'], frames=frames)['Panathinaikos FC']
+        self.assertEqual(result['status'], 'source_incomplete')
+        self.assertFalse(result['coverage_complete'])
+        self.assertIn('ยังสรุปว่าไม่พบทีมไม่ได้', result['reason'])
+        complete = self.resolve(names=['Panathinaikos FC'])['Panathinaikos FC']
+        self.assertEqual(complete['status'], 'unmatched')
 
     def test_current_membership_can_be_too_old(self):
         frames={k:history('Arsenal',dates=['2026-07-01']) for k in ('soccer_epl',)}

@@ -261,15 +261,180 @@ def fixture_dashboard_html(fixture):
     return content + '</article>'
 
 
+def _diagnostic_list(value):
+    return value if isinstance(value, (list, tuple)) else []
+
+
+def _diagnostic_status(value):
+    if value is True:
+        return 'ผ่าน'
+    if value is False:
+        return 'ไม่ผ่าน'
+    return text(value, 'ยังไม่มีหลักฐาน')
+
+
+def _diagnostic_fields_html(value):
+    """Show saved evidence recursively; external keys and values are escaped."""
+    if isinstance(value, dict):
+        return ''.join(f'<div><b>{text(key)}</b>: {_diagnostic_fields_html(item)}</div>'
+                       for key, item in value.items()) or text(None)
+    if isinstance(value, (list, tuple)):
+        return ''.join(f'<div>{_diagnostic_fields_html(item)}</div>' for item in value) or text(None)
+    return text(value)
+
+
+def _quote_diagnostic_html(row, label):
+    row = mapping(row)
+    return (f'<div class="vbp-tile"><p>{text(label)} · แถว #{text(row.get("id"))} · event {text(row.get("event_id"))}</p>'
+            f'<p>เจ้ามือ {text(row.get("bookmaker"))} · bookmaker_key {text(row.get("bookmaker_key"))}</p>'
+            f'<p>ฝั่ง {text(row.get("side"))} · เส้น {number(row.get("point"), 2)} · ราคา {number(row.get("odds"), 2)}</p>'
+            f'<p>เวลาบันทึก Snapshot: {text(row.get("scanned_at"))}</p>'
+            f'<p>เวลารับข้อมูล: {text(row.get("received_at"))}</p>'
+            f'<p>เจ้ามืออัปเดต: {text(row.get("source_updated_at"))}</p>'
+            f'<p>Snapshot ID: {text(row.get("snapshot_id"))}</p></div>')
+
+
+def _ou_diagnostics_html(main):
+    """Render supplied OU evidence only; never pair quotes or recompute metrics."""
+    main = mapping(main)
+    content = '<h4>Main OU Line และเส้นทางเลือก · วินิจฉัยราคา</h4>'
+    if not main:
+        return content + '<p>ไม่มีข้อมูลวินิจฉัย OU ที่บันทึกไว้ — ยังยืนยันเส้นหลักไม่ได้</p>'
+    content += (f'<p>{text(main.get("rule"))}</p><p>สถานะ {text(main.get("status"))} · {text(main.get("reason_code"))}</p>'
+                f'<p>{text(main.get("reason"))}</p>')
+    definitions = mapping(main.get('metric_definitions'))
+    for key, default in [
+            ('implied_sum', 'S = 1/ราคาสูง + 1/ราคาต่ำ; 0.98 ≤ S ≤ 1.20 (ฟิลด์เดิมชื่อ Margin)'),
+            ('overround', 'Overround = S − 1; Overround % = (S − 1) × 100 ไม่ใช่ค่า S'),
+            ('balance', 'Balance = |(1/ราคาสูง)/S − 0.5|; เกณฑ์ ≤ 0.08'),
+            ('interpretation', 'ข้อมูล implied จากราคาไม่ใช่โอกาสชนะจากโมเดลหรือผล Calibration')]:
+        content += f'<p>{text(definitions.get(key), default)}</p>'
+    if definitions.get('boundary'):
+        content += f'<p>{text(definitions["boundary"])}</p>'
+    if main.get('diagnostics'):
+        content += '<div class="vbp-tile"><b>จำนวนหลักฐานราคา</b>' + _diagnostic_fields_html(main['diagnostics']) + '</div>'
+    for index, raw in enumerate(_diagnostic_list(main.get('pairs')), 1):
+        pair = mapping(raw)
+        over = mapping(mapping(pair.get('over')).get('row'))
+        under = mapping(mapping(pair.get('under')).get('row'))
+        content += (f'<div class="vbp-tile" data-ou-diagnostic="pair"><p>คู่ราคา #{number(index, 0)} · เส้น {number(pair.get("line"), 2)} · {text(pair.get("bookmaker"))}</p>'
+                    f'<p>bookmaker_key {text(pair.get("bookmaker_key"))} · event {text(pair.get("event_id"))}</p>'
+                    f'<p>Over {number(over.get("odds"), 2)} / Under {number(under.get("odds"), 2)}</p>'
+                    f'<p>Margin / ผลรวม implied S = {number(pair.get("implied_sum", pair.get("margin")), 6)} · 0.98–1.20: {_diagnostic_status(pair.get("sum_passed"))}</p>'
+                    f'<p>Overround (S − 1) = {number(pair.get("overround"), 6)} · {number(pair.get("overround_pct"), 4, "%")}</p>'
+                    f'<p>Balance = {number(pair.get("balance"), 6)} · ≤ 0.08: {_diagnostic_status(pair.get("balance_passed"))}</p>'
+                    f'<p>ผ่านเกณฑ์ตัวเลข: {_diagnostic_status(pair.get("numeric_eligible"))} · หลักฐานความสด: {_diagnostic_status(pair.get("fresh"))} · ผ่านเกณฑ์ตลาด: {_diagnostic_status(pair.get("eligible"))}</p>'
+                    f'<p>เวลาบันทึก Snapshot: {text(pair.get("scanned_at"))}</p>'
+                    f'<p>เวลารับข้อมูล: {text(pair.get("received_at"))}</p>'
+                    f'<p>เจ้ามืออัปเดต: {text(pair.get("source_updated_at"))}</p>'
+                    '<div>รหัสแถวราคา: ' + _diagnostic_fields_html(pair.get('quote_ids')) + '</div>'
+                    '<div>รหัส Snapshot: ' + _diagnostic_fields_html(pair.get('snapshot_ids')) + '</div>'
+                    f'<p>เหตุผล: {text(pair.get("reason"))}</p>')
+        for reason in _diagnostic_list(pair.get('reasons')):
+            content += f'<p>{text(reason)}</p>'
+        content += '</div>'
+    for raw in _diagnostic_list(main.get('unpaired')):
+        group = mapping(raw)
+        content += (f'<div class="vbp-tile" data-ou-diagnostic="unpaired"><p>ราคายังจับคู่ไม่ได้ · {text(group.get("bookmaker"))} · เส้น {number(group.get("line"), 2)}</p>'
+                    f'<p>bookmaker_key {text(group.get("bookmaker_key"))} · event {text(group.get("event_id"))}</p>'
+                    f'<p>{text(group.get("reason_code"))} · {text(group.get("reason"))}</p>'
+                    '<p>ไม่มีคู่ราคาที่เข้ากันได้ — ยังไม่คำนวณ S / Overround / Balance</p>'
+                    '<div>รหัสแถวราคา: ' + _diagnostic_fields_html(group.get('quote_ids')) + '</div>'
+                    '<div>รหัส Snapshot: ' + _diagnostic_fields_html(group.get('snapshot_ids')) + '</div>')
+        for side, rows in mapping(group.get('sides')).items():
+            for row in _diagnostic_list(rows):
+                content += _quote_diagnostic_html(row, side)
+        content += '</div>'
+    for raw in _diagnostic_list(main.get('invalid')):
+        invalid = mapping(raw)
+        content += ('<div data-ou-diagnostic="invalid">'
+                    f'<p>ราคาไม่ผ่านการตรวจสอบ: {text(invalid.get("reason_code"))} · {text(invalid.get("reason"))}</p>'
+                    + _quote_diagnostic_html(invalid.get('row'), 'ข้อมูลดิบที่บันทึกไว้') + '</div>')
+    return content
+
+
+def _saved_form_audits(fixture):
+    """Find preserved audits even when a legacy representative row lacks one."""
+    entries = [{'row': mapping(fixture.get('row'))}]
+    entries.extend(mapping(value) for value in mapping(fixture.get('markets')).values())
+    for alternatives in mapping(fixture.get('alternatives')).values():
+        entries.extend(mapping(value) for value in _diagnostic_list(alternatives))
+    audits = {}
+    for entry in entries:
+        row = mapping(entry.get('row'))
+        a = mapping(entry.get('a')) or object_json(row.get('analysis_a_json'))
+        audit = mapping(a.get('form_audit'))
+        if not audit:
+            continue
+        signature = json.dumps(audit, ensure_ascii=False, sort_keys=True, default=str)
+        if signature not in audits:
+            audits[signature] = {'audit': audit, 'references': []}
+        reference = {key: row.get(key) for key in ('id', 'market', 'scanned_at')}
+        if reference not in audits[signature]['references']:
+            audits[signature]['references'].append(reference)
+    return list(audits.values())
+
+
+def _form_audit_html(audit, references):
+    content = ('<div data-form-audit="saved"><p>ขอบเขต: ' + text(audit.get('scope'))
+               + f' · สถานะ {text(audit.get("status"))} · ตัดก่อนวันที่ {text(audit.get("cutoff_date"))}</p>'
+               + f'<p>เวลาบันทึกหลักฐานฟอร์มจริง: {text(audit.get("recorded_at"))}</p>'
+               '<p>ตรวจหลักฐานย้อนหลังเท่านั้น ไม่แปลงคะแนน A เป็นความน่าจะเป็น และไม่สร้าง xG / EV</p>')
+    for reference in references:
+        content += (f'<p>อ้างอิงแถว #{text(reference.get("id"))} · {text(reference.get("market"))} · '
+                    f'เวลาบันทึกคำแนะนำ {text(reference.get("scanned_at"))}</p>')
+    if audit.get('review_thresholds'):
+        content += '<div>เกณฑ์แจ้งตรวจซ้ำ (ไม่ตัด/จำกัดค่าสถิติ): ' + _diagnostic_fields_html(audit['review_thresholds']) + '</div>'
+    for side, label in [('home', 'เจ้าบ้าน · ฟอร์มเหย้า'), ('away', 'ทีมเยือน · ฟอร์มเยือน')]:
+        entry = mapping(audit.get(side))
+        content += (f'<div class="vbp-tile"><b>{label}: {text(entry.get("team"))}</b>'
+                    f'<p>สถานะ {text(entry.get("status"))} · ชื่อที่จับคู่ {text(entry.get("matched_name"))} · วิธี {text(entry.get("mapping"))}</p>'
+                    f'<p>ขอบเขตแหล่งข้อมูล: {text(entry.get("source_scope"))}</p>'
+                    '<div>แถวที่ไม่ใช้ (แยกจากตัวอย่างที่คำนวณ): ' + _diagnostic_fields_html(entry.get('excluded')) + '</div>'
+                    '<div>ข้อสังเกต: ' + _diagnostic_fields_html(entry.get('warnings')) + '</div>')
+        for key in ('5', '10'):
+            window = mapping(mapping(entry.get('windows')).get(key))
+            content += (f'<h4>{key} นัดล่าสุดตามสนาม · หลักฐานที่บันทึกไว้</h4>'
+                        f'<p>จำนวน {number(window.get("count"), 0)} / {number(window.get("requested"), 0)} นัด · ผลรวมยิง {number(window.get("sum_gf"), 0)} / เสีย {number(window.get("sum_ga"), 0)}</p>'
+                        f'<p>ยิงเฉลี่ย {number(window.get("mean_gf"), 3)} / เสียเฉลี่ย {number(window.get("mean_ga"), 3)} · ใช้จำนวนเกมจริงเป็นตัวหาร</p>'
+                        f'<p>ค่าที่หน้าเดิมบันทึกไว้: ยิง {number(window.get("expected_mean_gf"), 3)} / เสีย {number(window.get("expected_mean_ga"), 3)} · {number(window.get("expected_count"), 0)} นัด</p>'
+                        f'<p>ตรงกับโปรไฟล์เดิม: {_diagnostic_status(window.get("matches_profile"))}</p>'
+                        '<div>ข้อสังเกตตัวอย่าง: ' + _diagnostic_fields_html(window.get('warnings')) + '</div>')
+            rows = _diagnostic_list(window.get('rows'))
+            if not rows:
+                content += '<p>ไม่มีรายการแข่งขันที่ผ่านเกณฑ์ในหลักฐานชุดนี้ — ยังยืนยันค่าเฉลี่ยไม่ได้</p>'
+            for raw in rows:
+                row = mapping(raw)
+                content += (f'<div class="vbp-tile"><p>{text(row.get("date"))} · {text(row.get("home_team"))} vs {text(row.get("away_team"))}</p>'
+                            f'<p>คู่แข่ง {text(row.get("opponent"))} · สนาม {text(row.get("venue"))} · สกอร์ {text(row.get("score"))} · GF {number(row.get("gf"), 0)} / GA {number(row.get("ga"), 0)}</p>'
+                            f'<p>ลีก {text(row.get("league"))} · รหัส {text(row.get("csv_code"))} / {text(row.get("sport_key"))} · ฤดูกาล {text(row.get("season"))}</p>'
+                            f'<p>ผู้ให้บริการ {text(row.get("source"))} · สถานะหลักฐาน {text(row.get("provenance_status"))}</p>'
+                            f'<p>URL แถวต้นทาง: {text(row.get("source_url"))}</p>'
+                            '<div>URL แหล่งข้อมูล: ' + _diagnostic_fields_html(row.get('source_urls')) + '</div>'
+                            f'<p>เวลารับข้อมูลจริง: {text(row.get("received_at"))}</p>'
+                            f'<p>SHA-256: {text(row.get("payload_sha256"))} · ลำดับแถวต้นทาง {number(row.get("input_position"), 0)}</p>'
+                            '<div>ข้อสังเกตเกม: ' + _diagnostic_fields_html(row.get('review_flags')) + '</div></div>')
+        for key, title in [('upstream_quality', 'การตัดข้อมูลจากแหล่งต้นทาง (ทั้งแหล่ง ไม่ใช่เฉพาะทีม)'),
+                           ('post_mapping_quality', 'ผลตรวจเกมซ้ำ/สกอร์ขัดแย้งหลังจับคู่ชื่อ (ทั้งแหล่ง)'),
+                           ('source_validation', 'ผลตรวจรูปแบบทั้งแหล่ง')]:
+            if entry.get(key):
+                content += f'<div><b>{title}</b>' + _diagnostic_fields_html(entry[key]) + '</div>'
+        content += '</div>'
+    if audit.get('source_reports'):
+        content += '<h4>รายงานแหล่งข้อมูลที่เก็บพร้อมหลักฐานฟอร์ม</h4>' + _diagnostic_fields_html(audit['source_reports'])
+    return content + '</div>'
+
+
 def fixture_details_html(fixture, ranking):
     content = f'<div class="vbp-details"><h4>หลักเกณฑ์จัดอันดับ</h4><p>{text(ranking)}</p>'
-    if fixture.get('ou_main'):
-        content += '<h4>Main OU Line และเส้นทางเลือก</h4><p>'+text(fixture['ou_main']['rule'])+'</p>'
-        for pair in fixture['ou_main']['pairs']:
-            content += (f'<div class="vbp-tile"><p>เส้น {number(pair["line"],2)} · {text(pair["bookmaker"])}</p>'
-                        f'<p>Over {number(pair["over"]["row"]["odds"],2)} / Under {number(pair["under"]["row"]["odds"],2)} · {text(pair["scanned_at"])}</p>'
-                        f'<p>ความห่างจากสมดุล {number(pair["balance"],3)} · ผลรวม implied {number(pair["margin"],3)} · ผ่านเกณฑ์ตลาด {text(pair["eligible"])}</p></div>')
-    for market, alternatives in fixture['alternatives'].items():
+    content += _ou_diagnostics_html(fixture.get('ou_main'))
+    content += '<h4>ตรวจสอบฟอร์ม 5/10 นัดจากหลักฐานที่บันทึกไว้</h4>'
+    audits = _saved_form_audits(fixture)
+    if not audits:
+        content += '<p>ไม่มีหลักฐานรายเกมที่บันทึกไว้สำหรับตรวจฟอร์ม — ยังยืนยันค่าเฉลี่ยเดิมไม่ได้ กรุณาสแกนใหม่เมื่อมีข้อมูล; ไม่สร้างสถิติย้อนหลังแทน</p>'
+    for saved in audits:
+        content += _form_audit_html(saved['audit'], saved['references'])
+    for market, alternatives in mapping(fixture.get('alternatives')).items():
         content += f'<h4>{text(market)} · ตัวเลือกจากข้อมูลที่บันทึกไว้</h4>'
         for index, entry in enumerate(alternatives, 1):
             row = entry['row']
@@ -277,7 +442,7 @@ def fixture_details_html(fixture, ranking):
                         f'<p>เส้น {number(row.get("point"), 2)} · ราคา {number(row.get("odds"), 2)} · {text(row.get("bookmaker"))}</p>'
                         f'<p>เวลาแถวคำแนะนำ {text(row.get("scanned_at"))} · A {number(entry["a"].get("score"))} · EV {number(entry.get("ev"), 2, "%")}</p>'
                         f'<p>{text(entry["conclusion"])} · {text(entry["reason"])}</p></div>')
-        selected = fixture['markets'].get(market)
+        selected = mapping(fixture.get('markets')).get(market)
         if selected:
             content += details_html(selected['row'])
     return content + '</div>'

@@ -217,13 +217,44 @@ class ReadinessTests(unittest.TestCase):
 
     def test_ui_templates_widgets_labels_css_and_model_formulas_unchanged(self):
         contract=json.loads((ROOT/'fixtures/readiness/pr2-contract.json').read_text())
-        self.assertEqual(hashlib.sha256((ROOT/'mobile_dashboard.py').read_bytes()).hexdigest(),contract['mobile_sha256'])
+        # PR #6 authorizes diagnostics only inside the existing details expander.
+        import mobile_dashboard
+        mobile_source=(ROOT/'mobile_dashboard.py').read_text()
+        self.assertEqual(hashlib.sha256(mobile_dashboard.DASHBOARD_CSS.encode()).hexdigest(),contract['mobile_css_sha256'])
+        protected={n.name:n for n in ast.parse(mobile_source).body if isinstance(n,ast.FunctionDef)}
+        for name,digest in contract['mobile_protected_source_sha256'].items():
+            self.assertEqual(hashlib.sha256(ast.get_source_segment(mobile_source,protected[name]).encode()).hexdigest(),digest,name)
         source=(ROOT/'app.py').read_text()
         tree=ast.parse(source);ui=[]
         for n in ast.walk(tree):
             if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and isinstance(n.func.value,ast.Name) and n.func.value.id=='st':
                 ui.append((n.lineno,n.func.attr,[v.value for v in ast.walk(n) if isinstance(v,ast.Constant) and isinstance(v.value,(str,int,float,bool,type(None)))]))
-        self.assertEqual([list(x[1:]) for x in sorted(ui)],contract['ui_calls'])
+        # PR7 adds one explicitly isolated, read-only archive panel; preserve
+        # the original PR2 UI contract for every pre-existing control.
+        archive_start = source.index('    # Read-only recovery of persisted scans')
+        archive_end = source.index('    from readiness import analysis_scope', archive_start)
+        archive_first_line = source.count('\n', 0, archive_start) + 1
+        archive_last_line = source.count('\n', 0, archive_end) + 1
+        # PR7 also adds a read-only saved-data coverage panel in Data Health.
+        # It must not modify or re-label any original PR2 controls.
+        coverage_start = source.index('        # Cup coverage from already saved analysis')
+        coverage_end = source.index('        st.caption("ชื่อใหม่ในชุดข้อมูลฤดูกาลใหม่', coverage_start)
+        coverage_first_line = source.count('\n', 0, coverage_start) + 1
+        coverage_last_line = source.count('\n', 0, coverage_end) + 1
+        original_ui = [entry for entry in ui
+                       if not archive_first_line <= entry[0] < archive_last_line
+                       and not coverage_first_line <= entry[0] < coverage_last_line]
+        # PR13/current request explicitly authorizes one scan-count diagnostic.
+        # Check its exact single call independently; every original control stays
+        # protected by the original PR2 contract rather than regenerating it.
+        scan = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'scan_league')
+        diagnostics = [n for n in ast.walk(scan) if isinstance(n, ast.Call)
+                       and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+                       and n.func.value.id == 'st']
+        self.assertEqual(len(diagnostics), 1)
+        self.assertEqual(ast.unparse(diagnostics[0]), 'st.caption(scan_report_text(scan_report))')
+        original_ui = [entry for entry in original_ui if entry[0] != diagnostics[0].lineno]
+        self.assertEqual([list(x[1:]) for x in sorted(original_ui)],contract['ui_calls'])
         for n in tree.body:
             if isinstance(n,ast.FunctionDef) and n.name in contract['formula_source_sha256']:
                 # Source hashes are stricter and portable across Python 3.11/3.12 AST changes.

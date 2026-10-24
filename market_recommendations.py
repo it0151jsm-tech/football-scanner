@@ -132,9 +132,20 @@ def group_fixture_recommendations(rows, choose_c):
                 if not row.get('bookmaker') or not finite(row.get('point')) or not finite(row.get('odds')) or row['odds'] <= 1:
                     continue
                 key = (row['side'],row.get('bookmaker_key'),row['bookmaker'],row['point']) if market == 'Over/Under' else (row['side'],row.get('bookmaker_key'),row['bookmaker'])
-                if key not in latest or (timestamp(row), row_id(row)) > (timestamp(latest[key]), row_id(latest[key])):
+                if market == 'Over/Under':
+                    # Preserve all rows in the latest scan, including conflicting
+                    # same-side quotes. Only select_main_line may reconcile the
+                    # evidence; choosing a row ID here would hide contradictions.
+                    previous = latest.get(key)
+                    if previous is None or timestamp(row) > timestamp(previous[0]):
+                        latest[key] = [row]
+                    elif timestamp(row) == timestamp(previous[0]):
+                        previous.append(row)
+                elif key not in latest or (timestamp(row), row_id(row)) > (timestamp(latest[key]), row_id(latest[key])):
                     latest[key] = row
-            choices = sorted((assess(row, choose_c) for row in latest.values()), key=lambda item: item['rank'], reverse=True)
+            saved_rows = ([row for group in latest.values() for row in group]
+                          if market == 'Over/Under' else latest.values())
+            choices = sorted((assess(row, choose_c) for row in saved_rows), key=lambda item: item['rank'], reverse=True)
             markets[market] = choices[0] if choices else None
             alternatives[market] = choices
             if market == 'Over/Under':
