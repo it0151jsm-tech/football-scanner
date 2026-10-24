@@ -2050,25 +2050,6 @@ with tab_scan:
                     "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย",
                     "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือ", "model_status":"สถานะข้อมูล"
                 }), use_container_width=True, hide_index=True)
-        # Show available real score statistics even when A/B cannot produce a score.
-        # This is deliberately independent of the EV and confidence-score gates.
-        with st.expander("📊 ฟอร์มฟุตบอลรายคู่ — ดูได้แม้ไม่มี EV", expanded=True):
-            if best_market.empty:
-                st.info("ยังไม่มีคู่แข่งขันที่สแกนได้")
-            else:
-                form_rows = best_market.drop_duplicates(subset=["league", "match", "kickoff_th"])
-                st.caption("สถิติจากผลการแข่งขันย้อนหลังที่จับคู่ชื่อทีมได้เท่านั้น ไม่ใช่ความน่าจะเป็นหรือคำแนะนำเดิมพัน")
-                for _, fixture in form_rows.iterrows():
-                    st.markdown(f"**{fixture.get('match', '')}** · {fixture.get('league', '')} · {fixture.get('kickoff_th', '')}")
-                    st.write("เหย้า: " + str(fixture.get("home_form_summary") or "ยังไม่มีผลย้อนหลังที่ยืนยันได้"))
-                    st.write("เยือน: " + str(fixture.get("away_form_summary") or "ยังไม่มีผลย้อนหลังที่ยืนยันได้"))
-                    if fixture.get("h2h_summary"):
-                        st.caption("พบกันย้อนหลัง: " + str(fixture["h2h_summary"]))
-                    if pd.isna(fixture.get("confidence_score")):
-                        st.caption("ระบบ A ยังไม่มีคะแนน — แสดงเฉพาะฟอร์มจริงที่ตรวจสอบได้")
-                    if pd.isna(fixture.get("ev_pct")):
-                        st.caption("ระบบ B ยังไม่มี EV — ห้ามใช้ฟอร์มแทนความน่าจะเป็น")
-                    st.divider()
         with st.expander("ดูเหตุผลวิเคราะห์และฟอร์มทีมแบบละเอียด"):
             detail = best_market.copy() if not best_market.empty else pd.DataFrame()
             if detail.empty:
