@@ -18,7 +18,21 @@ class ExportReadinessTests(unittest.TestCase):
         self.assertEqual(report['market_rows'], 3)
         self.assertEqual(report['fixtures'], 2)
         self.assertEqual(report['a_scored_fixtures'], 1)
-        self.assertEqual(report['b_ev_fixtures'], 1)
+        self.assertEqual(report['b_ev_fixtures'], 1)\n        self.assertEqual(len(report['problem_fixtures']), 0)
+
+    def test_problem_fixtures_deduplicated_and_reason_retained(self):
+        data = pd.DataFrame([
+            {'ลีก': 'E1', 'คู่แข่งขัน': 'A vs B', 'เวลาแข่ง (ไทย)': '24/10 18:30',
+             'คะแนนหลักฐาน A/100': None, 'EV (%)': None,
+             'สถานะข้อมูล': 'ทีมเจ้าบ้าน: จับคู่ชื่อทีมไม่ได้'},
+            {'ลีก': 'E1', 'คู่แข่งขัน': 'A vs B', 'เวลาแข่ง (ไทย)': '24/10 18:30',
+             'คะแนนหลักฐาน A/100': None, 'EV (%)': None,
+             'สถานะข้อมูล': 'ทีมเจ้าบ้าน: จับคู่ชื่อทีมไม่ได้'},
+        ])
+        report = summarize_export_readiness(data)
+        self.assertEqual(report['fixtures'], 1)
+        self.assertEqual(len(report['problem_fixtures']), 1)
+        self.assertIn('จับคู่ชื่อทีมไม่ได้', report['problem_fixtures'][0]['observed_status'])
 
     def test_missing_and_empty_inputs(self):
         self.assertEqual(summarize_export_readiness(pd.DataFrame())['status'], 'missing_columns')
