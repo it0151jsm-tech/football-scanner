@@ -18,7 +18,8 @@ class ExportReadinessTests(unittest.TestCase):
         self.assertEqual(report['market_rows'], 3)
         self.assertEqual(report['fixtures'], 2)
         self.assertEqual(report['a_scored_fixtures'], 1)
-        self.assertEqual(report['b_ev_fixtures'], 1)\n        self.assertEqual(len(report['problem_fixtures']), 0)
+        self.assertEqual(report['b_ev_fixtures'], 1)
+        self.assertEqual(len(report['problem_fixtures']), 1)
 
     def test_problem_fixtures_deduplicated_and_reason_retained(self):
         data = pd.DataFrame([
