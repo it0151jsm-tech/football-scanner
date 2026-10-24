@@ -131,6 +131,54 @@ def xg_diagnostics(frame, home, away, kickoff, *, supported=True):
     return result
 
 
+def summarize_export_readiness(frame):
+    """Audit a saved pick export offline, counting unique fixtures, not odds rows.
+
+    Counts only observed A scores and numeric B EV, not calibration or validated
+    betting recommendations. Uses the actual Streamlit 22-column CSV schema.
+    """
+    required = {'ลีก', 'คู่แข่งขัน', 'เวลาแข่ง (ไทย)', 'คะแนนหลักฐาน A/100', 'EV (%)'}
+    if frame is None or not required.issubset(frame.columns):
+        return {'status': 'missing_columns', 'missing': sorted(required - set(getattr(frame, 'columns', [])))}
+    if frame.empty:
+        return {'status': 'empty', 'market_rows': 0, 'fixtures': 0, 'leagues': []}
+    working = frame.copy()
+    working['_a_ready'] = pd.to_numeric(working['คะแนนหลักฐาน A/100'], errors='coerce').notna()
+    working['_b_ev_present'] = pd.to_numeric(working['EV (%)'], errors='coerce').notna()
+    keys = ['ลีก', 'คู่แข่งขัน', 'เวลาแข่ง (ไทย)']
+    grouped = working.groupby(keys, dropna=False, sort=False)
+    fixtures = grouped[['_a_ready', '_b_ev_present']].any().reset_index()
+    leagues = []
+    for league, subset in fixtures.groupby('ลีก', dropna=False, sort=False):
+        leagues.append({'league': str(league), 'fixtures': len(subset),
+                        'market_rows': int(working['ลีก'].eq(league).sum()),
+                        'a_scored_fixtures': int(subset['_a_ready'].sum()),
+                        'b_ev_fixtures': int(subset['_b_ev_present'].sum())})
+    problem_fixtures = []
+    reason_fields = ('ระบบ A', 'ระบบ B', 'สถานะข้อมูล', 'system_c_reason')
+    for key, subset in grouped:
+        a_ready = bool(subset['_a_ready'].any())
+        b_ready = bool(subset['_b_ev_present'].any())
+        if a_ready and b_ready:
+            continue
+        details = {}
+        for column in reason_fields:
+            if column in subset:
+                values = [str(v).strip() for v in subset[column].dropna().unique()
+                          if str(v).strip()]
+                if values:
+                    details[column] = values[:3]
+        problem_fixtures.append({
+            'league': str(key[0]), 'fixture': str(key[1]), 'kickoff': str(key[2]),
+            'a_scored': a_ready, 'b_ev_present': b_ready, 'observed_reasons': details,
+        })
+    return {'status': 'ok', 'market_rows': len(working), 'fixtures': len(fixtures),
+            'a_scored_fixtures': int(fixtures['_a_ready'].sum()),
+            'b_ev_fixtures': int(fixtures['_b_ev_present'].sum()),
+            'leagues': leagues, 'problem_fixtures': problem_fixtures,
+            'note': 'EV present does not establish calibration or a betting recommendation'}
+
+
 def model_data_readiness(provider, metrics, analysis_b):
     """Explain the unchanged model's output; calibration is not data availability."""
     info = {'provider': 'Understat', 'calibration_status': 'not_validated',
