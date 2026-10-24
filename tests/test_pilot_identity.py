@@ -57,17 +57,27 @@ class PilotIdentityBoundaryTests(unittest.TestCase):
                     f'2026-10-{day:02d}' for day in range(6, 11)])
 
     def test_unverified_pr13_abbreviations_do_not_gain_identity_by_similarity(self):
-        # PR #13 supplies no per-team evidence for these additional variants.
+        # PR #13 supplies no per-team evidence for these remaining variants.
         # When evidence is reviewed, this fixture must be replaced explicitly.
-        for full, short in [('Manchester United', 'Man United'),
-                            ('Manchester City', 'Man City'),
-                            ('Newcastle United', 'Newcastle'),
+        for full, short in [('Newcastle United', 'Newcastle'),
                             ('Tottenham Hotspur', 'Spurs'),
                             ('West Ham United', 'West Ham'),
                             ('Brighton and Hove Albion', 'Brighton'),
                             ('Wolverhampton Wanderers', 'Wolves')]:
             with self.subTest(team=full):
                 self.assertEqual(match_team(full, [short]), (None, 'name_unmatched'))
+
+    def test_newly_reviewed_manchester_aliases_keep_club_identity_evidence(self):
+        from history_data import alias_evidence
+        for full, short in [('Manchester City', 'Man City'),
+                            ('Manchester United', 'Man United')]:
+            with self.subTest(team=full):
+                self.assertEqual(match_team(full, [short]), (short, 'verified_alias'))
+                evidence = alias_evidence(full, short)
+                self.assertEqual(evidence['evidence_file'], 'fixtures/issue15_identity_evidence.json')
+                self.assertIn('identity_evidence', evidence)
+                self.assertEqual(match_team(full, [full, short]), (None, 'name_ambiguous'))
+                self.assertIsNone(match_team(full, [short+' U21'])[0])
 
     def test_shared_numeric_id_is_not_an_alias_for_a_different_named_club(self):
         # A local ID coinciding with one supplied by another provider is no proof.

@@ -88,7 +88,8 @@ class ApiFootballIntegrationTests(unittest.TestCase):
                 else:
                     csv = csv.tail(4).copy()
                 self.get.reset_mock()
-                returned = self.fallback(csv)
+                with patch.dict(os.environ, {'VALUE_BET_API_FOOTBALL_BACKOFF_REVISION': f'independent-csv-{kind}'}):
+                    returned = self.fallback(csv)
                 self.get.assert_called_once()
                 self.assertEqual(returned.attrs['api_football_diagnostics']['state'], 'empty')
                 self.assertFalse(returned.attrs['api_football_diagnostics']['used_for_form'])
@@ -253,16 +254,20 @@ class ApiFootballIntegrationTests(unittest.TestCase):
             returned, report = self.f['fetch_api_football_form']('soccer_epl', 2026, KEY)
             self.assertIs(returned, candidate)
             self.assertIs(report, diagnostic)
-        for failure in ({'status': 'http_error', 'state': 'http_error', 'http_status': 403},
+        for case_index, failure in enumerate(({'status': 'http_error', 'state': 'http_error', 'http_status': 403},
                         {'status': 'provider_error', 'state': 'plan_unsupported'},
                         {'status': 'empty_history', 'state': 'empty'},
-                        {'status': 'ok', 'state': 'success', 'rejected_rows': 1}):
+                        {'status': 'ok', 'state': 'success', 'rejected_rows': 1})):
             with self.subTest(failure=failure):
                 with patch('api_football_data.fetch_finished_fixtures', return_value=(candidate, failure)):
-                    with self.assertRaises(ApiFootballUnavailable) as caught:
-                        self.f['fetch_api_football_form']('soccer_epl', 2026, KEY)
+                    # Independent provider attempts keep this boundary test from
+                    # reusing the deliberate cooldown tested in the backoff suite.
+                    with patch.dict(os.environ, {'VALUE_BET_API_FOOTBALL_BACKOFF_REVISION': f'inner-boundary-{case_index}'}):
+                        with self.assertRaises(ApiFootballUnavailable) as caught:
+                            self.f['fetch_api_football_form']('soccer_epl', 2026, KEY)
                     self.assertIs(caught.exception.frame, candidate)
-                    returned, report = self.f['fetch_api_football_with_diagnostics']('soccer_epl', 2026, KEY)
+                    with patch.dict(os.environ, {'VALUE_BET_API_FOOTBALL_BACKOFF_REVISION': f'outer-boundary-{case_index}'}):
+                        returned, report = self.f['fetch_api_football_with_diagnostics']('soccer_epl', 2026, KEY)
                     self.assertIs(returned, candidate)
                     self.assertEqual(report, failure)
 

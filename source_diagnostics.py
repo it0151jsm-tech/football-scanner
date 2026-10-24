@@ -18,6 +18,27 @@ SOURCE_MESSAGES = {
 }
 
 
+def describe_history_cache(frame, called_at, ttl_seconds=900):
+    """Expose receipts already on the frame; never restamp a cached source."""
+    from readiness import instant
+    result = frame.copy()
+    source = result.attrs.get('history_diagnostics', {})
+    receipts = [instant(item.get('received_at')) for item in source.get('sources', [])]
+    if not receipts and source.get('received_at'):
+        receipts = [instant(source.get('received_at'))]
+    receipts = [value for value in receipts if value is not None]
+    called = instant(called_at)
+    result.attrs['cache_diagnostics'] = {
+        'ttl_seconds': ttl_seconds,
+        'status': ('unknown_receipt' if not receipts or called is None else
+                   'cache' if all(value < called for value in receipts) else 'fetched'),
+        'source_status': source.get('status', 'unknown'),
+        'received_at': [value.isoformat() for value in receipts],
+        'receipt_preserved': True,
+    }
+    return result
+
+
 def csv_form_ready(frame, fixtures):
     """Source eligibility only: current membership and existing five-game form.
 
@@ -110,12 +131,43 @@ def xg_diagnostics(frame, home, away, kickoff, *, supported=True):
     return result
 
 
+def model_data_readiness(provider, metrics, analysis_b):
+    """Explain the unchanged model's output; calibration is not data availability."""
+    info = {'provider': 'Understat', 'calibration_status': 'not_validated',
+            'minimum_venue_samples': 5, 'max_xg_age_days': 120, 'reason_codes': []}
+    if analysis_b.get('available') is True:
+        info.update(status='available_uncalibrated', message='B/EV คำนวณได้จากข้อมูลที่ผ่านเกณฑ์เดิม แต่ยังไม่ผ่าน Calibration')
+        return info
+    if metrics is not None:
+        info.update(status='no_valid_market', message='มีโมเดล แต่ไม่มีราคาตลาดที่ใช้คำนวณ EV ได้')
+        info['reason_codes'] = ['no_valid_market']
+        return info
+    for side in ('home', 'away'):
+        status = provider.get(side, {}).get('status', 'source_unavailable')
+        if status != 'available':
+            info['reason_codes'].append(side+'_'+status)
+    info['reason_codes'] = list(dict.fromkeys(info['reason_codes']))
+    if info['reason_codes']:
+        info.update(status='xg_unavailable', message=provider.get('summary', 'ข้อมูล xG ไม่พอ'))
+    else:
+        info.update(status='model_gate_failed', message='มี xG ตามสนาม แต่ไม่ผ่านเงื่อนไขฐานลีก/ค่าคาดการณ์ของโมเดลเดิม — ไม่สร้าง EV ทดแทน')
+        info['reason_codes'] = ['model_gate_failed']
+    return info
+
+
 def annotate_form_source(profile, frame, team, kickoff, sport_key):
     """Add evidence labels without altering the original form calculations."""
     diagnostic=profile.setdefault('diagnostics',{})
     season=season_for_kickoff(kickoff)
     source=deepcopy(getattr(frame,'attrs',{}).get('history_diagnostics',{}))
     diagnostic.update(source=source,requested_sport_key=sport_key,requested_season=season)
+    cache = deepcopy(getattr(frame, 'attrs', {}).get('cache_diagnostics', {}))
+    if cache:
+        diagnostic['cache'] = cache
+        diagnostic['message'] = str(diagnostic.get('message', ''))+f" · CSV cache: {cache.get('status', 'unknown')} TTL {cache.get('ttl_seconds')}s; สถานะแหล่ง {cache.get('source_status')}"
+    from form_readiness import form_data_readiness
+    diagnostic['readiness'] = form_data_readiness(frame, team, kickoff, diagnostic.get('venue'))
+    diagnostic['message'] = str(diagnostic.get('message', ''))+' · '+diagnostic['readiness']['summary']
     api_report = deepcopy(getattr(frame, 'attrs', {}).get('api_football_diagnostics', {}))
     if api_report:
         from api_football_data import api_football_status_text, BASE_URL

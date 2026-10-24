@@ -2,6 +2,7 @@
 import ast
 import json
 import math
+import os
 import re
 import sqlite3
 import tempfile
@@ -9,7 +10,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from difflib import get_close_matches
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 
 import pandas as pd
@@ -17,7 +18,7 @@ import pandas as pd
 
 def load_functions(path):
     tree = ast.parse(path.read_text())
-    ns = dict(pd=pd, math=math, re=re, json=json, sqlite3=sqlite3,
+    ns = dict(pd=pd, math=math, re=re, json=json, sqlite3=sqlite3, os=os,
               st=SimpleNamespace(caption=Mock(), secrets={}),
               datetime=datetime, timedelta=timedelta, timezone=timezone,
               get_close_matches=get_close_matches, TH_TZ=timezone(timedelta(hours=7)),
@@ -36,6 +37,9 @@ class Regressions(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
+        ledger = patch.dict(os.environ, VALUE_BET_API_FOOTBALL_LEDGER=str(Path(self.tmp.name)/'source-backoff.db'))
+        ledger.start()
+        self.addCleanup(ledger.stop)
         self.f = load_functions(Path(__file__).resolve().parents[1] / 'app.py')
         self.f['DB_FILE'] = Path(self.tmp.name) / 'test.db'
         self.f['init_db']()
