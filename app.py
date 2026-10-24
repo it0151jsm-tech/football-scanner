@@ -201,6 +201,7 @@ def init_db():
             "received_at": "TEXT",
             "source_updated_at": "TEXT",
             "bookmaker_key": "TEXT",
+            "source_update_scope": "TEXT",
         }
         for name, decl in migrations.items():
             if name not in existing:
@@ -213,7 +214,7 @@ def init_db():
         for name, decl in slip_migrations.items():
             if name not in slip_columns:
                 con.execute(f"ALTER TABLE slips ADD COLUMN {name} {decl}")
-        for name in ('received_at', 'source_updated_at', 'bookmaker_key'):
+        for name in ('received_at', 'source_updated_at', 'bookmaker_key', 'source_update_scope'):
             if name not in {r[1] for r in con.execute("PRAGMA table_info(odds_snapshots)")}:
                 con.execute(f"ALTER TABLE odds_snapshots ADD COLUMN {name} TEXT")
         con.execute("""CREATE TRIGGER IF NOT EXISTS protect_settled_pick
@@ -229,6 +230,8 @@ def init_db():
                 NEW.selections_json IS NOT OLD.selections_json)
             BEGIN SELECT RAISE(ABORT,'settled slip is immutable'); END""")
         con.execute("CREATE INDEX IF NOT EXISTS idx_picks_event ON picks(event_id)")
+        from scan_journal import initialize
+        initialize(con)
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_event ON odds_snapshots(event_id, captured_at)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON odds_snapshots(event_id, market, side, bookmaker, captured_at)")
 
@@ -276,7 +279,7 @@ def save_picks(rows, snapshot_rows=None):
         "form_summary", "form_method", "h2h_summary", "h2h_detail", "h2h_sample", "form_rate_10", "form_rate_season",
         "confidence_score", "recommendation", "analysis_reason", "odds_in_range",
         "home_form_summary", "away_form_summary", "analysis_a_json", "analysis_b_json",
-        "received_at", "source_updated_at", "bookmaker_key"
+        "received_at", "source_updated_at", "bookmaker_key", "source_update_scope"
     ]
     saved = 0
     with db() as con:
@@ -336,11 +339,11 @@ def save_picks(rows, snapshot_rows=None):
             if duplicate:
                 continue
             con.execute("""INSERT INTO odds_snapshots
-                (event_id,match_name,market,side,point,odds,bookmaker,captured_at,received_at,source_updated_at,bookmaker_key)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)""", (
+                (event_id,match_name,market,side,point,odds,bookmaker,captured_at,received_at,source_updated_at,bookmaker_key,source_update_scope)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""", (
                 r.get("event_id"), r.get("match_name"), r.get("market"), r.get("side"),
                 r.get("point"), r.get("odds"), r.get("bookmaker"), r.get("received_at") or now_text,
-                r.get("received_at"), r.get("source_updated_at"), r.get("bookmaker_key")
+                r.get("received_at"), r.get("source_updated_at"), r.get("bookmaker_key"),r.get("source_update_scope")
             ))
             inserted_snapshots += 1
     return saved, inserted_snapshots
@@ -350,7 +353,7 @@ def has_result_source(league):
     return any(name == league and code for name, code in LEAGUES.values())
 
 
-def save_slip_record(slip_df, combined_odds, estimated_probability, selected_league_names=None, hours_limit=24):
+def save_slip_record(slip_df, combined_odds, estimated_probability, selected_league_names=None, hours_limit=24, regions=None):
     """Recheck canonical SQLite quotes at click time, under the same write lock."""
     from readiness import analysis_scope
     from market_recommendations import recommended_pick_ids
@@ -364,6 +367,11 @@ def save_slip_record(slip_df, combined_odds, estimated_probability, selected_lea
         canonical = pd.read_sql_query("SELECT * FROM picks ORDER BY id DESC", con)
         leagues = selected_league_names if selected_league_names is not None else list(slip_df['league'])
         scoped = analysis_scope(canonical, leagues, latest_receipts=latest_api_receipts(con), hours_limit=hours_limit)
+        from scan_journal import latest, current_rows
+        journal=latest(con,LEAGUES)
+        if journal is not None:
+            selected=[key for key,value in LEAGUES.items() if value[0] in leagues]
+            scoped=current_rows(scoped,journal,selected,regions or journal.get('regions'),hours_limit,LEAGUES)
         eligible = recommended_pick_ids(scoped.to_dict('records'), choose_recommendation)
         if not set(ids).issubset(eligible):
             raise ValueError(f"ยังไม่แนะนำ: ราคา/ข้อมูล/EV ไม่ผ่านเกณฑ์ หรืออยู่นอกลีกและช่วง {hours_limit} ชั่วโมง")
@@ -505,13 +513,30 @@ def update_pick_result(pick_id, score, settlement, profit_units, outcome_binary=
             (score, settlement, profit_units, outcome_binary, int(pick_id)))
 
 # -------------------- ODDS API --------------------
+def api_budget_settings():
+    from odds_budget import settings, ScanStopped
+    defaults=settings()
+    names={'requests':'VALUE_BET_API_DAILY_REQUESTS','credits':'VALUE_BET_API_DAILY_CREDITS',
+        'monthly_credits':'VALUE_BET_API_MONTHLY_CREDITS','reserve':'VALUE_BET_API_CREDIT_RESERVE',
+        'cooldown':'VALUE_BET_API_COOLDOWN_SECONDS'}
+    try:
+        return {key:int(runtime_setting(name,str(defaults[key]))) for key,name in names.items()}
+    except (TypeError,ValueError):
+        raise ScanStopped('หยุดสแกน: การตั้งค่างบ API ไม่ถูกต้อง',reason='budget_settings_invalid') from None
+
+
+def api_budget():
+    from odds_budget import Budget
+    return Budget(path=runtime_setting('VALUE_BET_API_LEDGER','data/odds_api_budget.db'),bill_path=DB_FILE)
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_odds(sport_key, regions, api_key):
-    from odds_budget import Budget, ScanStopped, OddsBatch
+    from odds_budget import Budget, ScanStopped, LeagueScanError, OddsBatch
     from credential_redaction import protect
     protect(api_key)
-    budget = Budget(bill_path=DB_FILE)
-    reservation = budget.reserve(api_key, sport_key, regions)
+    budget = api_budget()
+    reservation = budget.reserve(api_key, sport_key, regions, limits=api_budget_settings())
     url = f"{API_BASE}/sports/{sport_key}/odds/"
     params = {"apiKey": api_key, "regions": regions, "markets": "spreads,totals", "oddsFormat": "decimal"}
     try:
@@ -519,27 +544,38 @@ def fetch_odds(sport_key, regions, api_key):
     except requests.RequestException:
         budget.complete(reservation, 'network_error', {})
         # Never interpolate request exceptions, URLs or provider bodies containing credentials.
-        raise ScanStopped("หยุดสแกน: เชื่อมต่อ API ไม่สำเร็จ") from None
+        raise LeagueScanError("ลีกนี้เชื่อมต่อ API ไม่สำเร็จ — ตรวจลีกถัดไป", reason='network_error') from None
     budget.complete(reservation, response.status_code, response.headers)
     if response.status_code != 200:
-        raise ScanStopped(f"หยุดสแกน: API ตอบ HTTP {response.status_code}")
+        raise LeagueScanError("ลีกนี้ API ตอบไม่สำเร็จ — ตรวจลีกถัดไป", reason='http_error', status=response.status_code)
     try:
         matches = response.json()
         if not isinstance(matches, list) or not all(isinstance(m, dict) for m in matches):
             raise ValueError()
     except (ValueError, TypeError):
-        raise ScanStopped("หยุดสแกน: รูปแบบข้อมูล API ไม่ถูกต้อง") from None
+        raise LeagueScanError("ลีกนี้รูปแบบข้อมูล API ไม่ถูกต้อง", reason='invalid_json') from None
     received_at = datetime.now(UTC).isoformat()
+    from observation_archive import record_provider_response
+    observation = record_provider_response('the_odds_api', url, response, bill_db_path=DB_FILE)
     for match in matches:
         match['_received_at'] = received_at
+        if observation.get('raw_id'):
+            match['_observation_raw_id'] = observation['raw_id']
     return OddsBatch(matches, received_at), response.headers.get("x-requests-remaining", "ไม่ระบุ"), response.headers.get("x-requests-used", "ไม่ระบุ")
 
 # -------------------- HISTORICAL RESULTS --------------------
+def observed_source_get(provider, url, **kwargs):
+    response=requests.get(url,**kwargs)
+    from observation_archive import record_provider_response
+    record_provider_response(provider,url,response,bill_db_path=DB_FILE)
+    return response
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_history(csv_code):
     """Validated history quality-v2: quarantine contradictions before deduplication."""
     from history_data import load_history
-    return load_history(csv_code, requests.get, timeout=HISTORY_TIMEOUT)
+    return load_history(csv_code, lambda url,**kwargs:observed_source_get('football_data',url,**kwargs), timeout=HISTORY_TIMEOUT)
 
 
 @cache_data(ttl=21600, show_spinner=False)
@@ -554,7 +590,8 @@ def fetch_api_football_form(sport_key, season, api_key):
     if not decision.allowed:
         raise ApiFootballUnavailable(pd.DataFrame(), decision.diagnostic)
     try:
-        frame, diagnostic = fetch_finished_fixtures(sport_key, season, api_key, requests.get, timeout=HISTORY_TIMEOUT)
+        frame, diagnostic = fetch_finished_fixtures(sport_key, season, api_key,
+            lambda url,**kwargs:observed_source_get('api_football',url,**kwargs), timeout=HISTORY_TIMEOUT)
     except Exception:
         complete_request(decision.reservation, {'state': 'download_error'})
         raise ApiFootballUnavailable(pd.DataFrame(), {'provider':'api-football', 'state':'download_error', 'status':'download_error'}) from None
@@ -716,7 +753,7 @@ def fetch_understat_history(sport_key):
     """Cache successful xG histories for six hours; failures retain safe diagnostics."""
     from understat_history import load_understat_history, UnderstatUnavailable
     frame = load_understat_history(sport_key, UNDERSTAT_LEAGUES.get(sport_key),
-                                  UNDERSTAT_SEASONS, requests.get, timeout=TIMEOUT)
+                                  UNDERSTAT_SEASONS, lambda url,**kwargs:observed_source_get('understat',url,**kwargs), timeout=TIMEOUT)
     if frame.empty or frame.attrs.get('xg_diagnostics',{}).get('status') != 'ok':
         raise UnderstatUnavailable(frame)
     return frame
@@ -1467,7 +1504,7 @@ def domestic_league_definitions():
 def fetch_domestic_rosters(season):
     """Quality-v2 current-season CSVs, cached; only called on explicit cup scan."""
     from history_data import load_history
-    return {key: load_history(info['csv_code'], requests.get, timeout=HISTORY_TIMEOUT, seasons=(season,))
+    return {key: load_history(info['csv_code'], lambda url,**kwargs:observed_source_get('football_data',url,**kwargs), timeout=HISTORY_TIMEOUT, seasons=(season,))
             for key, info in domestic_league_definitions().items()}
 
 
@@ -1627,8 +1664,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     if not is_cup and matches:
         from source_diagnostics import describe_history_cache
         score_history = describe_history_cache(score_history, score_called_at)
-    if not is_cup:
-        score_history = optional_api_football_fallback(sport_key, score_history, matches, now)
+    league_score_history = score_history
     league_xg_history = history
     from data_health import observe_league
     health = observe_league(
@@ -1636,6 +1672,9 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
     if is_cup:
         health=cup_health(cup_packs,league_name,sport_key,now)
     rows, snapshot_rows = [], []
+    fixture_api_diagnostics = {}
+    from collections import Counter
+    quote_rejections = Counter()
     first_prices = first_observed_quotes([m.get("id", "") for m in matches])
     for match in matches:
         try:
@@ -1654,6 +1693,10 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                 continue
             score_history,domestic_context,xg_evidence=cup_fixture_data(pack,home,away,kickoff)
         if not is_cup:
+            # One unmatched club must not block verified fallback for another
+            # fixture; never combine CSV/provider rows into a synthetic history.
+            score_history = optional_api_football_fallback(sport_key, league_score_history, [match], now)
+            fixture_api_diagnostics[match.get('id')] = score_history.attrs.get('api_football_diagnostics',{})
             from understat_history import eligible_xg_history
             history = eligible_xg_history(league_xg_history, kickoff, datetime.now(UTC))
         h2h = get_h2h_history(score_history, home, away, kickoff, limit=5)
@@ -1691,21 +1734,40 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                 expected_profiles={'home':home_profile, 'away':away_profile})
             form_audit['recorded_at'] = datetime.now(UTC).isoformat()
         rows_before_match = len(rows)
-        for bm in match.get("bookmakers", []):
+        bookmakers=match.get('bookmakers')
+        if not isinstance(bookmakers,list):
+            quote_rejections['invalid_bookmaker_collection']+=1
+            bookmakers=[]
+        for bm in bookmakers:
+            if not isinstance(bm,dict) or not isinstance(bm.get('markets'),list):
+                quote_rejections['invalid_bookmaker_or_markets']+=1
+                continue
             book_name = bm.get("title", "Unknown")
             for market in bm.get("markets", []):
+                if not isinstance(market,dict):
+                    quote_rejections['invalid_market']+=1
+                    continue
                 m_key = market.get("key")
                 if m_key not in ("spreads", "totals"):
                     continue
-                provenance = {"received_at": match.get("_received_at"), "source_updated_at": market.get("last_update"),
-                              "bookmaker_key": bm.get("key")}
-                for outcome in market.get("outcomes", []):
+                from quote_provenance import quote_update
+                provenance = {"received_at": match.get("_received_at"),
+                              "bookmaker_key": bm.get("key"), **quote_update(bm,market)}
+                outcomes=market.get('outcomes')
+                if not isinstance(outcomes,list):
+                    quote_rejections['invalid_outcomes']+=1
+                    continue
+                for outcome in outcomes:
+                    if not isinstance(outcome,dict) or any(isinstance(outcome.get(key),bool) for key in ('price','point')):
+                        quote_rejections['invalid_outcome']+=1
+                        continue
                     try:
                         odds = float(outcome.get("price", 0))
                         line = float(outcome.get("point"))
                     except (TypeError, ValueError):
                         continue
-                    if not math.isfinite(odds) or odds <= 1 or not math.isfinite(line) or abs(line*4-round(line*4)) > 1e-9:
+                    if not math.isfinite(odds) or odds <= 1 or not math.isfinite(line) or not math.isfinite(line*4) or abs(line*4-round(line*4)) > 1e-9 or (m_key=='totals' and line<0):
+                        quote_rejections['invalid_price_or_line']+=1
                         continue
                     name = outcome.get("name")
                     if m_key == "spreads":
@@ -1734,6 +1796,7 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     formseason = estimate_form_signal(score_history, home, away, kickoff, m_key, side, line, window=None)
                     price = price_evidence(first_prices.get((match.get("id", ""),market_label,side,book_name,provenance["bookmaker_key"]) if provenance["bookmaker_key"] else (match.get("id", ""),market_label,side,book_name)),
                                            line, odds, provenance["received_at"] or now.astimezone(TH_TZ).isoformat(timespec="seconds"))
+                    price['source_update_scope'] = provenance['source_update_scope']
                     analysis_a = system_a_analysis(form5, form10, formseason, home_profile, away_profile,
                                                    opponents, xg_evidence, price)
                     ou_line = line if m_key == "totals" else 2.5
@@ -1821,11 +1884,20 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                     "status": "ยังไม่มีราคาตลาดสำหรับคำนวณ EV"}, ensure_ascii=False)})
     from scan_diagnostics import finalize_scan_report
     scan_report = finalize_scan_report(scan_report, rows, datetime.now(UTC), choose_c=choose_recommendation, current_scan_rows=True)
-    health['api_football'] = score_history.attrs.get('api_football_diagnostics', {
+    scan_report['market_quote_rejections'] = dict(quote_rejections)
+    available_diagnostics=list(fixture_api_diagnostics.values())
+    health['api_football'] = next((d for d in available_diagnostics if d.get('used_for_form')),
+        available_diagnostics[0] if available_diagnostics else score_history.attrs.get('api_football_diagnostics', {
         'provider': 'api-football', 'state': 'not_called', 'reason': 'unsupported_league',
-        'request_attempted': False})
+        'request_attempted': False}))
+    health['api_football_by_fixture'] = fixture_api_diagnostics
     from api_football_data import api_football_status_text
-    scan_report['api_football_status'] = api_football_status_text(health['api_football'])
+    scan_report['api_football_status'] = ' | '.join(dict.fromkeys(api_football_status_text(d)
+        for d in available_diagnostics)) if available_diagnostics else api_football_status_text(health['api_football'])
+    from observation_archive import capture_completed_scan
+    scan_report['observation_archive'] = (capture_completed_scan(sport_key, matches, rows, snapshot_rows,
+        score_history, history, bill_db_path=DB_FILE) if os.environ.get('VALUE_BET_OBSERVATION_DB','').strip()
+        else {'status':'disabled','normalized_n':0,'decisions_n':0})
     health['scan_window'] = scan_report
     record_data_health(sport_key, health)
     st.caption(scan_report_text(scan_report))
@@ -1840,10 +1912,69 @@ def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odd
                 item for item in scan_report['per_fixture_readiness'] if item.get('event_id') == row.get('event_id')],
                 'detail_scope': 'matching_fixture_only; full scan in league_health'}
         analysis['scan_diagnostics'] = report_for_row
-        analysis['api_football'] = health['api_football']
+        analysis['api_football'] = fixture_api_diagnostics.get(row.get('event_id'), health['api_football'])
         analysis['status'] = str(analysis.get('status', ''))+' · '+scan_report_text(scan_report)
         row['analysis_a_json'] = json.dumps(analysis, ensure_ascii=False, allow_nan=False)
     return rows, snapshot_rows, remaining, used
+
+def latest_scan_report():
+    from scan_journal import latest
+    with db() as con:
+        return latest(con, LEAGUES)
+
+
+def current_scan_rows(frame, selected, regions, hours_limit):
+    from scan_journal import current_rows
+    return current_rows(frame, latest_scan_report(), selected, regions, hours_limit, LEAGUES)
+
+
+def safe_budget_status(api_key):
+    if not api_key:
+        return None
+    try:
+        return api_budget().snapshot(api_key,limits=api_budget_settings())
+    except Exception:
+        return {'provider_used':'ไม่ทราบ','provider_remaining':'ไม่ทราบ',
+            'credits_month':'อ่านบัญชีงบไม่ได้','monthly_credit_limit':500,'credit_reserve':'ไม่ทราบ'}
+
+
+def execute_selected_scan(selected, hours_limit, min_odds, max_odds, regions, api_key, on_progress=None):
+    """Persist each successful league and every outcome; never open another DB."""
+    from scan_control import run_selected_leagues
+    from scan_journal import begin, append
+    from odds_budget import ScanStopped
+    with db() as con:
+        run_id=begin(con,list(selected),regions,hours_limit)
+    saved=[0,0]
+
+    def scan_one(key, name, code):
+        output=scan_league(key,name,code,hours_limit,min_odds,max_odds,regions,api_key)
+        try:
+            counts=save_picks(output[0],output[1])
+        except Exception:
+            raise ScanStopped('หยุดสแกน: บันทึกราคาไม่สำเร็จ',reason='price_persistence_failed') from None
+        saved[0]+=counts[0]
+        saved[1]+=counts[1]
+        return output
+
+    def report_for(key):
+        with db() as con:
+            row=con.execute('SELECT payload_json FROM league_health WHERE sport_key=? ORDER BY id DESC LIMIT 1',(key,)).fetchone()
+        return json.loads(row[0]).get('scan_window',{}) if row else {}
+
+    def progress(index,total,entry):
+        try:
+            with db() as con:
+                append(con,run_id,entry)
+        except Exception:
+            raise ScanStopped('หยุดสแกน: บันทึกรายงานสแกนไม่สำเร็จ',reason='scan_journal_unavailable') from None
+        if on_progress:
+            on_progress(index,total,entry)
+
+    result=run_selected_leagues(selected,LEAGUES,scan_one,report_for=report_for,on_progress=progress)
+    result.update(run_id=run_id,saved_counts=saved,regions=regions,hours_limit=hours_limit)
+    return result
+
 
 # -------------------- RESULT SETTLEMENT --------------------
 def settle_pick(row, home_goals, away_goals):
@@ -1923,32 +2054,29 @@ with tab_scan:
         else:
             all_rows, all_snapshots, errors, quota_info = [], [], [], []
             progress = st.progress(0)
-            for i, key in enumerate(selected_leagues):
-                league_name, csv_code = LEAGUES[key]
-                try:
-                    rows, snapshots, remaining, used = scan_league(key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key)
-                    all_rows.extend(rows)
-                    all_snapshots.extend(snapshots)
-                    quota_info.append(f"{league_name}: ใช้ไป {used}, เหลือ {remaining}")
-                except Exception as exc:
-                    from odds_budget import ScanStopped
-                    errors.append(f"{league_name}: {str(exc) if isinstance(exc, ScanStopped) else type(exc).__name__}")
-                    if isinstance(exc, ScanStopped):
-                        break
-                progress.progress((i + 1) / len(selected_leagues))
+            result = execute_selected_scan(selected_leagues, hours_limit, min_odds, max_odds, regions, api_key,
+                on_progress=lambda index,total,entry: progress.progress(index/total))
+            all_rows, all_snapshots = result['rows'], result['snapshots']
+            count, snapshot_count = result['saved_counts']
+            errors = [f"{entry['league']}: {entry['status']} · {entry.get('reason') or ''}"
+                      for entry in result['leagues'] if entry['status'] not in ('success','empty_api','filtered_out','success_no_rows')]
+            quota_info = [f"{entry['league']}: พบ {entry['saved_fixture_count']} คู่ | ใช้ไป {entry.get('provider_used')}, เหลือ {entry.get('provider_remaining')}"
+                          for entry in result['leagues']]
             progress.empty()
             if all_rows or all_snapshots:
-                count, snapshot_count = save_picks(all_rows, all_snapshots)
                 fixture_count = len({r.get("event_id") for r in all_rows if r.get("event_id")})
                 with_price = sum(1 for r in all_rows if r.get("market") != "ยังไม่มีราคา")
                 st.success(f"พบ {fixture_count} คู่ | บันทึก/อัปเดต {count} รายการตลาด | เก็บราคา {snapshot_count} snapshot")
                 st.info(f"มีราคาและตลาดให้วิเคราะห์ {with_price} รายการตลาด — ไม่ตัดคู่ทิ้งด้วย EV หรือช่วงค่าน้ำ")
-            else:
+            elif result['counts']['successful_leagues'] and not errors:
                 st.info("ไม่พบคู่ในช่วงเวลาที่เลือก หรือ API ไม่ส่งโปรแกรมแข่งขัน")
             for info in quota_info:
                 st.caption("ℹ️ " + info)
             for err in errors:
                 st.warning(err)
+
+    from scan_status import render_scan_status
+    render_scan_status(latest_scan_report(), safe_budget_status(api_key))
 
     # Read-only recovery of persisted scans, including fixtures that have kicked off.
     # Never present archived prices as live quotes or as new betting recommendations.
@@ -1983,6 +2111,7 @@ with tab_scan:
 
     from readiness import analysis_scope
     df = analysis_display_rows(analysis_scope(load_picks(limit=None), [LEAGUES[k][0] for k in selected_leagues], latest_receipts=latest_api_receipts(), hours_limit=hours_limit))
+    df = current_scan_rows(df, selected_leagues, regions, hours_limit)
     if df.empty:
         st.info("ยังไม่มีข้อมูล เลือกลีกและกดสแกน")
     else:
@@ -1994,22 +2123,9 @@ with tab_scan:
         dashboard_rows = df[df["kickoff_parsed"] >= now_ts].copy()
         df = latest_saved_quotes(df)
         upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
-        # Use the best available price for the same line/selection across bookmakers.
-        quoted = upcoming[upcoming["odds"].notna()].copy()
-        if not quoted.empty:
-            from market_recommendations import ah_table_rows
-            best_market = pd.DataFrame(ah_table_rows(dashboard_rows.to_dict("records"), choose_recommendation))
-            no_price_rows = upcoming[upcoming["market"] == "ยังไม่มีราคา"].copy()
-            if not no_price_rows.empty:
-                best_market = pd.concat([best_market, no_price_rows], ignore_index=True, sort=False)
-        else:
-            best_market = upcoming[upcoming["market"] == "ยังไม่มีราคา"].copy()
-        from market_recommendations import ou_table_rows
-        ou_rows = ou_table_rows(dashboard_rows.to_dict("records"),choose_recommendation)
-        if not best_market.empty:
-            best_market = best_market[best_market["market"] != "Over/Under"].copy()
-        if ou_rows:
-            best_market = pd.concat([best_market,pd.DataFrame(ou_rows)],ignore_index=True,sort=False)
+        quoted = dashboard_rows[dashboard_rows['odds'].notna()].copy()
+        from market_summary import summary_market_rows
+        best_market = pd.DataFrame(summary_market_rows(dashboard_rows.to_dict('records'),choose_recommendation))
         fixtures = upcoming[["event_id", "match", "league", "kickoff_th"]].drop_duplicates("event_id")
         a, b, c = st.columns(3)
         a.metric("คู่ที่ยังไม่เริ่ม", len(fixtures))
@@ -2067,7 +2183,7 @@ with tab_scan:
             if quoted.empty:
                 st.info("ไม่มีราคาให้แสดง")
             else:
-                alt_cols = [c for c in ["kickoff_th", "league", "match", "market", "selection", "point", "odds", "confidence_score", "ev_pct", "bookmaker", "odds_in_range"] if c in quoted.columns]
+                alt_cols = [c for c in ["kickoff_th", "league", "match", "market", "selection", "point", "odds", "confidence_score", "ev_pct", "bookmaker", "odds_in_range", "received_at", "source_updated_at", "source_update_scope"] if c in quoted.columns]
                 st.dataframe(quoted[alt_cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "point":"เส้น", "odds":"ค่าน้ำ", "confidence_score":"คะแนนหลักฐาน A", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ", "odds_in_range":"อยู่ในช่วงค่าน้ำที่ตั้งไว้"}), use_container_width=True, hide_index=True)
         st.caption("คะแนน A มาจากหลักฐานฟอร์ม ไม่ใช่ความน่าจะเป็น; เปอร์เซ็นต์ของ B มาจาก Poisson และยังไม่ผ่าน Calibration; EV อาจคลาดเคลื่อนตามคุณภาพ xG")
 
@@ -2075,6 +2191,7 @@ with tab_slips:
     st.subheader("🎟️ จัดอันดับตัวเลือก — OU ต้องมีเส้นหลักและ EV ที่ยืนยันได้")
     from readiness import analysis_scope
     df = analysis_display_rows(analysis_scope(load_picks(limit=None), [LEAGUES[k][0] for k in selected_leagues], latest_receipts=latest_api_receipts(), hours_limit=hours_limit))
+    df = current_scan_rows(df, selected_leagues, regions, hours_limit)
     if df.empty:
         st.info("สแกนราคาก่อน")
     else:
@@ -2125,7 +2242,7 @@ with tab_slips:
                     st.caption("บิลนี้มีลีกที่ยังไม่มีแหล่งตรวจผลอัตโนมัติ จึงยังบันทึกไม่ได้")
                 if st.button(f"💾 บันทึกบิล {size} คู่", key=save_key, disabled=not can_settle):
                     probability = float((slip["p_win"].clip(0, 100) / 100).prod()) if slip["p_win"].notna().all() else None
-                    slip_id = save_slip_record(slip, combined_odds, probability, [LEAGUES[k][0] for k in selected_leagues], hours_limit=hours_limit)
+                    slip_id = save_slip_record(slip, combined_odds, probability, [LEAGUES[k][0] for k in selected_leagues], hours_limit=hours_limit, regions=regions)
                     st.success(f"บันทึกบิลหมายเลข #{slip_id} แล้ว — จะตรวจผลเมื่อผลของทุกคู่พร้อม")
         else:
             st.info("ยังไม่มีตัวเลือกถึงคะแนนขั้นต่ำนี้ — แต่คู่ทั้งหมดดูได้ในเมนูวิเคราะห์")

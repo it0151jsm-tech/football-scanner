@@ -1,3 +1,5 @@
+> ขอบเขตประวัติ PR #18: การพัฒนา Operational Recovery รุ่นถัดไปอยู่ใน [OPERATIONAL_ACCEPTANCE.md](OPERATIONAL_ACCEPTANCE.md) และ [OBSERVATION_ARCHIVE.md](OBSERVATION_ARCHIVE.md) โดยใช้ baseline PR6 ที่ตรึงไว้ใน `fixtures/backtest/pr6-baseline/`; รายงาน v1 เดิมเก็บเป็นประวัติ ไม่ใช่ผลตรวจโค้ด operational รุ่นใหม่
+
 # รายงานตรวจรับ Backtest บนฐาน PR6
 
 วันที่ 24 ตุลาคม 2569 — ฐานโค้ด PR6 `df4b836b7bfade57f009f1ec115ae2905f76ae7d`

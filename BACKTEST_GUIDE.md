@@ -1,3 +1,5 @@
+> ขอบเขตประวัติ PR #18: การพัฒนา Operational Recovery รุ่นถัดไปอยู่ใน [OPERATIONAL_ACCEPTANCE.md](OPERATIONAL_ACCEPTANCE.md) และ [OBSERVATION_ARCHIVE.md](OBSERVATION_ARCHIVE.md) โดยใช้ baseline PR6 ที่ตรึงไว้ใน `fixtures/backtest/pr6-baseline/`; รายงาน v1 เดิมเก็บเป็นประวัติ ไม่ใช่ผลตรวจโค้ด operational รุ่นใหม่
+
 # คู่มือ Backtest ออฟไลน์ของ Value Bet Pro
 
 งานนี้เพิ่มเครื่องมือวิจัยแยกจากแอป Streamlit บนฐาน PR6 เท่านั้น ไม่เชื่อม Foundation ไม่เปิดฐานบิล ไม่เรียก API และไม่เปลี่ยนหน้าจอหรือสูตร A/B/C, Poisson, EV และ Settlement เดิม

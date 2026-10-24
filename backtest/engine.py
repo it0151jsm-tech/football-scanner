@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 from pathlib import Path
+import re
 
 from .baseline import Baseline
 from .evidence import Archive, finite, _identity
@@ -17,6 +18,9 @@ from .price_history import closing_line_value, select_price_history
 from .protocol import canonical_sha256, default_protocol, utc, validate_protocol
 
 MARKETS = ('Asian Handicap', 'Over/Under')
+FEATURE_COLLECTIONS = ('events','score_history','xg_history','quotes')
+MEMBERSHIP_FIELDS = ('input_observation_ids','input_normalized_sha256','input_source_payload_sha256')
+HASH = re.compile(r'^[0-9a-f]{64}$')
 
 
 def _stable(row):
@@ -30,6 +34,92 @@ def _conflicts(rows, key):
         if isinstance(row.get(key), str) and row[key].strip():
             groups[row[key]].add(canonical_sha256(row))
     return {identity for identity, values in groups.items() if len(values) > 1}
+
+
+def _decision_inputs(archive, decision, version, proof_index):
+    """Validate the logged input set, never add other available observations.
+
+    Observer IDs and original normalized hashes remain an audit trail back to
+    its append-only DB. Export source identities are policy-versioned, so their
+    rewritten proof hashes are the replay binding; Archive.proof checks those
+    exact bytes. This validates supplied membership, not authenticity of clocks
+    or equality with a separately archived live prediction.
+    """
+    if not any(key in decision for key in MEMBERSHIP_FIELDS):
+        if 'model_version' in decision and decision['model_version'] != version:
+            return {'status':'rejected','reason':'decision_model_version_mismatch'}
+        return {'status':'legacy_unbound_descriptive','reason':'logged_input_membership_not_available',
+                'inputs':{key:getattr(archive,key) for key in FEATURE_COLLECTIONS}}
+    if decision.get('model_version') != version:
+        return {'status':'rejected','reason':'decision_model_version_mismatch'}
+    values=[decision.get(key) for key in MEMBERSHIP_FIELDS]
+    if (any(not isinstance(value,list) or not value for value in values)
+            or len({len(value) for value in values}) != 1):
+        return {'status':'rejected','reason':'decision_input_membership_missing_or_incomplete'}
+    ids,normalized,proofs=values
+    if (any(type(value) is not int or value < 1 for value in ids) or len(set(ids)) != len(ids)
+            or any(not isinstance(value,str) or not HASH.fullmatch(value) for value in normalized+proofs)
+            or len(set(normalized)) != len(normalized) or len(set(proofs)) != len(proofs)):
+        return {'status':'rejected','reason':'decision_input_membership_invalid_or_duplicated'}
+    inputs={key:[] for key in FEATURE_COLLECTIONS}
+    cutoff=utc(decision['decision_at'])
+    recorded_decision=utc(decision.get('recorded_at')) if 'recorded_at' in decision else cutoff
+    if recorded_decision is None or not utc(decision['received_at']) <= recorded_decision <= cutoff:
+        return {'status':'rejected','reason':'decision_recording_clock_unverified'}
+    for digest,normalized_digest in zip(proofs,normalized):
+        matches=proof_index.get(digest,[])
+        if len(matches) != 1:
+            return {'status':'rejected','reason':'decision_input_proof_missing_or_ambiguous'}
+        collection,row=matches[0]
+        if collection not in FEATURE_COLLECTIONS:
+            return {'status':'rejected','reason':'decision_input_contains_outcome_or_decision'}
+        if archive.proof(row):
+            return {'status':'rejected','reason':'decision_input_evidence_unverified'}
+        original={key:value for key,value in row.items() if key!='source_payload_sha256'}
+        source=original['source']
+        provider,separator,revision=source.rpartition('@')
+        # The observer rewrites only the source catalog identity on export.
+        # Reverse that documented transform only when its policy hash matches;
+        # generic archives without a revision suffix keep their source intact.
+        if separator and provider and revision==canonical_sha256(archive.catalog[source])[:16]:
+            original['source']=provider
+        if canonical_sha256(original) != normalized_digest:
+            return {'status':'rejected','reason':'decision_input_normalized_checksum_mismatch'}
+        receipt=utc(row.get('received_at'))
+        if receipt is None or receipt > cutoff:
+            return {'status':'rejected','reason':'decision_input_received_after_decision'}
+        if 'recorded_at' in row:
+            recorded=utc(row['recorded_at'])
+            if recorded is None or not receipt <= recorded <= cutoff:
+                return {'status':'rejected','reason':'decision_input_recording_clock_unverified'}
+        if 'source_received_at' in row:
+            source_received=utc(row['source_received_at'])
+            if source_received is None or source_received > receipt:
+                return {'status':'rejected','reason':'decision_input_source_clock_unverified'}
+        inputs[collection].append(row)
+    if len(inputs['events']) != 1 or inputs['events'][0].get('event_id') != decision.get('event_id'):
+        return {'status':'rejected','reason':'decision_input_requires_exact_target_event'}
+    event=inputs['events'][0]
+    if archive.event_reason(event,cutoff):
+        return {'status':'rejected','reason':'decision_input_event_unverified'}
+    for collection,rows in inputs.items():
+        for row in rows:
+            if row.get('league') != event['league']:
+                return {'status':'rejected','reason':'decision_input_league_mismatch'}
+            if row.get('event_id',event['event_id']) != event['event_id']:
+                return {'status':'rejected','reason':'decision_input_fixture_mismatch'}
+            if collection=='quotes':
+                if row.get('quote_kind') not in ('observed','opening'):
+                    return {'status':'rejected','reason':'decision_input_closing_or_unverified_quote'}
+                # Old, genuinely logged first-observed quotes can be features;
+                # the separate current-price gate still enforces freshness.
+                if archive.quote_reason(row,event,cutoff,closing=True):
+                    return {'status':'rejected','reason':'decision_input_quote_unverified'}
+            elif collection in ('score_history','xg_history'):
+                if archive.history_frame([row],event,cutoff,xg=collection=='xg_history').empty:
+                    return {'status':'rejected','reason':'decision_input_history_unverified'}
+    return {'status':'bound_inputs_validated','reason':None,'inputs':inputs,
+            'proof_sha256':proofs,'input_n':len(proofs)}
 
 
 def _split(protocol, event, decision):
@@ -83,6 +173,12 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
     excluded, pending, selections, forecasts, price_records = Counter(), [], [], [], []
     event_diagnostics, prediction_records = [], []
     forecast_pending_n = 0
+    membership_counts=Counter()
+    proof_index=defaultdict(list)
+    for collection in FEATURE_COLLECTIONS+('results','decisions'):
+        for row in getattr(archive,collection):
+            if isinstance(row.get('source_payload_sha256'),str):
+                proof_index[row['source_payload_sha256']].append((collection,row))
     decision_groups = defaultdict(list)
     for row in archive.decisions:
         cutoff, received = utc(row.get('decision_at')), utc(row.get('received_at'))
@@ -100,7 +196,8 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
     # No future correction can poison an earlier decision: reconcile each
     # identity only after its actual receipt is inside the relevant cutoff.
     visited_fixtures = set()
-    event_ids = sorted({row.get('event_id') for row in archive.events if isinstance(row.get('event_id'), str)})
+    event_ids = sorted({row.get('event_id') for row in archive.events if isinstance(row.get('event_id'), str)}
+                       | set(decision_groups))
     for event_id in event_ids:
         decisions = decision_groups.get(event_id, [])
         if not decisions:
@@ -113,8 +210,22 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
             continue
         decision = min(earliest_decisions, key=lambda row: row['decision_id'])
         cutoff = decision['decision_at']
+        membership=_decision_inputs(archive,decision,version,proof_index)
+        membership_counts[membership['status']]+=1
+        if membership['status']=='rejected':
+            excluded[membership['reason']]+=1
+            event_diagnostics.append({'event_id':event_id,'decision_at':cutoff,
+                'input_membership_status':'rejected','input_membership_reason':membership['reason'],
+                'score_history_n':0,'xg_history_n':0,'current_quotes_n':0,
+                'a_available_n':0,'b_available_n':0,'c_eligible_n':0})
+            continue
+        feature_inputs=membership['inputs']
+        event_quality=('observed_inputs_unbound' if mode=='observed'
+            and membership['status']=='legacy_unbound_descriptive' else quality)
+        prediction_provenance=('recomputed_from_logged_inputs' if membership['status']=='bound_inputs_validated'
+            else 'descriptive_unbound_replay_not_archived_live')
         excluded['later_decisions_not_independent_samples'] += len(decisions)-len(earliest_decisions)
-        events = [row for row in archive.events if row.get('event_id') == event_id
+        events = [row for row in feature_inputs['events'] if row.get('event_id') == event_id
                   and utc(row.get('received_at')) is not None and utc(row['received_at']) <= earliest]
         if not events:
             excluded['event_not_received_at_decision'] += 1
@@ -137,8 +248,8 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
             excluded['duplicate_canonical_fixture'] += 1
             continue
         visited_fixtures.add(fixture)
-        score_frame = archive.history_frame(archive.score_history, event, cutoff)
-        xg_frame = archive.history_frame(archive.xg_history, event, cutoff, xg=True)
+        score_frame = archive.history_frame(feature_inputs['score_history'], event, cutoff)
+        xg_frame = archive.history_frame(feature_inputs['xg_history'], event, cutoff, xg=True)
         quote_candidates, closing_quotes = [], []
         for quote in archive.quotes:
             if quote.get('event_id') != event_id:
@@ -148,6 +259,12 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
             report_error = archive.quote_reason(quote, event, now, closing=True)
             if report_error is None:
                 closing_quotes.append(quote)
+        feature_price_history=[]
+        for quote in feature_inputs['quotes']:
+            if quote.get('event_id') != event_id:
+                continue
+            if archive.quote_reason(quote,event,cutoff,closing=True) is None and quote.get('quote_kind')!='closing':
+                feature_price_history.append(quote)
             receipt = utc(quote.get('received_at'))
             if receipt is not None and receipt > earliest:
                 continue
@@ -164,8 +281,7 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
         for quote in sorted(unique_quotes.values(), key=_stable):
             # Includes older evidence solely for the first-observed comparison;
             # decision/current must still pass the unchanged freshness gate.
-            asof_quotes = [row for row in closing_quotes if utc(row['received_at']) <= earliest
-                          and row.get('quote_kind') != 'closing']
+            asof_quotes = feature_price_history
             history = select_price_history(asof_quotes, quote, cutoff)
             if history['status'] != 'available' or history['decision_quote']['quote_id'] != quote['quote_id']:
                 excluded['not_latest_compatible_decision_quote'] += 1
@@ -191,13 +307,16 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
         split = _split(protocol, event, cutoff)
         for row in rows:
             row.update(decision_at=utc(cutoff).isoformat(), fixture_id=fixture,
-                data_mode=mode, quality_status=quality, model_version=version,
+                data_mode=mode, quality_status=event_quality, model_version=version,
+                input_membership_status=membership['status'],prediction_provenance=prediction_provenance,
                 result_split=split, baseline_c_supported=row['id'] in c_ids)
             prediction_records.append({key: row.get(key) for key in
                 ('event_id','fixture_id','quote_id','league','market','side','point','odds',
                  'decision_at','kickoff_utc','score','form_sample','ev_pct','p_win','p_partial','p_loss',
-                 'model_status','result_split','baseline_c_supported')})
+                 'model_status','result_split','baseline_c_supported','input_membership_status','prediction_provenance')})
         event_diagnostics.append({'event_id': event_id, 'fixture_id': fixture,
+            'input_membership_status':membership['status'],'input_membership_reason':membership['reason'],
+            'logged_input_n':membership.get('input_n'),'prediction_provenance':prediction_provenance,
             'decision_at': cutoff, 'score_history_n': len(score_frame), 'xg_history_n': len(xg_frame),
             'current_quotes_n': len(rows), 'a_available_n': sum(finite(row.get('score')) for row in rows),
             'b_available_n': sum(finite(row.get('ev_pct')) for row in rows), 'c_eligible_n': len(c_ids)})
@@ -220,7 +339,8 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
         for system, picked in chosen:
             case = canonical_sha256({'fixture_id': fixture,'market': picked['market'],'system': system})
             header = {key: picked[key] for key in ('event_id','fixture_id','quote_id','league','market',
-                'side','point','odds','decision_at','kickoff_utc','result_split','data_mode','quality_status','model_version')}
+                'side','point','odds','decision_at','kickoff_utc','result_split','data_mode','quality_status','model_version',
+                'input_membership_status','prediction_provenance')}
             header.update(case_id=case, system=system,
                 baseline_selection={key: picked.get(key) for key in ('p_win','p_partial','p_loss','ev_pct')},
                 model_available=finite(picked.get('ev_pct')))
@@ -247,6 +367,7 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
                 if detail['eligible']:
                     forecasts.append({**detail,'system':'B','event_id':event_id,'fixture_id':fixture,
                         'league':event['league'],'result_split':split,'decision_at':cutoff,
+                        'input_membership_status':membership['status'],'quality_status':event_quality,
                         'kickoff_utc':event['kickoff_utc'],'result_received_at':result['received_at'],
                         'baseline_selection':{key:row[key] for key in ('p_win','p_partial','p_loss')},'model_available':True})
         else:
@@ -270,13 +391,21 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
             'interpretation':('shadow form comparator; not a value recommendation; no A probability' if system == 'A'
                 else 'positive original model EV comparator' if system == 'B' else 'original C market policy'),
             'by_split':{split:summarize_settlements([r for r in records if r['result_split']==split],
-                minimum_n_for_review=minimum) for split in ('descriptive_replay','holdout')}}
+                minimum_n_for_review=minimum) for split in ('descriptive_replay','holdout')},
+            'by_input_membership':{status:summarize_settlements(
+                [r for r in records if r['input_membership_status']==status],minimum_n_for_review=minimum)
+                for status in ('bound_inputs_validated','legacy_unbound_descriptive')}}
     calibration = _summary(forecasts, bins, minimum)
     calibration['by_split'] = {split:_summary([row for row in forecasts if row['result_split']==split],bins,minimum)
         for split in ('descriptive_replay','holdout')}
+    calibration['by_input_membership']={status:_summary(
+        [row for row in forecasts if row['input_membership_status']==status],bins,minimum)
+        for status in ('bound_inputs_validated','legacy_unbound_descriptive')}
     root = Path(__file__).resolve().parent
     evaluator = {path.name:hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(root.glob('*.py'))}
     n = len({row['fixture_id'] for row in selections})
+    bound_real_n=len({row['fixture_id'] for row in selections if mode=='observed'
+                     and row['input_membership_status']=='bound_inputs_validated'})
     return _empty_financials({'schema_version':1,'generated_at':now.isoformat(),'data_mode':mode,
         'status':'synthetic_test_only_not_real_performance' if mode == 'synthetic_test' else
                  'insufficient_real_data' if not n else 'descriptive_replay_requires_independent_review',
@@ -289,7 +418,12 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
         'data_availability_note':'This evaluator reads only the explicitly supplied archive; zero is not a live league/source coverage measurement.',
         'training_provenance_status':'unknown','training_case_ids':[],'training_fixture_ids':[],
         'performance_conclusion':'ไม่สามารถสรุปประสิทธิภาพหรือผลกำไรในอนาคตได้',
-        'qualified_real_fixture_n':n if mode == 'observed' else 0,
+        'qualified_real_fixture_n':bound_real_n,
+        'observed_descriptive_fixture_n':n if mode=='observed' else 0,
+        'decision_input_membership':{key:membership_counts[key] for key in
+            ('bound_inputs_validated','legacy_unbound_descriptive','rejected')},
+        'archived_live_prediction_verified':False,
+        'financial_summary_scope':'descriptive replay; use by_input_membership to separate logged-input reconstructions from legacy unbound replay',
         'evaluated_fixture_n':len(visited_fixtures),'systems':systems,
         'b_calibration_all_contracts':calibration,'b_calibration_contract_n':len(forecasts),
         'b_calibration_coverage':{'forecast_n':len(forecasts)+forecast_pending_n,
@@ -300,6 +434,7 @@ def run_backtest(document, protocol=None, *, report_at=None, allow_test_fixtures
         'price_reports':price_records,'event_diagnostics':event_diagnostics,
         'exclusions':dict(excluded),'history_exclusions':dict(archive.history_exclusions),
         'limitations':['Hashes bind supplied observations but cannot authenticate past clocks or source truth.',
+            'Missing decision input membership is descriptive unbound replay, not an archived-live reconstruction.',
             'Retrospective fixed-formula replay is not an archived live prediction or proof of out-of-sample performance.',
             'No model fitting/calibration adjustment; original probabilities are uncalibrated.',
             'Missing source/timing/xG/prices/results are not imputed.',
