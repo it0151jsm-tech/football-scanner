@@ -1,0 +1,39 @@
+{
+  "generated_at": "2026-10-24T13:11:31.371452+00:00",
+  "scope": "source-code review and offline fixtures only",
+  "base_pr": 18,
+  "base_commit": "0a35ffa025b6c00b2881cb194eabc7627a904c56",
+  "dependency": "PR6 -> PR18 -> this draft; PR17 export diagnostics selectively integrated",
+  "configured_leagues": 38,
+  "configured_csv_codes": 26,
+  "configured_xg_leagues": 5,
+  "live_source_success_count": null,
+  "live_end_to_end_verified": false,
+  "physical_iphone_safari_verified": false,
+  "streamlit_cloud_deployment_verified": false,
+  "ready_provider_credentials_observed": false,
+  "provider_api_calls_during_validation": 0,
+  "real_backtest_qualified_samples": 0,
+  "roi_pct": null,
+  "calibrated": false,
+  "all_fixture_metrics_are_synthetic": true,
+  "incident_11_to_3_confirmed": false,
+  "incident_evidence_missing": [
+    "original raw API responses",
+    "original scan log",
+    "original budget ledger"
+  ],
+  "proven_code_defects": [
+    "all per-league network/HTTP/JSON failures previously stopped remaining selected leagues",
+    "legacy default daily 10 requests/20 credits cannot cover 11 uncached two-market leagues",
+    "bookmaker-level provider update timestamp ignored by prior reader",
+    "one unmatched API-Football fixture blocked verified fallback for other fixtures",
+    "raw OU alternative rows were mixed into table summary",
+    "latest failed/interrupted run did not have an authoritative display gate"
+  ],
+  "ui_policy": "original 4 tabs, controls, CSS and card renderers preserved; necessary scan-status expander added",
+  "backtest_policy": "frozen PR6 formulas, logged-input membership, separate unbound research, no future labels as features",
+  "go_no_go": "offline pilot verification only; live acceptance pending; no real-money bill durability approval",
+  "main_merged": false,
+  "production_deployed": false
+}

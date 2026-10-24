@@ -20,9 +20,11 @@ import unicodedata
 import pandas as pd
 
 
-ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+ROOT = REPOSITORY_ROOT / 'fixtures/backtest/pr6-baseline'
+REFERENCE_LOCK = REPOSITORY_ROOT / 'fixtures/backtest/pr6-source-lock.json'
 UTC = timezone.utc
-BASELINE_VERSION = 'original-app-offline-v1'
+BASELINE_VERSION = 'pr6-frozen-offline-v2'
 PROTECTED_FUNCTIONS = frozenset({
     'estimate_goals', 'estimate_form_signal', 'choose_recommendation',
     'poisson_probs', 'score_matrix', 'split_line', 'evaluate_market_poisson',
@@ -76,6 +78,19 @@ def _selected_tree(source, functions, constants):
 
 
 def _source_manifest(root):
+    # Operational fixes may change today's scan/database helpers. Historical
+    # evaluation remains pinned to all reviewed PR6 source bytes, not whatever
+    # production happens to run when a report is regenerated later.
+    frozen_reference = root.resolve() == ROOT.resolve()
+    if frozen_reference:
+        lock = json.loads(REFERENCE_LOCK.read_text(encoding='utf-8'))
+        for name, expected_hash in lock['protected_files_sha256'].items():
+            try:
+                actual_hash = hashlib.sha256((root / name).read_bytes()).hexdigest()
+            except OSError:
+                raise BaselineIntegrityError('Frozen PR6 source is missing: '+name) from None
+            if actual_hash != expected_hash:
+                raise BaselineIntegrityError('Frozen PR6 source differs: '+name)
     source = (root / 'app.py').read_text(encoding='utf-8')
     contract = json.loads((root / 'fixtures/readiness/pr2-contract.json').read_text(encoding='utf-8'))
     expected = contract.get('formula_source_sha256', {})
@@ -97,7 +112,9 @@ def _source_manifest(root):
         **{name: _sha((root / name).read_text(encoding='utf-8')) for name in POLICY_FILES},
     }
     payload = {'version': BASELINE_VERSION, 'formula_sha256': dict(sorted(actual.items())),
-               'source_sha256': dict(sorted(sources.items()))}
+               'source_sha256': dict(sorted(sources.items())),
+               'reference_scope': 'frozen_pr6' if frozen_reference else 'explicit_custom_reference',
+               'reference_commit': 'df4b836b7bfade57f009f1ec115ae2905f76ae7d' if frozen_reference else None}
     payload['baseline_sha256'] = _sha(json.dumps(payload, sort_keys=True, separators=(',', ':')))
     payload['bundle_sha256'] = payload['baseline_sha256']
     return payload

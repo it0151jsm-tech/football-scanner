@@ -16,7 +16,8 @@ from unittest.mock import patch
 import pandas as pd
 
 from backtest.baseline import (APP_FUNCTIONS, Baseline, BaselineIntegrityError,
-                               PROTECTED_FUNCTIONS, current_source_hashes, existing_functions)
+                               PROTECTED_FUNCTIONS, ROOT as FROZEN_ROOT,
+                               current_source_hashes, existing_functions)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,10 +50,10 @@ def copy_sources(folder):
     folder = Path(folder)
     for filename in ('app.py', 'history_data.py', 'mobile_dashboard.py', 'readiness.py',
                      'market_recommendations.py', 'ou_market.py'):
-        shutil.copy2(ROOT / filename, folder / filename)
+        shutil.copy2(FROZEN_ROOT / filename, folder / filename)
     target = folder / 'fixtures/readiness'
     target.mkdir(parents=True)
-    shutil.copy2(ROOT / 'fixtures/readiness/pr2-contract.json', target / 'pr2-contract.json')
+    shutil.copy2(FROZEN_ROOT / 'fixtures/readiness/pr2-contract.json', target / 'pr2-contract.json')
     return folder
 
 
@@ -80,6 +81,32 @@ class BacktestBaselineTests(unittest.TestCase):
         self.assertEqual(Baseline().version['bundle_sha256'], manifest['bundle_sha256'])
         self.assertEqual(len(manifest['bundle_sha256']), 64)
         self.assertTrue(all(len(digest) == 64 for digest in manifest['source_sha256'].values()))
+        self.assertEqual(self.baseline.root,FROZEN_ROOT)
+        self.assertEqual(manifest['reference_scope'],'frozen_pr6')
+
+    def test_operational_scan_changes_cannot_change_frozen_backtest(self):
+        before=self.rows()
+        original_read=Path.read_text
+        live_sources={ROOT/name for name in ('app.py','history_data.py','market_recommendations.py',
+                      'ou_market.py','readiness.py','mobile_dashboard.py')}
+        def changed_operational_source(path,*args,**kwargs):
+            if path in live_sources:
+                raise AssertionError('Backtest read the mutable operational source')
+            return original_read(path,*args,**kwargs)
+        with patch.object(Path,'read_text',changed_operational_source):
+            after=self.rows()
+            self.assertEqual(self.baseline.c_pick_ids(after,ASOF),{1})
+        self.assertEqual(before,after)
+
+    def test_default_frozen_reference_detects_tampering_even_outside_formula_whitelist(self):
+        original_read=Path.read_bytes
+        target=FROZEN_ROOT/'bill_backup.py'
+        def tampered_reference(path,*args,**kwargs):
+            content=original_read(path,*args,**kwargs)
+            return content+b'\n# altered reference' if path==target else content
+        with patch.object(Path,'read_bytes',tampered_reference):
+            with self.assertRaisesRegex(BaselineIntegrityError,'Frozen PR6 source differs: bill_backup.py'):
+                Baseline()
 
     def test_whitelist_excludes_fetch_database_and_ui_top_level_execution(self):
         functions = existing_functions()

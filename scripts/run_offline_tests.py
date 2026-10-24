@@ -3,6 +3,7 @@ import os
 import socket
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,7 +32,10 @@ def connect_ex(sock,address):
 
 
 if __name__=='__main__':
-    with patch.object(socket.socket,'connect',connect),patch.object(socket.socket,'connect_ex',connect_ex):
+    with tempfile.TemporaryDirectory(prefix='value-bet-offline-') as isolated, \
+            patch.dict(os.environ,VALUE_BET_DB=str(Path(isolated)/'app.db'),
+                VALUE_BET_API_LEDGER=str(Path(isolated)/'budget.db'),VALUE_BET_OBSERVATION_DB=''), \
+            patch.object(socket.socket,'connect',connect),patch.object(socket.socket,'connect_ex',connect_ex):
         result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.discover(str(ROOT/'tests')))
     if blocked:
         print('Unexpected external network attempts:',len(blocked),file=sys.stderr)
