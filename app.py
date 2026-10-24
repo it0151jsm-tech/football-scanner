@@ -1929,7 +1929,8 @@ with tab_scan:
                     rows, snapshots, remaining, used = scan_league(key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key)
                     all_rows.extend(rows)
                     all_snapshots.extend(snapshots)
-                    quota_info.append(f"{league_name}: ใช้ไป {used}, เหลือ {remaining}")
+                    league_fixtures = len({row.get("event_id") for row in rows if row.get("event_id")})
+                    quota_info.append(f"{league_name}: พบ {league_fixtures} คู่ | ใช้ไป {used}, เหลือ {remaining}")
                 except Exception as exc:
                     from odds_budget import ScanStopped
                     errors.append(f"{league_name}: {str(exc) if isinstance(exc, ScanStopped) else type(exc).__name__}")
