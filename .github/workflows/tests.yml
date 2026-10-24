@@ -15,6 +15,12 @@ jobs:
         env:
           DASHBOARD_SCREENSHOTS: test-artifacts
       - run: python -m py_compile app.py mobile_dashboard.py market_recommendations.py history_data.py ou_market.py manual_quotes.py data_health.py scripts/check_e2_history.py scripts/audit_leagues.py readiness.py odds_budget.py bill_backup.py credential_redaction.py domestic_data.py form_audit.py api_football_data.py understat_history.py source_diagnostics.py scan_diagnostics.py form_readiness.py api_football_backoff.py
+      - name: Compile isolated offline backtest tools
+        run: python -m compileall -q backtest scripts/run_backtest.py
+      - name: Produce honest empty-cohort report without provider downloads
+        run: |
+          mkdir -p test-artifacts
+          python scripts/run_backtest.py --archive fixtures/backtest/empty-observed.json --output test-artifacts/backtest-data-availability.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
