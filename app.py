@@ -232,6 +232,8 @@ def init_db():
         con.execute("CREATE INDEX IF NOT EXISTS idx_picks_event ON picks(event_id)")
         from scan_journal import initialize
         initialize(con)
+        from data_center_store import initialize as initialize_data_center
+        initialize_data_center(con)
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_event ON odds_snapshots(event_id, captured_at)")
         con.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_lookup ON odds_snapshots(event_id, market, side, bookmaker, captured_at)")
 
@@ -1649,8 +1651,10 @@ def cup_health(packs, label, key, now):
 
 
 # -------------------- SCAN --------------------
-def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key):
-    matches, remaining, used = fetch_odds(sport_key, regions, api_key)
+def scan_league(sport_key, league_name, csv_code, hours_limit, min_odds, max_odds, regions, api_key, *, odds_result=None):
+    # Explicit replay uses the original saved receipt; opening analysis cannot
+    # silently refresh prices or spend Odds API credits after cache expiry.
+    matches, remaining, used = fetch_odds(sport_key, regions, api_key) if odds_result is None else odds_result
     receipt = getattr(matches, 'received_at', None) or (matches[0].get('_received_at') if matches else None)
     record_api_receipt(sport_key, receipt)
     now = datetime.now(UTC)
@@ -1976,6 +1980,137 @@ def execute_selected_scan(selected, hours_limit, min_odds, max_odds, regions, ap
     return result
 
 
+def load_data_center_cards(selected, regions, hours_limit):
+    from data_center_store import load_latest
+    with db() as con:
+        return load_latest(con,list(selected),regions,hours_limit)
+
+
+def execute_data_center_scan(selected, hours_limit, min_odds, max_odds, regions, api_key, on_progress=None):
+    """Fetch/persist prices only; no statistics or prediction is required."""
+    from scan_control import run_selected_leagues
+    from scan_journal import begin, append
+    from data_center_store import save_batch
+    from scan_diagnostics import filter_scan_fixtures
+    from odds_budget import ScanStopped
+    with db() as con:
+        run_id=begin(con,list(selected),regions,hours_limit)
+    reports={}
+    saved=[0,0]
+
+    def fetch_one(key,name,code):
+        matches,remaining,used=fetch_odds(key,regions,api_key)
+        receipt=getattr(matches,'received_at',None) or (matches[0].get('_received_at') if matches else None)
+        _,report=filter_scan_fixtures(matches,key,datetime.now(UTC),hours_limit)
+        try:
+            with db() as con:
+                stored=save_batch(con,run_id,key,name,matches,receipt,report,remaining,used,regions)
+            record_api_receipt(key,receipt)
+        except Exception:
+            raise ScanStopped('หยุดสแกน: บันทึกข้อมูล Data Center ไม่สำเร็จ',reason='data_center_persistence_failed') from None
+        reports[key]=report
+        saved[0]+=len(stored['rows'])
+        saved[1]+=len(stored['snapshots'])
+        return stored['rows'],stored['snapshots'],remaining,used
+
+    def progress(index,total,entry):
+        try:
+            with db() as con:
+                append(con,run_id,entry)
+        except Exception:
+            raise ScanStopped('หยุดสแกน: บันทึกสถานะไม่สำเร็จ',reason='scan_journal_unavailable') from None
+        if on_progress:
+            on_progress(index,total,entry)
+
+    result=run_selected_leagues(selected,LEAGUES,fetch_one,report_for=reports.get,on_progress=progress)
+    result.update(run_id=run_id,regions=regions,hours_limit=hours_limit,saved_counts=saved,
+                  mode='football_data_center',statistics_requested=False,analysis_requested=False)
+    return result
+
+
+def data_center_run_context(run_id):
+    from data_center_store import load_batches
+    with db() as con:
+        row=con.execute('SELECT * FROM scan_runs WHERE id=?',(run_id,)).fetchone()
+        if row is None:
+            raise ValueError('ไม่พบรอบสแกน')
+        latest=con.execute('SELECT id FROM scan_runs ORDER BY rowid DESC LIMIT 1').fetchone()
+        if latest is None or latest[0]!=run_id:
+            raise ValueError('รอบสแกนนี้ไม่ใช่รอบล่าสุด')
+        context=dict(row)
+        context['selected']=json.loads(context['selected_json'])
+        context['batches']=load_batches(con,run_id)
+        return context
+
+
+def data_center_cup_statistics(event):
+    """Verified domestic context only; no country/fuzzy-name inference."""
+    from readiness import instant
+    kickoff=instant(event.get('kickoff_utc'))
+    match={'id':event['event_id'],'home_team':event['home_team'],
+        'away_team':event['away_team'],'commence_time':event['kickoff_utc']}
+    packs=load_cup_sources([match],datetime.now(UTC),48)
+    pack=packs.get((match['id'],match['home_team'],match['away_team'],kickoff.isoformat())) if kickoff else None
+    if pack is None:
+        return {}
+    return {side:{'score_history':pack['scores'].get(pack[side].get('sport_key'),pd.DataFrame()),
+                  'xg_history':pack['xgs'].get(pack[side].get('sport_key'),pd.DataFrame()),
+                  'context':dict(pack[side])} for side in ('home','away')}
+
+
+def collect_data_center_statistics(run_id, event_ids=None):
+    from data_center_stats import collect_statistics
+    from data_center_store import load_latest, save_enrichment
+    context=data_center_run_context(run_id)
+    with db() as con:
+        cards=load_latest(con,context['selected'],context['regions'],context['hours_limit'])
+    requested=set(event_ids) if event_ids is not None else None
+    result={'status':'completed','run_id':run_id,'fixtures':0,'errors':0,'odds_api_requests':0}
+    for card in cards:
+        if requested is not None and card['event_id'] not in requested:
+            continue
+        event=dict(card,csv_code=LEAGUES.get(card['sport_key'],('',None))[1])
+        try:
+            statistics=collect_statistics(event,fetch_history=fetch_history,fetch_xg=fetch_understat_with_diagnostics,
+                optional_fallback=optional_api_football_fallback,fetch_cup=data_center_cup_statistics,now=datetime.now(UTC))
+        except Exception:
+            statistics={'schema_version':1,'event_id':card['event_id'],'status':'error',
+                'as_of':datetime.now(UTC).isoformat(),'reason':'statistics_processing_failed',
+                'sources':{},'teams':{},'h2h':None,'standings':None,
+                'limitations':['โหลดสถิติไม่สำเร็จ โปรแกรมและราคายังอยู่ครบ ไม่สร้างสถิติทดแทน']}
+            result['errors']+=1
+        statistics.update(event_id=card['event_id'],sport_key=card['sport_key'],
+            home_team=card['home_team'],away_team=card['away_team'],kickoff_utc=card['kickoff_utc'])
+        with db() as con:
+            save_enrichment(con,run_id,card['event_id'],statistics)
+        result['fixtures']+=1
+    return result
+
+
+def analyze_data_center_run(run_id, min_odds=1.8, max_odds=2.05):
+    """Optional original A/B/C on saved prices, with no Odds API request."""
+    from odds_budget import OddsBatch
+    context=data_center_run_context(run_id)
+    result={'status':'completed','run_id':run_id,'leagues':0,'errors':0,'odds_api_requests':0,'saved_counts':[0,0]}
+    for key in context['selected']:
+        batch=context['batches'].get(key)
+        if batch is None or key not in LEAGUES:
+            continue
+        try:
+            cached=OddsBatch(batch['matches'],batch['received_at'])
+            output=scan_league(key,*LEAGUES[key],context['hours_limit'],min_odds,max_odds,
+                context['regions'],'',odds_result=(cached,batch.get('remaining'),batch.get('used')))
+            counts=save_picks(output[0],output[1])
+            result['saved_counts'][0]+=counts[0]
+            result['saved_counts'][1]+=counts[1]
+            result['leagues']+=1
+        except Exception:
+            result['errors']+=1
+    if result['errors']:
+        result['status']='partial' if result['leagues'] else 'error'
+    return result
+
+
 # -------------------- RESULT SETTLEMENT --------------------
 def settle_pick(row, home_goals, away_goals):
     # Fixture placeholders without odds must never be settled as bets.
@@ -2040,152 +2175,169 @@ api_key = get_api_key()
 tab_scan, tab_slips, tab_history, tab_help = st.tabs(["📊 ผลวิเคราะห์ราคา", "🎟️ ตัวเลือกสเต็ป", "📚 ราคาไหลและตรวจผล", "ℹ️ วิธีใช้"])
 
 with tab_scan:
-    st.subheader("📊 วิเคราะห์ทุกคู่ที่ดึงข้อมูลได้")
-    render_data_health()
-    analysis_view = st.radio("มุมมองผลวิเคราะห์", ["การ์ดมือถือ", "ตารางเดิม"], horizontal=True)
-    st.caption("ระบบ A = คะแนนหลักฐาน | ระบบ B = Poisson/EV | ระบบ C = อ่านผลร่วมกัน; ยังไม่ผ่าน Calibration")
-    if scan_btn:
-        if not api_key:
-            st.error("ไม่พบ API Key กรุณากรอกคีย์ในแถบซ้ายมือ")
-        elif not selected_leagues:
-            st.warning("เลือกลีกทางซ้ายก่อนกดสแกน")
-        elif min_odds > max_odds:
-            st.error("ค่าน้ำต่ำสุดต้องไม่มากกว่าค่าน้ำสูงสุด")
-        else:
-            all_rows, all_snapshots, errors, quota_info = [], [], [], []
-            progress = st.progress(0)
-            result = execute_selected_scan(selected_leagues, hours_limit, min_odds, max_odds, regions, api_key,
-                on_progress=lambda index,total,entry: progress.progress(index/total))
-            all_rows, all_snapshots = result['rows'], result['snapshots']
-            count, snapshot_count = result['saved_counts']
-            errors = [f"{entry['league']}: {entry['status']} · {entry.get('reason') or ''}"
-                      for entry in result['leagues'] if entry['status'] not in ('success','empty_api','filtered_out','success_no_rows')]
-            quota_info = [f"{entry['league']}: พบ {entry['saved_fixture_count']} คู่ | ใช้ไป {entry.get('provider_used')}, เหลือ {entry.get('provider_remaining')}"
-                          for entry in result['leagues']]
-            progress.empty()
-            if all_rows or all_snapshots:
-                fixture_count = len({r.get("event_id") for r in all_rows if r.get("event_id")})
-                with_price = sum(1 for r in all_rows if r.get("market") != "ยังไม่มีราคา")
-                st.success(f"พบ {fixture_count} คู่ | บันทึก/อัปเดต {count} รายการตลาด | เก็บราคา {snapshot_count} snapshot")
-                st.info(f"มีราคาและตลาดให้วิเคราะห์ {with_price} รายการตลาด — ไม่ตัดคู่ทิ้งด้วย EV หรือช่วงค่าน้ำ")
-            elif result['counts']['successful_leagues'] and not errors:
-                st.info("ไม่พบคู่ในช่วงเวลาที่เลือก หรือ API ไม่ส่งโปรแกรมแข่งขัน")
-            for info in quota_info:
-                st.caption("ℹ️ " + info)
-            for err in errors:
-                st.warning(err)
-
-    from scan_status import render_scan_status
-    render_scan_status(latest_scan_report(), safe_budget_status(api_key))
-
-    # Read-only recovery of persisted scans, including fixtures that have kicked off.
-    # Never present archived prices as live quotes or as new betting recommendations.
-    with st.expander("📁 ผลสแกนที่บันทึกไว้ (ย้อนหลัง · ไม่เรียก API)", expanded=False):
-        archived = load_picks(limit=None)
-        if archived.empty:
-            st.info("ยังไม่มีผลสแกนที่บันทึกไว้ในฐานข้อมูลนี้")
-        else:
-            st.warning("ข้อมูลย้อนหลังเท่านั้น ไม่ใช่ราคาปัจจุบัน ห้ามใช้เป็นสัญญาณเดิมพันใหม่")
-            st.caption("แสดงรายการที่ฐานข้อมูลยังเก็บไว้ แม้ปิด Safari หรือคู่เริ่มแข่งไปแล้ว")
-            archive_cols = ["kickoff_th", "league", "match", "market", "selection",
-                            "odds", "bookmaker", "status"]
-            archive_cols = [col for col in archive_cols if col in archived.columns]
-            if archive_cols:
-                st.dataframe(archived[archive_cols], use_container_width=True, hide_index=True)
-                # Read-only recovery: keep every saved market selection for each
-                # fixture instead of silently displaying only its first quote.
-                # Expand one fixture at a time on mobile; never refresh the API.
-                if "event_id" in archived.columns:
-                    st.caption("รายละเอียด A/B ที่บันทึกไว้ (20 คู่ล่าสุด; ทุกตัวเลือกที่เก็บไว้)")
-                    for event_id, group in list(archived.groupby("event_id", sort=False, dropna=False))[:20]:
-                        first = group.iloc[0]
-                        fixture_label = str(first.get("match") or event_id or "ไม่ทราบคู่")
-                        with st.expander(f"{fixture_label} · {len(group)} รายการตลาด", expanded=False):
-                            st.caption("หลักฐาน ณ เวลาสแกนเท่านั้น ไม่ใช่ราคาปัจจุบัน")
-                            for _, saved_row in group.iterrows():
-                                row = saved_row.to_dict()
-                                st.text("\n".join(mobile_card_lines(row)))
-                                st.divider()
+    from data_center_ui import mode_selector, analysis_panel, render_center, run_price_scan, show_scan_issue
+    data_center_active=mode_selector()
+    if data_center_active:
+        if scan_btn:
+            if not api_key:
+                show_scan_issue('missing_key')
+            elif not selected_leagues:
+                show_scan_issue('no_leagues')
             else:
-                st.info("มีข้อมูลที่บันทึกไว้ แต่ไม่พบคอลัมน์ที่รองรับการแสดงย้อนหลัง")
+                run_price_scan(
+                    lambda progress: execute_data_center_scan(selected_leagues,hours_limit,min_odds,max_odds,regions,api_key,on_progress=progress),
+                    lambda: load_data_center_cards(selected_leagues,regions,hours_limit),
+                    latest_scan_report,lambda: safe_budget_status(api_key))
+        render_center(load_data_center_cards(selected_leagues,regions,hours_limit),latest_scan_report(),safe_budget_status(api_key),
+            on_load_statistics=lambda cards: collect_data_center_statistics(cards[0]['run_id'],[card['event_id'] for card in cards]),
+            on_analyze=lambda cards: analyze_data_center_run(cards[0]['run_id'],min_odds,max_odds))
+    with analysis_panel(data_center_active):
+        st.subheader("📊 วิเคราะห์ทุกคู่ที่ดึงข้อมูลได้")
+        render_data_health()
+        analysis_view = st.radio("มุมมองผลวิเคราะห์", ["การ์ดมือถือ", "ตารางเดิม"], horizontal=True)
+        st.caption("ระบบ A = คะแนนหลักฐาน | ระบบ B = Poisson/EV | ระบบ C = อ่านผลร่วมกัน; ยังไม่ผ่าน Calibration")
+        if scan_btn and not data_center_active:
+            if not api_key:
+                st.error("ไม่พบ API Key กรุณากรอกคีย์ในแถบซ้ายมือ")
+            elif not selected_leagues:
+                st.warning("เลือกลีกทางซ้ายก่อนกดสแกน")
+            elif min_odds > max_odds:
+                st.error("ค่าน้ำต่ำสุดต้องไม่มากกว่าค่าน้ำสูงสุด")
+            else:
+                all_rows, all_snapshots, errors, quota_info = [], [], [], []
+                progress = st.progress(0)
+                result = execute_selected_scan(selected_leagues, hours_limit, min_odds, max_odds, regions, api_key,
+                    on_progress=lambda index,total,entry: progress.progress(index/total))
+                all_rows, all_snapshots = result['rows'], result['snapshots']
+                count, snapshot_count = result['saved_counts']
+                errors = [f"{entry['league']}: {entry['status']} · {entry.get('reason') or ''}"
+                          for entry in result['leagues'] if entry['status'] not in ('success','empty_api','filtered_out','success_no_rows')]
+                quota_info = [f"{entry['league']}: พบ {entry['saved_fixture_count']} คู่ | ใช้ไป {entry.get('provider_used')}, เหลือ {entry.get('provider_remaining')}"
+                              for entry in result['leagues']]
+                progress.empty()
+                if all_rows or all_snapshots:
+                    fixture_count = len({r.get("event_id") for r in all_rows if r.get("event_id")})
+                    with_price = sum(1 for r in all_rows if r.get("market") != "ยังไม่มีราคา")
+                    st.success(f"พบ {fixture_count} คู่ | บันทึก/อัปเดต {count} รายการตลาด | เก็บราคา {snapshot_count} snapshot")
+                    st.info(f"มีราคาและตลาดให้วิเคราะห์ {with_price} รายการตลาด — ไม่ตัดคู่ทิ้งด้วย EV หรือช่วงค่าน้ำ")
+                elif result['counts']['successful_leagues'] and not errors:
+                    st.info("ไม่พบคู่ในช่วงเวลาที่เลือก หรือ API ไม่ส่งโปรแกรมแข่งขัน")
+                for info in quota_info:
+                    st.caption("ℹ️ " + info)
+                for err in errors:
+                    st.warning(err)
 
-    from readiness import analysis_scope
-    df = analysis_display_rows(analysis_scope(load_picks(limit=None), [LEAGUES[k][0] for k in selected_leagues], latest_receipts=latest_api_receipts(), hours_limit=hours_limit))
-    df = current_scan_rows(df, selected_leagues, regions, hours_limit)
-    if df.empty:
-        st.info("ยังไม่มีข้อมูล เลือกลีกและกดสแกน")
-    else:
-        df["kickoff_parsed"] = pd.to_datetime(df["kickoff_utc"], errors="coerce", utc=True)
-        now_ts = pd.Timestamp.now(tz="UTC")
-        for col in ("ev_pct", "odds", "p_win", "score", "confidence_score", "form_rate", "form_rate_10", "form_rate_season"):
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        dashboard_rows = df[df["kickoff_parsed"] >= now_ts].copy()
-        df = latest_saved_quotes(df)
-        upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
-        quoted = dashboard_rows[dashboard_rows['odds'].notna()].copy()
-        from market_summary import summary_market_rows
-        best_market = pd.DataFrame(summary_market_rows(dashboard_rows.to_dict('records'),choose_recommendation))
-        fixtures = upcoming[["event_id", "match", "league", "kickoff_th"]].drop_duplicates("event_id")
-        a, b, c = st.columns(3)
-        a.metric("คู่ที่ยังไม่เริ่ม", len(fixtures))
-        b.metric("คู่มีราคาตลาด", upcoming[upcoming["market"] != "ยังไม่มีราคา"]["event_id"].nunique())
-        c.metric("คู่ที่ยังไม่มีราคา", upcoming[upcoming["market"] == "ยังไม่มีราคา"]["event_id"].nunique())
-        if analysis_view == "การ์ดมือถือ":
-            st.caption("หนึ่งการ์ดต่อ event_id · AH/OU จัดอันดับแยกกันจากแถวที่บันทึกไว้ · ระบุเจ้ามือ เส้น ราคา และ Snapshot แยกตลาด · ไม่เลือกเพราะค่าน้ำสูงสุด")
+        from scan_status import render_scan_status
+        render_scan_status(latest_scan_report(), safe_budget_status(api_key))
+
+        # Read-only recovery of persisted scans, including fixtures that have kicked off.
+        # Never present archived prices as live quotes or as new betting recommendations.
+        with st.expander("📁 ผลสแกนที่บันทึกไว้ (ย้อนหลัง · ไม่เรียก API)", expanded=False):
+            archived = load_picks(limit=None)
+            if archived.empty:
+                st.info("ยังไม่มีผลสแกนที่บันทึกไว้ในฐานข้อมูลนี้")
+            else:
+                st.warning("ข้อมูลย้อนหลังเท่านั้น ไม่ใช่ราคาปัจจุบัน ห้ามใช้เป็นสัญญาณเดิมพันใหม่")
+                st.caption("แสดงรายการที่ฐานข้อมูลยังเก็บไว้ แม้ปิด Safari หรือคู่เริ่มแข่งไปแล้ว")
+                archive_cols = ["kickoff_th", "league", "match", "market", "selection",
+                                "odds", "bookmaker", "status"]
+                archive_cols = [col for col in archive_cols if col in archived.columns]
+                if archive_cols:
+                    st.dataframe(archived[archive_cols], use_container_width=True, hide_index=True)
+                    # Read-only recovery: keep every saved market selection for each
+                    # fixture instead of silently displaying only its first quote.
+                    # Expand one fixture at a time on mobile; never refresh the API.
+                    if "event_id" in archived.columns:
+                        st.caption("รายละเอียด A/B ที่บันทึกไว้ (20 คู่ล่าสุด; ทุกตัวเลือกที่เก็บไว้)")
+                        for event_id, group in list(archived.groupby("event_id", sort=False, dropna=False))[:20]:
+                            first = group.iloc[0]
+                            fixture_label = str(first.get("match") or event_id or "ไม่ทราบคู่")
+                            with st.expander(f"{fixture_label} · {len(group)} รายการตลาด", expanded=False):
+                                st.caption("หลักฐาน ณ เวลาสแกนเท่านั้น ไม่ใช่ราคาปัจจุบัน")
+                                for _, saved_row in group.iterrows():
+                                    row = saved_row.to_dict()
+                                    st.text("\n".join(mobile_card_lines(row)))
+                                    st.divider()
+                else:
+                    st.info("มีข้อมูลที่บันทึกไว้ แต่ไม่พบคอลัมน์ที่รองรับการแสดงย้อนหลัง")
+
+        from readiness import analysis_scope
+        df = analysis_display_rows(analysis_scope(load_picks(limit=None), [LEAGUES[k][0] for k in selected_leagues], latest_receipts=latest_api_receipts(), hours_limit=hours_limit))
+        df = current_scan_rows(df, selected_leagues, regions, hours_limit)
+        if df.empty:
+            st.info("ยังไม่มีข้อมูล เลือกลีกและกดสแกน")
         else:
-            st.caption("ทุกคู่ที่ API ส่งมาในช่วงเวลาที่เลือกจะแสดง แม้ EV ติดลบหรือข้อมูล xG ไม่ครบ OU แสดงราคาสองฝั่งของเส้นหลักที่ประมาณ; เมื่อยืนยันไม่ได้แสดงเป็นข้อมูลประเมิน ไม่เลือกฝั่ง; AH คงตารางเดิม")
-        if analysis_view == "การ์ดมือถือ":
-            render_mobile_cards(dashboard_rows)
-        for market_label, heading in [("Asian Handicap", "อันดับแฮนดิแคป: ต่อ–รอง"), ("Over/Under", "อันดับสูง–ต่ำ")]:
+            df["kickoff_parsed"] = pd.to_datetime(df["kickoff_utc"], errors="coerce", utc=True)
+            now_ts = pd.Timestamp.now(tz="UTC")
+            for col in ("ev_pct", "odds", "p_win", "score", "confidence_score", "form_rate", "form_rate_10", "form_rate_season"):
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+            dashboard_rows = df[df["kickoff_parsed"] >= now_ts].copy()
+            df = latest_saved_quotes(df)
+            upcoming = df[df["kickoff_parsed"] >= now_ts].copy()
+            quoted = dashboard_rows[dashboard_rows['odds'].notna()].copy()
+            from market_summary import summary_market_rows
+            best_market = pd.DataFrame(summary_market_rows(dashboard_rows.to_dict('records'),choose_recommendation))
+            fixtures = upcoming[["event_id", "match", "league", "kickoff_th"]].drop_duplicates("event_id")
+            a, b, c = st.columns(3)
+            a.metric("คู่ที่ยังไม่เริ่ม", len(fixtures))
+            b.metric("คู่มีราคาตลาด", upcoming[upcoming["market"] != "ยังไม่มีราคา"]["event_id"].nunique())
+            c.metric("คู่ที่ยังไม่มีราคา", upcoming[upcoming["market"] == "ยังไม่มีราคา"]["event_id"].nunique())
             if analysis_view == "การ์ดมือถือ":
-                continue
-            st.markdown(f"### {heading}")
-            market_view = best_market[best_market["market"] == market_label].copy() if not best_market.empty else pd.DataFrame()
-            if market_view.empty:
-                st.info("ไม่มีราคาตลาดนี้ในคู่ที่ดึงมา")
-                continue
-            market_view["confidence_score"] = pd.to_numeric(market_view["confidence_score"], errors="coerce")
-            market_view["kickoff_sort"] = pd.to_datetime(market_view["kickoff_utc"], errors="coerce", utc=True)
-            market_view = market_view.sort_values(
-                ["kickoff_sort", "confidence_score", "ev_pct"],
-                ascending=[True, False, False], na_position="last"
-            )
-            cols = ["kickoff_th", "league", "match", "selection", "odds", "confidence_score", "system_a_result", "system_b_status", "recommendation",
-                    "ev_pct", "p_win", "form_rate", "form_rate_10", "form_rate_season", "xg_home_avg", "xga_home_avg",
-                    "xg_away_avg", "xga_away_avg", "bookmaker", "model_status", "ou_main_status", "system_c_reason"]
-            cols = [c for c in cols if c in market_view.columns]
+                st.caption("หนึ่งการ์ดต่อ event_id · AH/OU จัดอันดับแยกกันจากแถวที่บันทึกไว้ · ระบุเจ้ามือ เส้น ราคา และ Snapshot แยกตลาด · ไม่เลือกเพราะค่าน้ำสูงสุด")
+            else:
+                st.caption("ทุกคู่ที่ API ส่งมาในช่วงเวลาที่เลือกจะแสดง แม้ EV ติดลบหรือข้อมูล xG ไม่ครบ OU แสดงราคาสองฝั่งของเส้นหลักที่ประมาณ; เมื่อยืนยันไม่ได้แสดงเป็นข้อมูลประเมิน ไม่เลือกฝั่ง; AH คงตารางเดิม")
             if analysis_view == "การ์ดมือถือ":
-                render_mobile_cards(market_view)
-            else:
-                st.dataframe(market_view[cols].rename(columns={
-                    "kickoff_th":"เวลาแข่ง (ไทย)", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"คำแนะนำตลาด",
-                    "odds":"ราคาที่บันทึก", "confidence_score":"คะแนนหลักฐาน A/100", "system_a_result":"ระบบ A", "system_b_status":"ระบบ B", "recommendation":"ระบบ C อ่าน A/B ร่วมกัน",
-                    "ev_pct":"EV (%)", "p_win":"ชนะเต็มตามโมเดล (%)", "form_rate":"ฟอร์มเทียบเส้น 5 นัด (%)",
-                    "form_rate_10":"ฟอร์มเทียบเส้น 10 นัด (%)", "form_rate_season":"ฟอร์มเทียบเส้นทั้งหมด (%)",
-                    "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย",
-                    "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือ", "model_status":"สถานะข้อมูล"
-                }), use_container_width=True, hide_index=True)
-        with st.expander("ดูเหตุผลวิเคราะห์และฟอร์มทีมแบบละเอียด"):
-            detail = best_market.copy() if not best_market.empty else pd.DataFrame()
-            if detail.empty:
-                st.info("ไม่มีรายละเอียด")
-            else:
-                detail = detail.sort_values("confidence_score", ascending=False, na_position="last")
-                for _, r in detail.iterrows():
-                    st.markdown(f"**{r.get('match','')} — {r.get('market','')} — {r.get('selection','')}**")
-                    st.write(f"คะแนน: {r.get('confidence_score', 'n/a')}/100 | {r.get('recommendation','')}")
-                    st.write(r.get("analysis_reason") or "ไม่มีเหตุผลเชิงตัวเลขเพิ่มเติม")
-                    st.caption("เหย้า: " + str(r.get("home_form_summary") or "ไม่มีข้อมูล") + " | เยือน: " + str(r.get("away_form_summary") or "ไม่มีข้อมูล"))
-                    if r.get("h2h_summary"):
-                        st.caption("H2H ประกอบเท่านั้น: " + str(r.get("h2h_summary")))
-        with st.expander("ดูราคาทางเลือกอื่นและทุกเจ้ามือ"):
-            if quoted.empty:
-                st.info("ไม่มีราคาให้แสดง")
-            else:
-                alt_cols = [c for c in ["kickoff_th", "league", "match", "market", "selection", "point", "odds", "confidence_score", "ev_pct", "bookmaker", "odds_in_range", "received_at", "source_updated_at", "source_update_scope"] if c in quoted.columns]
-                st.dataframe(quoted[alt_cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "point":"เส้น", "odds":"ค่าน้ำ", "confidence_score":"คะแนนหลักฐาน A", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ", "odds_in_range":"อยู่ในช่วงค่าน้ำที่ตั้งไว้"}), use_container_width=True, hide_index=True)
-        st.caption("คะแนน A มาจากหลักฐานฟอร์ม ไม่ใช่ความน่าจะเป็น; เปอร์เซ็นต์ของ B มาจาก Poisson และยังไม่ผ่าน Calibration; EV อาจคลาดเคลื่อนตามคุณภาพ xG")
+                render_mobile_cards(dashboard_rows)
+            for market_label, heading in [("Asian Handicap", "อันดับแฮนดิแคป: ต่อ–รอง"), ("Over/Under", "อันดับสูง–ต่ำ")]:
+                if analysis_view == "การ์ดมือถือ":
+                    continue
+                st.markdown(f"### {heading}")
+                market_view = best_market[best_market["market"] == market_label].copy() if not best_market.empty else pd.DataFrame()
+                if market_view.empty:
+                    st.info("ไม่มีราคาตลาดนี้ในคู่ที่ดึงมา")
+                    continue
+                market_view["confidence_score"] = pd.to_numeric(market_view["confidence_score"], errors="coerce")
+                market_view["kickoff_sort"] = pd.to_datetime(market_view["kickoff_utc"], errors="coerce", utc=True)
+                market_view = market_view.sort_values(
+                    ["kickoff_sort", "confidence_score", "ev_pct"],
+                    ascending=[True, False, False], na_position="last"
+                )
+                cols = ["kickoff_th", "league", "match", "selection", "odds", "confidence_score", "system_a_result", "system_b_status", "recommendation",
+                        "ev_pct", "p_win", "form_rate", "form_rate_10", "form_rate_season", "xg_home_avg", "xga_home_avg",
+                        "xg_away_avg", "xga_away_avg", "bookmaker", "model_status", "ou_main_status", "system_c_reason"]
+                cols = [c for c in cols if c in market_view.columns]
+                if analysis_view == "การ์ดมือถือ":
+                    render_mobile_cards(market_view)
+                else:
+                    st.dataframe(market_view[cols].rename(columns={
+                        "kickoff_th":"เวลาแข่ง (ไทย)", "league":"ลีก", "match":"คู่แข่งขัน", "selection":"คำแนะนำตลาด",
+                        "odds":"ราคาที่บันทึก", "confidence_score":"คะแนนหลักฐาน A/100", "system_a_result":"ระบบ A", "system_b_status":"ระบบ B", "recommendation":"ระบบ C อ่าน A/B ร่วมกัน",
+                        "ev_pct":"EV (%)", "p_win":"ชนะเต็มตามโมเดล (%)", "form_rate":"ฟอร์มเทียบเส้น 5 นัด (%)",
+                        "form_rate_10":"ฟอร์มเทียบเส้น 10 นัด (%)", "form_rate_season":"ฟอร์มเทียบเส้นทั้งหมด (%)",
+                        "xg_home_avg":"เหย้า xG เฉลี่ย", "xga_home_avg":"เหย้า xGA เฉลี่ย", "xg_away_avg":"เยือน xG เฉลี่ย",
+                        "xga_away_avg":"เยือน xGA เฉลี่ย", "bookmaker":"เจ้ามือ", "model_status":"สถานะข้อมูล"
+                    }), use_container_width=True, hide_index=True)
+            with st.expander("ดูเหตุผลวิเคราะห์และฟอร์มทีมแบบละเอียด"):
+                detail = best_market.copy() if not best_market.empty else pd.DataFrame()
+                if detail.empty:
+                    st.info("ไม่มีรายละเอียด")
+                else:
+                    detail = detail.sort_values("confidence_score", ascending=False, na_position="last")
+                    for _, r in detail.iterrows():
+                        st.markdown(f"**{r.get('match','')} — {r.get('market','')} — {r.get('selection','')}**")
+                        st.write(f"คะแนน: {r.get('confidence_score', 'n/a')}/100 | {r.get('recommendation','')}")
+                        st.write(r.get("analysis_reason") or "ไม่มีเหตุผลเชิงตัวเลขเพิ่มเติม")
+                        st.caption("เหย้า: " + str(r.get("home_form_summary") or "ไม่มีข้อมูล") + " | เยือน: " + str(r.get("away_form_summary") or "ไม่มีข้อมูล"))
+                        if r.get("h2h_summary"):
+                            st.caption("H2H ประกอบเท่านั้น: " + str(r.get("h2h_summary")))
+            with st.expander("ดูราคาทางเลือกอื่นและทุกเจ้ามือ"):
+                if quoted.empty:
+                    st.info("ไม่มีราคาให้แสดง")
+                else:
+                    alt_cols = [c for c in ["kickoff_th", "league", "match", "market", "selection", "point", "odds", "confidence_score", "ev_pct", "bookmaker", "odds_in_range", "received_at", "source_updated_at", "source_update_scope"] if c in quoted.columns]
+                    st.dataframe(quoted[alt_cols].rename(columns={"kickoff_th":"เวลาแข่ง", "league":"ลีก", "match":"คู่แข่งขัน", "market":"ตลาด", "selection":"ตัวเลือก", "point":"เส้น", "odds":"ค่าน้ำ", "confidence_score":"คะแนนหลักฐาน A", "ev_pct":"EV (%)", "bookmaker":"เจ้ามือ", "odds_in_range":"อยู่ในช่วงค่าน้ำที่ตั้งไว้"}), use_container_width=True, hide_index=True)
+            st.caption("คะแนน A มาจากหลักฐานฟอร์ม ไม่ใช่ความน่าจะเป็น; เปอร์เซ็นต์ของ B มาจาก Poisson และยังไม่ผ่าน Calibration; EV อาจคลาดเคลื่อนตามคุณภาพ xG")
 
 with tab_slips:
     st.subheader("🎟️ จัดอันดับตัวเลือก — OU ต้องมีเส้นหลักและ EV ที่ยืนยันได้")
