@@ -1,0 +1,13 @@
+{
+  "data_mode": "synthetic_test_fixture",
+  "real_provider_calls": 0,
+  "live_end_to_end_verified": false,
+  "purpose": "Authored relative fixture offsets for Data Center software verification only",
+  "fixture_offsets": [
+    {"suffix": "within24", "hours": 2, "embedded_key": "selected"},
+    {"suffix": "within48", "hours": 36, "embedded_key": "selected"},
+    {"suffix": "started", "hours": -1, "embedded_key": "selected"},
+    {"suffix": "after48", "hours": 60, "embedded_key": "selected"},
+    {"suffix": "wrong-league", "hours": 3, "embedded_key": "wrong"}
+  ]
+}

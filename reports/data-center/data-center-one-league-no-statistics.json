@@ -1,0 +1,50 @@
+{
+  "data_mode": "synthetic_test_fixture",
+  "case": "one-league-no-statistics",
+  "real_provider_calls": 0,
+  "live_end_to_end_verified": false,
+  "scope": "Data Center software acceptance with authored observations; not live coverage",
+  "counts": {
+    "selected_leagues": 1,
+    "successful_leagues": 1,
+    "league_errors": 0,
+    "cooldown_leagues": 0,
+    "safety_stops": 0,
+    "skipped_safety_stop": 0,
+    "invalid_leagues": 0,
+    "duplicate_selections": 0,
+    "api_returned": 1,
+    "api_returned_known_leagues": 1,
+    "passed_filter": 1,
+    "passed_filter_known_leagues": 1,
+    "response_counts_complete": true,
+    "saved_fixture_count": 1,
+    "market_rows": 4,
+    "snapshot_rows": 4
+  },
+  "league_results": [
+    {
+      "sport_key": "soccer_epl",
+      "league": "พรีเมียร์ลีก อังกฤษ",
+      "status": "success",
+      "reason": null,
+      "api_returned": 1,
+      "passed_filter": 1,
+      "excluded_count": 0,
+      "excluded_by_reason": {},
+      "saved_fixture_count": 1,
+      "market_rows": 4,
+      "snapshot_rows": 4,
+      "ah_fixtures": 1,
+      "ou_fixtures": 1,
+      "no_price_fixtures": 0,
+      "provider_remaining": 498,
+      "provider_used": 2,
+      "api_received_at": "2026-10-25T07:34:36.042085+00:00"
+    }
+  ],
+  "restored_fixture_n": 1,
+  "restored_quote_n": 4,
+  "model_calls": 0,
+  "statistics_calls": 0
+}
