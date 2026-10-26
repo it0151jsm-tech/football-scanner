@@ -246,6 +246,7 @@ class MobileDashboardScreenshotTests(unittest.TestCase):
 
     def test_native_market_switch_survives_real_streamlit_app_without_provider_calls(self):
         """React/Streamlit must preserve the HTML inputs, not just static Chromium."""
+        from playwright.sync_api import expect
         import test_data_center_mobile as existing_mobile
         helper = existing_mobile.DataCenterStreamlitTests()
         helper.setUp()
@@ -310,9 +311,15 @@ sys.exit(cli.main())
             selector.wait_for(timeout=30000)
             selector.click()
             page.get_by_role('option', name='พรีเมียร์ลีก อังกฤษ', exact=True).click()
+            # A multiselect remains open after choosing one option. BaseUI hides
+            # the background from assistive technology while that popup is open.
+            # Close it before testing the real accessible navigation contract.
+            page.keyboard.press('Escape')
             card = page.locator('article.dc-card').first
             card.wait_for(timeout=30000)
-            self.assertEqual(page.get_by_role('tab').count(), 4)
+            tabs = page.get_by_role('tab')
+            expect(tabs).to_have_count(4, timeout=15000)
+            expect(tabs).to_have_text(existing_mobile.TABS, timeout=15000)
             self.assertEqual(card.locator('input[type="radio"]').count(), 2)
             self.assertTrue(card.locator('.dc-tab-ah').is_enabled())
             with helper.f['db']() as con:
@@ -336,6 +343,33 @@ sys.exit(cli.main())
             self.assertEqual(before, after)
             self.assertFalse(marker.exists(), 'UI attempted a provider request')
             self.assertEqual(external, [])
+        except Exception:
+            directory = os.environ.get('DASHBOARD_SCREENSHOTS')
+            if directory:
+                folder = Path(directory)
+                folder.mkdir(parents=True, exist_ok=True)
+                page.screenshot(path=str(folder / 'mobile-dashboard-streamlit-failure.png'),
+                                animations='disabled', full_page=True)
+                (folder / 'mobile-dashboard-streamlit-failure.html').write_text(
+                    page.content(), encoding='utf-8')
+                diagnostics = page.evaluate('''() => ({
+                    tabs: Array.from(document.querySelectorAll('[role="tab"],[data-testid="stTab"]'))
+                        .map(e => ({text:e.textContent, html:e.outerHTML,
+                            hidden:e.getAttribute('aria-hidden'), box:e.getBoundingClientRect().toJSON()})),
+                    popups: Array.from(document.querySelectorAll('[role="listbox"],[role="dialog"]'))
+                        .map(e => ({role:e.getAttribute('role'), hidden:e.getAttribute('aria-hidden')})),
+                    cards: document.querySelectorAll('article.dc-card').length,
+                    radios: Array.from(document.querySelectorAll('.dc-market-radio'))
+                        .map(e => ({id:e.id, checked:e.checked, disabled:e.disabled})),
+                    sidebar: document.querySelector('[data-testid="stSidebar"]')?.getAttribute('data-collapsed')
+                })''')
+                diagnostics['accessible_tab_count'] = page.get_by_role('tab').count()
+                diagnostics['provider_call_attempted'] = marker.exists()
+                (folder / 'mobile-dashboard-streamlit-failure.json').write_text(
+                    json.dumps(diagnostics, ensure_ascii=False, indent=2), encoding='utf-8')
+                (folder / 'mobile-dashboard-streamlit-guarded-server.log').write_text(
+                    log.read_text(), encoding='utf-8')
+            raise
         finally:
             page.close()
 
