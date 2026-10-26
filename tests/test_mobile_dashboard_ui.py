@@ -12,6 +12,7 @@ from pathlib import Path
 import struct
 import socket
 import subprocess
+import tempfile
 import time
 import urllib.request
 import sys
@@ -159,6 +160,163 @@ class MobileDashboardScreenshotTests(unittest.TestCase):
             folder = Path(directory)
             folder.mkdir(parents=True, exist_ok=True)
             (folder / name).write_bytes(image)
+
+    def assert_host_theme_and_contrast(self, page, *, dark):
+        measurements = page.evaluate('''() => {
+            const rgba = value => value.match(/[\\d.]+/g).map(Number);
+            const linear = value => {
+                value /= 255;
+                return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+            };
+            const luminance = color => .2126 * linear(color[0]) + .7152 * linear(color[1]) + .0722 * linear(color[2]);
+            const background = element => {
+                const parents = [];
+                for (let item = element; item; item = item.parentElement) parents.unshift(item);
+                let color = [255, 255, 255];
+                for (const item of parents) {
+                    const value = rgba(getComputedStyle(item).backgroundColor);
+                    const alpha = value.length > 3 ? value[3] : 1;
+                    color = color.map((channel, index) => value[index] * alpha + channel * (1 - alpha));
+                }
+                return color;
+            };
+            const host = getComputedStyle(document.querySelector('[data-dc-theme-probe]')).color;
+            return Array.from(document.querySelectorAll('article.dc-card,.dc-summary')).map(element => {
+                const text = getComputedStyle(element).color;
+                const foreground = luminance(rgba(text));
+                const surface = luminance(background(element));
+                return {host, text, foreground, surface,
+                    contrast: (Math.max(foreground, surface) + .05) / (Math.min(foreground, surface) + .05)};
+            });
+        }''')
+        self.assertGreaterEqual(len(measurements), 2)
+        for value in measurements:
+            self.assertEqual(value['text'], value['host'], value)
+            self.assertGreaterEqual(value['contrast'], 4.5, value)
+            if dark:
+                self.assertGreater(value['foreground'], .5, value)
+                self.assertLess(value['surface'], .2, value)
+            else:
+                self.assertLess(value['foreground'], .2, value)
+                self.assertGreater(value['surface'], .5, value)
+
+    def test_host_theme_without_css_variables_overrides_opposite_operating_system_theme(self):
+        """Streamlit does not promise the custom CSS variables used by static fixtures."""
+        from data_center_ui import DATA_CENTER_CSS, dashboard_summary_html, data_center_card_html
+        cards = authored_cards()
+        for dark in (False, True):
+            with self.subTest(host_dark=dark):
+                page = self.browser.new_page(viewport={'width': 320, 'height': 844},
+                    color_scheme='light' if dark else 'dark')
+                try:
+                    text, surface = ('#ececec', '#212121') if dark else ('#202123', '#ffffff')
+                    page.set_content('<html><head>' + DATA_CENTER_CSS + '</head><body style="margin:0;'
+                        'padding:12px;font-family:Arial,sans-serif;color:' + text + ';background:' + surface + '">'
+                        '<p data-dc-theme-probe>Authored host theme</p>' + dashboard_summary_html(cards)
+                        + ''.join(data_center_card_html(card, instance=index) for index, card in enumerate(cards))
+                        + '</body></html>')
+                    self.assertEqual(page.evaluate("getComputedStyle(document.body).getPropertyValue('--text-color')"), '')
+                    self.assert_host_theme_and_contrast(page, dark=dark)
+                    self.assert_fits(page)
+                    self.save_image('mobile-dashboard-no-css-variables-' + ('dark' if dark else 'light') + '.png',
+                                    page.screenshot(animations='disabled', full_page=True))
+                finally:
+                    page.close()
+
+    def serve_isolated_theme_fixture(self, theme):
+        """Serve only the production presentation module under the real Streamlit theme."""
+        directory = tempfile.TemporaryDirectory(prefix='value-bet-ui-theme-')
+        self.addCleanup(directory.cleanup)
+        folder = Path(directory.name)
+        (folder / 'cards.json').write_text(json.dumps(authored_cards(), ensure_ascii=False), encoding='utf-8')
+        script = folder / 'dashboard.py'
+        script.write_text('''import json, sys
+from pathlib import Path
+import streamlit as st
+sys.path.insert(0, ROOT_PATH)
+from data_center_ui import DATA_CENTER_CSS, dashboard_summary_html, data_center_card_html
+st.set_page_config(page_title='Authored Dashboard Theme Test', layout='wide')
+cards = json.loads(Path(__file__).with_name('cards.json').read_text())
+st.markdown('<p data-dc-theme-probe>Streamlit host theme</p>', unsafe_allow_html=True)
+st.markdown(DATA_CENTER_CSS + dashboard_summary_html(cards), unsafe_allow_html=True)
+for index, card in enumerate(cards):
+    st.markdown(data_center_card_html(card, instance=index), unsafe_allow_html=True)
+'''.replace('ROOT_PATH', repr(str(ROOT))), encoding='utf-8')
+        marker = folder / 'provider-call-attempt.txt'
+        log = folder / 'server.log'
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            port = listener.getsockname()[1]
+        wrapper = '''import pathlib, requests, sys
+marker = pathlib.Path(sys.argv[1])
+def deny(*args, **kwargs):
+    marker.write_text('provider call attempted')
+    raise AssertionError('provider calls forbidden in theme UI test')
+requests.sessions.Session.request = deny
+from streamlit.web import cli
+sys.argv = ['streamlit', 'run', sys.argv[2], '--server.address=127.0.0.1',
+    '--server.port=' + sys.argv[3], '--theme.base=' + sys.argv[4],
+    '--server.headless=true', '--browser.gatherUsageStats=false']
+sys.exit(cli.main())
+'''
+        env = dict(os.environ, THE_ODDS_API_KEY='', API_FOOTBALL_KEY='',
+                   STREAMLIT_BROWSER_GATHER_USAGE_STATS='false')
+        with log.open('w') as output:
+            process = subprocess.Popen([sys.executable, '-c', wrapper, str(marker), str(script), str(port), theme],
+                cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT)
+        def stop():
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill(); process.wait(timeout=10)
+        self.addCleanup(stop)
+        address = f'http://127.0.0.1:{port}'
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                self.fail('Guarded theme server exited: ' + log.read_text()[-2500:])
+            try:
+                with urllib.request.urlopen(address + '/_stcore/health', timeout=1) as response:
+                    if response.status == 200:
+                        return address, marker, log
+            except (OSError, TimeoutError):
+                time.sleep(.1)
+        self.fail('Guarded theme server did not start')
+
+    def test_real_streamlit_forced_theme_remains_readable_with_opposite_os_theme(self):
+        for theme in ('light', 'dark'):
+            with self.subTest(streamlit_theme=theme):
+                address, marker, log = self.serve_isolated_theme_fixture(theme)
+                page = self.browser.new_page(viewport={'width': 375, 'height': 844},
+                    color_scheme='light' if theme == 'dark' else 'dark')
+                external = []
+                def allow_local(route):
+                    if route.request.url.startswith(address):
+                        route.continue_()
+                    else:
+                        external.append(route.request.url)
+                        route.abort()
+                page.route('**/*', allow_local)
+                try:
+                    page.goto(address, wait_until='domcontentloaded')
+                    page.locator('article.dc-card').first.wait_for(timeout=30000)
+                    self.assert_host_theme_and_contrast(page, dark=theme == 'dark')
+                    self.assert_fits(page)
+                    self.assertEqual(external, [])
+                    self.assertFalse(marker.exists(), 'Theme UI attempted a provider request')
+                    self.save_image(f'mobile-dashboard-streamlit-forced-{theme}-opposite-os.png',
+                                    page.screenshot(animations='disabled', full_page=True))
+                except Exception:
+                    self.save_image(f'mobile-dashboard-streamlit-theme-{theme}-failure.png',
+                                    page.screenshot(animations='disabled', full_page=True))
+                    directory = os.environ.get('DASHBOARD_SCREENSHOTS')
+                    if directory:
+                        (Path(directory) / f'mobile-dashboard-streamlit-theme-{theme}-server.log').write_text(
+                            log.read_text(), encoding='utf-8')
+                    raise
+                finally:
+                    page.close()
 
     def test_layout_and_screenshots_at_all_iphone_widths_and_themes(self):
         manifest = []
