@@ -2189,6 +2189,7 @@ with tab_scan:
                     lambda: load_data_center_cards(selected_leagues,regions,hours_limit),
                     latest_scan_report,lambda: safe_budget_status(api_key))
         render_center(load_data_center_cards(selected_leagues,regions,hours_limit),latest_scan_report(),safe_budget_status(api_key),
+            analysis_rows=load_picks(limit=None),
             on_load_statistics=lambda cards: collect_data_center_statistics(cards[0]['run_id'],[card['event_id'] for card in cards]),
             on_analyze=lambda cards: analyze_data_center_run(cards[0]['run_id'],min_odds,max_odds))
     with analysis_panel(data_center_active):

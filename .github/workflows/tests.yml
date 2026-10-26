@@ -16,7 +16,7 @@ jobs:
           DASHBOARD_SCREENSHOTS: test-artifacts
       - run: python -m py_compile app.py mobile_dashboard.py market_recommendations.py history_data.py ou_market.py manual_quotes.py data_health.py scripts/check_e2_history.py scripts/audit_leagues.py readiness.py odds_budget.py bill_backup.py credential_redaction.py domestic_data.py form_audit.py api_football_data.py understat_history.py source_diagnostics.py scan_diagnostics.py form_readiness.py api_football_backoff.py
       - name: Compile isolated offline backtest tools
-        run: python -m compileall -q backtest scripts/run_backtest.py scripts/export_observed_backtest.py scan_control.py scan_journal.py scan_status.py market_summary.py quote_provenance.py observation_archive.py data_center_store.py data_center_stats.py data_center_ui.py
+        run: python -m compileall -q backtest scripts/run_backtest.py scripts/export_observed_backtest.py scan_control.py scan_journal.py scan_status.py market_summary.py quote_provenance.py observation_archive.py data_center_store.py data_center_stats.py data_center_ui.py data_center_presentation.py
       - name: Produce honest empty-cohort report without provider downloads
         run: |
           mkdir -p test-artifacts

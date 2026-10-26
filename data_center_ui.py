@@ -5,22 +5,27 @@ Every provider string is escaped before insertion into the scoped HTML markup.
 """
 from collections import OrderedDict
 from html import escape
+import hashlib
 import math
 
 
 DATA_CENTER_CSS = '''<style>
-.dc-card,.dc-card *{box-sizing:border-box;min-width:0;overflow-wrap:anywhere;word-break:normal}
-.dc-card{width:100%;max-width:100%;margin:0 0 1rem;padding:1rem;border:1px solid rgba(128,128,128,.28);border-radius:16px;background:var(--secondary-background-color,#f5f7fb);color:var(--text-color,#182332);font-family:inherit;line-height:1.5}
-.dc-card h3{font-size:1.15rem;margin:.2rem 0 .5rem;line-height:1.45}.dc-card h4{font-size:1rem;margin:.8rem 0 .35rem}.dc-card p{margin:.3rem 0}.dc-card .dc-muted{font-size:.83rem;opacity:.78}.dc-card .dc-vs{font-size:.85rem;opacity:.7;margin:0 .35rem}
-.dc-card .dc-status{display:inline-block;padding:.18rem .5rem;border:1px solid rgba(128,128,128,.3);border-radius:8px;font-size:.8rem;margin:.2rem .25rem .2rem 0}
-.dc-card .dc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.dc-card .dc-team{padding:.6rem;border:1px solid rgba(128,128,128,.24);border-radius:10px}
-.dc-card .dc-table{table-layout:fixed;border-collapse:collapse;width:100%;max-width:100%;font-size:.84rem}.dc-card .dc-table th,.dc-card .dc-table td{text-align:left;vertical-align:top;padding:.4rem .3rem;border-bottom:1px solid rgba(128,128,128,.2);white-space:normal;overflow-wrap:anywhere}
-.dc-card .dc-table th{font-weight:600}.dc-card .dc-table th:last-child,.dc-card .dc-table td:last-child{width:25%}.dc-card .dc-table th:first-child,.dc-card .dc-table td:first-child{width:43%}
-.dc-card details{margin:.5rem 0;padding:.4rem .55rem;border:1px solid rgba(128,128,128,.22);border-radius:9px}.dc-card summary{cursor:pointer;white-space:normal;font-weight:600}.dc-card .dc-empty{padding:.55rem;border-radius:9px;border:1px dashed rgba(128,128,128,.4);font-size:.9rem}
-.dc-card .dc-price-note{border-left:3px solid rgba(128,128,128,.5);padding-left:.55rem;margin:.5rem 0;font-size:.83rem}
+.dc-card,.dc-card *,.dc-summary,.dc-summary *{box-sizing:border-box;min-width:0;overflow-wrap:anywhere;word-break:normal}
+.dc-card{--dc-border:rgba(128,128,128,.22);--dc-accent:#12765c;--dc-tint:rgba(18,118,92,.08);width:100%;max-width:100%;margin:0 0 1rem;padding:1.1rem;border:1px solid var(--dc-border);border-radius:20px;background:var(--background-color,#fff);color:var(--text-color,#202123);font-family:inherit;line-height:1.5}
+.dc-card h3{font-size:1.2rem;font-weight:650;margin:.35rem 0 .6rem;line-height:1.4;letter-spacing:-.02em}.dc-card h4{font-size:.95rem;margin:.85rem 0 .45rem}.dc-card p{margin:.3rem 0}.dc-card .dc-muted{font-size:.78rem;opacity:.76}.dc-card .dc-vs{font-size:.75rem;font-weight:400;opacity:.55;margin:0 .3rem}.dc-card .dc-name{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
+.dc-card .dc-kickoff{font-size:.87rem;font-weight:550}.dc-card .dc-status{display:inline-block;padding:.2rem .55rem;border:1px solid var(--dc-border);border-radius:999px;font-size:.73rem;margin:.35rem .25rem .35rem 0;background:var(--dc-tint)}
+.dc-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.55rem;margin:.5rem 0 1rem;color:var(--text-color,#202123);font-family:inherit}
+.dc-summary .dc-summary-tile{padding:.8rem .45rem;border:1px solid rgba(128,128,128,.22);border-radius:15px;background:var(--secondary-background-color,#f7f7f8);text-align:center}.dc-summary strong{display:block;font-size:1.7rem;line-height:1.25;font-variant-numeric:tabular-nums;font-weight:650}.dc-summary span{display:block;font-size:.72rem;margin-top:.2rem}
+.dc-card .dc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.dc-card .dc-team{padding:.65rem;border:1px solid var(--dc-border);border-radius:12px}
+.dc-card .dc-team-overview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.55rem;margin:.5rem 0}.dc-card .dc-team-tile{border:1px solid var(--dc-border);border-radius:12px;padding:.65rem .55rem;background:var(--secondary-background-color,#f7f7f8)}.dc-card .dc-team-tile strong{display:block;font-size:.83rem}.dc-card .dc-venue-label{font-size:.69rem;opacity:.72}.dc-card .dc-form-chips{display:flex;gap:.18rem;flex-wrap:wrap;margin:.45rem 0}.dc-card .dc-form-chip{display:inline-flex;align-items:center;justify-content:center;min-width:1.25rem;height:1.3rem;border-radius:5px;border:1px solid var(--dc-border);font-size:.66rem;font-weight:650}.dc-card .dc-form-chip[data-result="W"]{background:rgba(18,118,92,.15)}.dc-card .dc-form-chip[data-result="L"]{background:rgba(179,72,72,.12)}.dc-card .dc-goal-pair{font-size:1.08rem;font-weight:650;font-variant-numeric:tabular-nums;margin:.2rem 0}.dc-card .dc-team-tile .dc-muted{font-size:.7rem}
+.dc-card .dc-table{table-layout:fixed;border-collapse:collapse;width:100%;max-width:100%;font-size:.82rem}.dc-card .dc-table th,.dc-card .dc-table td{text-align:left;vertical-align:top;padding:.5rem .3rem;border-bottom:1px solid var(--dc-border);white-space:normal;overflow-wrap:anywhere}.dc-card .dc-table th{font-size:.7rem;font-weight:500;opacity:.75}.dc-card .dc-table td:last-child{font-variant-numeric:tabular-nums;font-weight:600}.dc-card .dc-table th:last-child,.dc-card .dc-table td:last-child{width:25%}.dc-card .dc-table th:first-child,.dc-card .dc-table td:first-child{width:43%}
+.dc-card details{margin:.5rem 0;padding:.15rem .65rem;border:1px solid var(--dc-border);border-radius:12px}.dc-card summary{cursor:pointer;white-space:normal;font-size:.84rem;font-weight:550;min-height:44px;padding:.65rem 0}.dc-card details[open]>summary{margin-bottom:.25rem}.dc-card .dc-empty{padding:.65rem;border-radius:10px;border:1px dashed var(--dc-border);font-size:.84rem;background:var(--secondary-background-color,#f7f7f8)}
+.dc-card .dc-price-note{border-left:2px solid var(--dc-border);padding-left:.6rem;margin:.65rem 0;font-size:.78rem}.dc-card .dc-preview{padding:.4rem .6rem .6rem;border:1px solid var(--dc-border);border-radius:12px;background:var(--secondary-background-color,#f7f7f8)}.dc-card .dc-preview .dc-muted{margin-top:.3rem}.dc-card .dc-market-help{font-size:.72rem;opacity:.7}
+.dc-card .dc-market-switch{position:relative;margin:.8rem 0}.dc-card .dc-market-radio{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden;white-space:nowrap}.dc-card .dc-market-labels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.3rem;padding:.25rem;margin-bottom:.65rem;background:var(--secondary-background-color,#f7f7f8);border-radius:12px;border:1px solid var(--dc-border)}.dc-card .dc-market-labels label{display:flex;justify-content:center;align-items:center;text-align:center;gap:.35rem;min-height:44px;padding:.5rem .25rem;cursor:pointer;font-size:.84rem;font-weight:550;border-radius:9px;border:1px solid transparent}.dc-card .dc-market-labels small{font-size:.66rem;font-weight:400;opacity:.7}.dc-card .dc-tab-ah:checked~.dc-market-labels [data-dc-tab="ah"],.dc-card .dc-tab-ou:checked~.dc-market-labels [data-dc-tab="ou"],.dc-card .dc-market-switch[data-dc-default="ah"] .dc-tab-ah:not(:checked)~.dc-tab-ou:not(:checked)~.dc-market-labels [data-dc-tab="ah"],.dc-card .dc-market-switch[data-dc-default="ou"] .dc-tab-ah:not(:checked)~.dc-tab-ou:not(:checked)~.dc-market-labels [data-dc-tab="ou"]{background:var(--background-color,#fff);border-color:var(--dc-border);box-shadow:0 1px 3px rgba(0,0,0,.06);color:var(--dc-accent)}.dc-card .dc-market-radio:focus-visible~.dc-market-labels{outline:2px solid var(--dc-accent);outline-offset:3px}.dc-card .dc-panel-ah,.dc-card .dc-panel-ou{display:none}.dc-card .dc-tab-ah:checked~.dc-panel-ah,.dc-card .dc-tab-ou:checked~.dc-panel-ou,.dc-card .dc-market-switch[data-dc-default="ah"] .dc-tab-ah:not(:checked)~.dc-tab-ou:not(:checked)~.dc-panel-ah,.dc-card .dc-market-switch[data-dc-default="ou"] .dc-tab-ah:not(:checked)~.dc-tab-ou:not(:checked)~.dc-panel-ou{display:block}
+.dc-card .dc-source-footer{border-top:1px solid var(--dc-border);padding-top:.65rem;margin-top:.85rem}.dc-card .dc-source-footer p{font-size:.71rem;opacity:.75}.dc-card .dc-analysis{margin-top:.6rem}.dc-card .dc-analysis-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.4rem}.dc-card .dc-analysis-item{padding:.55rem .4rem;border:1px solid var(--dc-border);border-radius:10px;font-size:.77rem}.dc-card .dc-analysis-item strong{display:block;font-size:1rem}.dc-card .dc-analysis-note,.dc-card .dc-analysis-contract{font-size:.73rem;opacity:.78}.dc-card .dc-analysis-reasons{font-size:.8rem}
 @media(max-width:500px){.dc-card .dc-grid{grid-template-columns:minmax(0,1fr)}}
-@media(max-width:350px){.dc-card{padding:.7rem}.dc-card .dc-grid{gap:.4rem}.dc-card .dc-team{padding:.4rem}.dc-card .dc-table{font-size:.8rem}}
-@media(prefers-color-scheme:dark){.dc-card{background:var(--secondary-background-color,#18212d);color:var(--text-color,#fafafa)}}
+@media(max-width:350px){.dc-card{padding:.8rem;border-radius:16px}.dc-card .dc-grid{gap:.4rem}.dc-card .dc-team{padding:.4rem}.dc-card .dc-table{font-size:.78rem}.dc-card .dc-team-tile{padding:.5rem .4rem}.dc-summary{gap:.35rem}.dc-summary .dc-summary-tile{padding:.7rem .25rem}.dc-summary strong{font-size:1.5rem}.dc-summary span{font-size:.68rem}}
+@media(prefers-color-scheme:dark){.dc-card{--dc-accent:#7acdb0;--dc-tint:rgba(122,205,176,.08);background:var(--background-color,#212121);color:var(--text-color,#ececec)}.dc-summary{color:var(--text-color,#ececec)}.dc-summary .dc-summary-tile{background:var(--secondary-background-color,#2f2f2f)}.dc-card .dc-team-tile,.dc-card .dc-preview,.dc-card .dc-market-labels,.dc-card .dc-empty{background:var(--secondary-background-color,#2f2f2f)}.dc-card .dc-tab-ah:checked~.dc-market-labels [data-dc-tab="ah"],.dc-card .dc-tab-ou:checked~.dc-market-labels [data-dc-tab="ou"],.dc-card .dc-market-switch[data-dc-default="ah"] .dc-tab-ah:not(:checked)~.dc-tab-ou:not(:checked)~.dc-market-labels [data-dc-tab="ah"],.dc-card .dc-market-switch[data-dc-default="ou"] .dc-tab-ah:not(:checked)~.dc-tab-ou:not(:checked)~.dc-market-labels [data-dc-tab="ou"]{background:var(--background-color,#212121)}}
 </style>'''
 
 
@@ -159,8 +164,15 @@ def _price_market(card, market, label):
         groups.setdefault((str(quote.get('bookmaker_key') or ''),str(quote.get('bookmaker') or 'ไม่มีข้อมูลเจ้ามือ')),[]).append(quote)
     output=['<section data-dc-market="'+_text(market)+'"><h4>'+_text(label)+'</h4>']
     output.append('<p class="dc-muted">แยกตามเจ้ามือ ไม่ใช่การจัดอันดับความคุ้มค่า</p>')
+    # This is a short preview in source order, not a new market ranking or a
+    # claim that the first bookmaker/line is the main line.
+    preview=next(iter(groups.values()))[:2]
+    preview_rows=[(_selection(q,card),_number(q.get('point'),signed=market=='Asian Handicap'),_number(q.get('odds'))) for q in preview]
+    output.append('<div class="dc-preview">'+_table(('ตัวเลือก','เส้น','ราคา'),preview_rows,label=label+' · ตัวอย่าง Snapshot'))
+    output.append('<p class="dc-muted">ตัวอย่าง '+str(len(preview))+' รายการแรกของเจ้ามือแรกตาม Snapshot · '+_text(preview[0].get('bookmaker'))+'</p>')
+    output.append('<p class="dc-market-help">ไม่ใช่การยืนยันเส้นหลักหรือคำแนะนำเดิมพัน</p></div>')
     for index,((_,book), values) in enumerate(groups.items()):
-        output.append('<details class="dc-book"'+(' open' if index==0 else '')+'><summary>'+_text(book)+'</summary>')
+        output.append('<details class="dc-book"><summary>'+_text(book)+'</summary>')
         rows=[(_selection(q,card),_number(q.get('point'),signed=market == 'Asian Handicap'),_number(q.get('odds'))) for q in values]
         output.append(_table(('ตัวเลือก','เส้น','ราคา'),rows,label=label+' · '+book))
         for quote in values:
@@ -191,6 +203,26 @@ def _price_market(card, market, label):
     return ''.join(output)
 
 
+def _market_switch(card, instance=None):
+    identity='\x1f'.join(str(card.get(key) or '') for key in ('run_id','event_id','sport_key','kickoff_utc'))
+    namespace='' if instance is None else str(instance)
+    token=hashlib.sha256((identity+'\x1f'+namespace).encode()).hexdigest()[:24]
+    name='dc-market-'+token
+    quotes=[q for q in _list(card.get('quotes')) if isinstance(q,dict)]
+    counts={market:sum(q.get('market')==market for q in quotes) for market in ('Asian Handicap','Over/Under')}
+    use_ou=counts['Asian Handicap']==0 and counts['Over/Under']>0
+    # Leave native inputs uncontrolled: Streamlit's React markdown renderer can
+    # otherwise restore a server-rendered checked attribute after a local click.
+    # CSS supplies the initial visible panel until the first real radio choice.
+    return ('<div class="dc-market-switch" data-dc-default="'+('ou' if use_ou else 'ah')+'" role="group" aria-label="สลับตลาดราคา AH หรือ OU">'
+        '<input class="dc-market-radio dc-tab-ah" type="radio" name="'+name+'" id="'+name+'-ah">'
+        '<input class="dc-market-radio dc-tab-ou" type="radio" name="'+name+'" id="'+name+'-ou">'
+        '<div class="dc-market-labels"><label for="'+name+'-ah" data-dc-tab="ah">AH <small>แฮนดิแคป</small></label>'
+        '<label for="'+name+'-ou" data-dc-tab="ou">OU <small>สูง–ต่ำ</small></label></div>'
+        '<div class="dc-panel-ah">'+_price_market(card,'Asian Handicap','แฮนดิแคป AH')+'</div>'
+        '<div class="dc-panel-ou">'+_price_market(card,'Over/Under','สูง–ต่ำ OU')+'</div></div>')
+
+
 def _form_window(window):
     window=_dict(window)
     sample=window.get('sample')
@@ -199,6 +231,32 @@ def _form_window(window):
     form=' '.join(str(value) for value in _list(window.get('form')))
     goals=f'{_number(window.get("gf_avg"))} / {_number(window.get("ga_avg"))}'
     return form or 'ไม่มีข้อมูล',goals,str(sample)
+
+
+def _team_overview(team, side, name):
+    team=_dict(team)
+    label='เจ้าบ้าน · เหย้า' if side=='home' else 'ทีมเยือน · เยือน'
+    window=_dict(_dict(team.get('venue')).get('last5'))
+    sample=window.get('sample')
+    available=type(sample) is int and sample>0
+    output=['<div class="dc-team-tile" data-dc-team="'+side+'"><span class="dc-venue-label">'+label+'</span><strong>'+_text(team.get('name') or name)+'</strong>']
+    if available:
+        chips=[]
+        for result in _list(window.get('form')):
+            chips.append('<span class="dc-form-chip" data-result="'+_text(result)+'">'+_text(result)+'</span>')
+        output.append('<div class="dc-form-chips" aria-label="ฟอร์ม 5 นัดตามสนาม">'+(''.join(chips) or '<span class="dc-muted">ไม่มีข้อมูลผล W/D/L</span>')+'</div>')
+        output.append('<p class="dc-goal-pair">'+_text(_number(window.get('gf_avg')))+' / '+_text(_number(window.get('ga_avg')))+'</p>')
+        output.append('<p class="dc-muted">ยิง / เสียเฉลี่ย · '+_text(_count(sample))+' นัด</p>')
+    else:
+        output.append('<p class="dc-empty">ไม่มีข้อมูลฟอร์มตามสนาม</p>')
+    xg=_dict(_dict(_dict(team.get('xg')).get('venue')).get('last5'))
+    xg_sample=xg.get('sample')
+    if type(xg_sample) is int and xg_sample>0:
+        output.append('<p class="dc-muted">xG/xGA '+_text(_number(xg.get('xg_avg')))+' / '+_text(_number(xg.get('xga_avg')))+' · '+_text(_count(xg_sample))+' นัด</p>')
+    else:
+        output.append('<p class="dc-muted">xG/xGA: ไม่มีข้อมูล</p>')
+    output.append('</div>')
+    return ''.join(output)
 
 
 def _team_statistics(team, label):
@@ -275,18 +333,22 @@ def _statistics(card):
     if not isinstance(statistics,dict):
         return '<section data-dc-statistics="not_loaded"><h4>สถิติฟุตบอล</h4><p class="dc-empty">ยังไม่ได้โหลดสถิติ — โปรแกรมและราคาดูได้ทันทีโดยไม่ต้องรอ A/B/C</p><p>ฟอร์ม 5/10 นัด · เหย้า–เยือน · ยิง/เสียเฉลี่ย · H2H · xG/xGA: ยังไม่มีข้อมูลที่โหลดสำหรับรอบนี้</p><p>อันดับตาราง: ไม่มีข้อมูล</p></section>'
     teams=_dict(statistics.get('teams'))
-    output=['<section data-dc-statistics="loaded"><h4>สถิติฟุตบอล</h4><p class="dc-muted">ความครบถ้วน: '+_text(_state(statistics.get('status')))+' · ประเมินข้อมูล ณ '+_text(statistics.get('as_of'))+'</p><div class="dc-grid">']
+    output=['<section data-dc-statistics="loaded"><h4>สถิติฟุตบอล</h4><p class="dc-muted">ความครบถ้วน: '+_text(_state(statistics.get('status')))+' · ประเมินข้อมูล ณ '+_text(statistics.get('as_of'))+'</p><div class="dc-team-overview">']
+    output.append(_team_overview(teams.get('home'),'home',card.get('home_team')))
+    output.append(_team_overview(teams.get('away'),'away',card.get('away_team')))
+    output.append('</div><details class="dc-form-details"><summary>ดูฟอร์ม 5/10 นัดและสถิติเหย้า–เยือน</summary><div class="dc-grid">')
     output.append(_team_statistics(teams.get('home'),'เจ้าบ้าน'))
     output.append(_team_statistics(teams.get('away'),'ทีมเยือน'))
-    output.append('</div>')
+    output.append('</div></details>')
     h2h=_dict(statistics.get('h2h'))
     matches=[m for m in _list(h2h.get('matches')) if isinstance(m,dict)]
-    output.append('<h4>H2H</h4>')
+    output.append('<details class="dc-h2h"><summary>ดู H2H · '+str(len(matches))+' นัดที่มีข้อมูล</summary>')
     if matches:
         rows=[(m.get('date'),f'{m.get("home_team", "ไม่มีข้อมูล")} vs {m.get("away_team", "ไม่มีข้อมูล")}',f'{m.get("home_goals", "ไม่มีข้อมูล")}–{m.get("away_goals", "ไม่มีข้อมูล")}') for m in matches]
         output.append(_table(('วัน','คู่แข่งขัน','สกอร์'),rows,label='H2H'))
     else:
         output.append('<p class="dc-empty">ไม่มีข้อมูล H2H ที่ผ่านการตรวจ</p>')
+    output.append('</details>')
     standings=_dict(statistics.get('standings'))
     output.append('<h4>อันดับตาราง</h4>')
     if standings.get('status')=='success' and all(type(standings.get(side)) is int and standings[side]>0 for side in ('home','away')) and standings.get('source'):
@@ -300,16 +362,44 @@ def _statistics(card):
     return ''.join(output)
 
 
-def data_center_card_html(card):
+def _source_footer(card):
+    statistics=_dict(card.get('statistics'))
+    output=['<footer class="dc-source-footer"><p>แหล่งโปรแกรม/ราคา: '+_text(card.get('source') or card.get('provider') or 'The Odds API')+'</p>']
+    output.append('<p>รับราคา '+_text(card.get('received_at'))+'</p>')
+    sources=_dict(statistics.get('sources'))
+    names={'football_data':'Football-Data','understat':'Understat','api_football':'API-Football'}
+    for key,source in sources.items():
+        source=_dict(source)
+        stamps=source.get('received_at')
+        stamp=' · '.join(str(value) for value in stamps) if isinstance(stamps,list) else stamps
+        output.append('<p>'+_text(source.get('provider') or names.get(key,key))+' · '+_text(_state(source.get('status')))+' · รับ '+_text(stamp)+'</p>')
+    if not sources:
+        output.append('<p>แหล่งสถิติ: ยังไม่มีข้อมูลที่โหลดสำหรับรอบนี้</p>')
+    output.append('</footer>')
+    return ''.join(output)
+
+
+def dashboard_summary_html(cards):
+    from data_center_presentation import summary_counts
+    counts=summary_counts(cards)
+    labels=(('fixtures','คู่แข่งขัน'),('priced','คู่ที่มีราคา'),('statistics','คู่ที่มีสถิติ'))
+    return '<div class="dc-summary" role="group" aria-label="สรุปข้อมูลรอบสแกน">'+''.join(
+        '<div class="dc-summary-tile" data-dc-count="'+key+'"><strong>'+_text(_count(counts.get(key)))+'</strong><span>'+label+'</span></div>'
+        for key,label in labels)+'</div>'
+
+
+def data_center_card_html(card, *, instance=None):
     card=_dict(card)
     status={'available':'มีโปรแกรมและราคา','no_prices':'มีโปรแกรม แต่ไม่มีราคาตลาด','missing_timestamp':'เวลาได้รับข้อมูลยังยืนยันไม่ได้'}.get(card.get('data_status'),'ข้อมูลยังไม่ครบ')
-    output=['<article class="dc-card" data-center-fixture="'+_text(card.get('event_id'))+'"><header><p class="dc-muted">'+_text(card.get('league'))+'</p><h3>'+_text(card.get('home_team'))+' <span class="dc-vs">vs</span> '+_text(card.get('away_team'))+'</h3><p>เวลาไทย '+_text(card.get('kickoff_th'))+'</p><span class="dc-status">'+_text(status)+'</span><p class="dc-muted">แหล่งโปรแกรม/ราคา: '+_text(card.get('source') or card.get('provider') or 'The Odds API')+' · รับข้อมูล '+_text(card.get('received_at'))+'</p></header>']
+    output=['<article class="dc-card" data-center-fixture="'+_text(card.get('event_id'))+'"><header><p class="dc-muted">'+_text(card.get('league'))+'</p><h3><span class="dc-name" title="'+_text(card.get('home_team'))+'">'+_text(card.get('home_team'))+'</span><span class="dc-vs">vs</span><span class="dc-name" title="'+_text(card.get('away_team'))+'">'+_text(card.get('away_team'))+'</span></h3><p class="dc-kickoff">เวลาไทย '+_text(card.get('kickoff_th'))+'</p><span class="dc-status">'+_text(status)+'</span></header>']
     output.append('<p class="dc-muted">ราคาเป็นข้อมูล ณ Snapshot ไม่ใช่การยืนยันราคาสดหรือคำแนะนำเดิมพัน</p>')
     for reason in _list(card.get('data_quality_reasons')):
         output.append('<p class="dc-muted">'+_text(reason)+'</p>')
-    output.append(_price_market(card,'Asian Handicap','แฮนดิแคป AH'))
-    output.append(_price_market(card,'Over/Under','สูง–ต่ำ OU'))
+    output.append(_market_switch(card,instance))
     output.append(_statistics(card))
+    from data_center_presentation import analysis_summary_html
+    output.append(analysis_summary_html(card))
+    output.append(_source_footer(card))
     output.append('</article>')
     return ''.join(output)
 
@@ -372,20 +462,23 @@ def _action(st, callback, cards, action):
     st.rerun()
 
 
-def render_center(cards, report, budget, *, on_load_statistics=None, on_analyze=None):
+def render_center(cards, report, budget, *, on_load_statistics=None, on_analyze=None, analysis_rows=None):
     """Render saved facts first; callbacks only run on the corresponding click."""
     import streamlit as st
     from scan_status import render_scan_status
-    cards=list(cards or [])
+    from data_center_presentation import project_cards
+    cards=project_cards(list(cards or []),analysis_rows)
     st.subheader('⚽ Football Data Center')
     st.caption('โปรแกรม ราคา และสถิติที่มีจริง แสดงได้โดยไม่ต้องรอ A/B/C · เปลี่ยนหน้าจอไม่เรียก Odds API')
-    render_scan_status(report,budget)
+    st.markdown(DATA_CENTER_CSS,unsafe_allow_html=True)
+    st.markdown(dashboard_summary_html(cards),unsafe_allow_html=True)
+    with st.expander('สถานะรอบสแกนและเครดิต API',expanded=not cards):
+        render_scan_status(report,budget)
     if not cards:
         st.info('ยังไม่มีคู่จากรอบสแกนที่ตรงลีก ภูมิภาค และช่วงเวลาปัจจุบัน ดูสถานะรายลีกเพื่อแยก API error ออกจากข้อมูลที่ผู้ให้บริการไม่ได้ส่ง')
         return
-    st.markdown(DATA_CENTER_CSS,unsafe_allow_html=True)
-    for card in cards:
-        st.markdown(data_center_card_html(card),unsafe_allow_html=True)
+    for index,card in enumerate(cards):
+        st.markdown(data_center_card_html(card,instance=index),unsafe_allow_html=True)
     if on_load_statistics is not None:
         if st.button('โหลดสถิติที่มีสำหรับคู่ที่แสดง (ไม่เรียก Odds API)',key='dc_stats_load',use_container_width=True):
             _action(st,on_load_statistics,cards,'statistics')
