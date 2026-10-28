@@ -1,0 +1,20 @@
+{
+  "data_mode": "synthetic_test_fixture",
+  "source": "Authored offline software regression scenarios, not provider observations",
+  "real_provider_calls": 0,
+  "fixture_offsets": [
+    {"suffix": "within24", "hours": 2, "embedded_key": "selected"},
+    {"suffix": "within48", "hours": 36, "embedded_key": "selected"},
+    {"suffix": "started", "hours": -2, "embedded_key": "selected"},
+    {"suffix": "outside48", "hours": 72, "embedded_key": "selected"},
+    {"suffix": "wrong-league", "hours": 2, "embedded_key": "different"}
+  ],
+  "eleven_league_expectations": {
+    "selected": 11,
+    "api_returned": 55,
+    "fixtures24": 11,
+    "fixtures48": 22,
+    "major_leagues_with_supported_mock_xg": 5,
+    "real_world_coverage_claim": false
+  }
+}

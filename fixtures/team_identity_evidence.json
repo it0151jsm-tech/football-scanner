@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-10-23T05:55:37.169279+00:00",
+  "scope": "Four Issue #9 clubs only. This is identity-label evidence, not model data or proof that the deployed app fetched these files. Odds labels are from the user report, not a new Odds API request. No additional spelling is inferred.",
+  "api_label_evidence": {
+    "url": "https://github.com/it0151jsm-tech/football-scanner/issues/9",
+    "kind": "user-reported API fixture labels",
+    "labels": [
+      "VfB Stuttgart",
+      "Borussia Monchengladbach",
+      "Ipswich Town",
+      "Nottingham Forest"
+    ]
+  },
+  "understat_label_evidence": {
+    "report": "reports/league-source-audit.json",
+    "url": "https://github.com/it0151jsm-tech/football-scanner/actions/runs/39448791254/artifacts/12275769505",
+    "checked_at": "2026-10-20T15:30:06.397287+00:00",
+    "labels": [
+      "VfB Stuttgart",
+      "Borussia M.Gladbach",
+      "Nottingham Forest"
+    ],
+    "limitation": "Saved audit verifies these Understat labels; its csv_name:null does not itself prove a cross-provider identity match. Ipswich Understat coverage is not asserted."
+  },
+  "csv_label_evidence": [
+    {
+      "url": "https://www.football-data.co.uk/mmz4281/2627/D1.csv",
+      "season": "2627",
+      "code": "D1",
+      "http_status": 200,
+      "received_at": "2026-10-23T05:53:38.164066+00:00",
+      "sha256": "79f84b0b65acf2400c1d7a5c7328007bb68a6f38da6e87198d82f9f75e4e5d89",
+      "bytes": 26278,
+      "rows": 54,
+      "labels": [
+        "Stuttgart",
+        "M'gladbach"
+      ]
+    },
+    {
+      "url": "https://www.football-data.co.uk/mmz4281/2627/E0.csv",
+      "season": "2627",
+      "code": "E0",
+      "http_status": 200,
+      "received_at": "2026-10-23T05:53:40.038771+00:00",
+      "sha256": "705ef4373f6c4c9ec09b67eb3ca3398d6a770813095efc5d629edb591e4ee41c",
+      "bytes": 34516,
+      "rows": 70,
+      "labels": [
+        "Ipswich",
+        "Nott'm Forest"
+      ]
+    }
+  ]
+}
