@@ -1,0 +1,24 @@
+{
+  "base_commit": "df4b836b7bfade57f009f1ec115ae2905f76ae7d",
+  "protected_files_sha256": {
+    "api_football_backoff.py": "84f7f575c9ea88739b79d75260a66621d2386834519ef024411a621ea82eb85f",
+    "api_football_data.py": "a5a1ab6a72b1a3d608d2799031b4a09daddb6a9d32cbf1c5bbe8b94979f2df89",
+    "app.py": "d39ab8178a555a8f39538be52f8973d5e52835ced5461c45003b2b4648ead03d",
+    "bill_backup.py": "f200412a8c19d8cf891f921d5780b0006ff229003989dd48c4b88590c370ea7f",
+    "credential_redaction.py": "9346a6cc8ce915a5bbb96a1ac8e036542b2d8650edee77344e255ac210c76798",
+    "data_health.py": "cda2b81979cba10d35c47b9b73d1182e7204da3368339c60fdea7f98d6219cda",
+    "domestic_data.py": "34706f9f18d88db639e45f620f8e9761598e13feae34fa7db2eb6660e4652bae",
+    "form_audit.py": "da9ebb5b93737597b378476f4ddb988c0bb5f9395232d580addcf26d4b9dc943",
+    "form_readiness.py": "4c76e8515df9637b3cc29fd59c6795f846e5acc76b6b5d0543ee3774c7e6a050",
+    "history_data.py": "d8d30f9b7a9af18d83647279f309ba9aa71f7a76a2cfb4188db15e8de2961a70",
+    "manual_quotes.py": "e16240125d90e32023b237427459d1f351b3189d9c95af664ffb78dcc43d4250",
+    "market_recommendations.py": "2c3876a23e09164a80a085fed4146466636de0a3e70914527a10e759d081379d",
+    "mobile_dashboard.py": "fb8842057efdb812d9c5659525df00270fa00ed90a4822d72036e7f09d3260f3",
+    "odds_budget.py": "08cec7cb856f80a0599942634c2cadd0a1043bc7fa2f59b4f987f68a214807c7",
+    "ou_market.py": "cd5d50c349c624f6295f81f61ecbf78c3cfdd292feb4403a42e4de2684c3cb86",
+    "readiness.py": "ae2e9c0a7580e871c8cf4c786122948a80d2c051d2a8aa9116d4a0f652f4e146",
+    "scan_diagnostics.py": "86d2188c56b132df6738faa3ff59171368b13767d409916e43274cc18e3c8680",
+    "source_diagnostics.py": "c0c77b61e9a01bfe09262e10c22db0324c54ea36504f0470ffd3b749669bcd7b",
+    "understat_history.py": "e06d9fdc0b2173137d28cfb5840a91860a9ce4aadfee0e3861b02e0b85892bb2"
+  }
+}

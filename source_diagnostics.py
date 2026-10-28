@@ -1,0 +1,308 @@
+"""Saved, read-only source explanations; no HTTP, probabilities or substitute xG."""
+from copy import deepcopy
+import math
+import pandas as pd
+
+from domestic_data import safe_match_team, season_for_kickoff
+
+
+SOURCE_MESSAGES = {
+    'forbidden':'HTTP 403 ถูกปฏิเสธ', 'rate_limited':'HTTP 429 จำกัดคำขอ',
+    'http_error':'HTTP ไม่สำเร็จ', 'download_error':'โหลดข้อมูลไม่สำเร็จ',
+    'unsupported':'ไม่มีแหล่ง xG รองรับ', 'unsupported_source':'ไม่มีแหล่ง xG รองรับ',
+    'empty_payload':'ไฟล์/ข้อมูลว่าง', 'empty_history':'ไม่มีผลที่ใช้ได้',
+    'invalid_json':'อ่าน JSON ไม่สำเร็จ', 'invalid_schema':'โครงสร้างข้อมูลไม่ตรง',
+    'missing_columns':'ขาดคอลัมน์ xG ที่จำเป็น', 'ok':'โหลดข้อมูลแล้ว',
+    'unsupported_xg':'ลีกนี้ไม่มี Understat รองรับ', 'partial':'โหลดได้บางส่วน — มีฤดูกาลหรือแถวที่ไม่ผ่าน',
+    'invalid_payload':'โครงสร้างข้อมูล Understat ไม่ตรง', 'invalid_rows':'ไม่มีแถว xG ผ่านการตรวจ',
+    'invalid_dates':'วันที่ xG ไม่ถูกต้องหรืออ่านไม่ได้',
+    'conflicting_fixtures':'เกม/สกอร์/xG ขัดแย้ง — แยกออกก่อนคำนวณ',
+}
+
+
+def describe_history_cache(frame, called_at, ttl_seconds=900):
+    """Expose receipts already on the frame; never restamp a cached source."""
+    from readiness import instant
+    result = frame.copy()
+    source = result.attrs.get('history_diagnostics', {})
+    receipts = [instant(item.get('received_at')) for item in source.get('sources', [])]
+    if not receipts and source.get('received_at'):
+        receipts = [instant(source.get('received_at'))]
+    receipts = [value for value in receipts if value is not None]
+    called = instant(called_at)
+    result.attrs['cache_diagnostics'] = {
+        'ttl_seconds': ttl_seconds,
+        'status': ('unknown_receipt' if not receipts or called is None else
+                   'cache' if all(value < called for value in receipts) else 'fetched'),
+        'source_status': source.get('status', 'unknown'),
+        'received_at': [value.isoformat() for value in receipts],
+        'receipt_preserved': True,
+    }
+    return result
+
+
+def csv_form_ready(frame, fixtures):
+    """Source eligibility only: current membership and existing five-game form.
+
+    This never changes form scoring or fills a gap; it only decides whether an
+    explicit scan needs to try its already configured optional score provider.
+    """
+    from history_data import team_history, match_team
+    from readiness import instant
+    required = {'Date_dt', 'HomeTeam', 'AwayTeam', '_history_season'}
+    if frame is None or frame.empty or not required.issubset(frame.columns):
+        return False
+    for fixture in fixtures:
+        kickoff = instant(fixture.get('commence_time'))
+        if kickoff is None:
+            return False
+        day = pd.Timestamp(kickoff).tz_convert('UTC').tz_localize(None).normalize()
+        before = frame[pd.to_datetime(frame.Date_dt, errors='coerce') < day]
+        current = before[before['_history_season'].astype(str).eq(season_for_kickoff(kickoff))]
+        for side in ('home', 'away'):
+            team = fixture.get(side+'_team')
+            matched, _ = match_team(team, set(current.HomeTeam) | set(current.AwayTeam))
+            history, _ = team_history(frame, team, kickoff, side)
+            if matched is None or len(history) < 5:
+                return False
+            last = pd.to_datetime(history.Date_dt, errors='coerce').max()
+            if pd.isna(last) or (day-pd.Timestamp(last).normalize()).days > 120:
+                return False
+    return bool(fixtures)
+
+
+def xg_diagnostics(frame, home, away, kickoff, *, supported=True):
+    """Explain provider failure separately from name, venue and freshness failures."""
+    attrs=getattr(frame,'attrs',{})
+    report=deepcopy(attrs.get('xg_diagnostics') or attrs.get('history_diagnostics') or {})
+    status=report.get('status') or ('ok' if frame is not None and not frame.empty else 'empty_history')
+    if not supported:
+        status='unsupported'
+    from readiness import instant
+    cutoff = instant(kickoff)
+    result={'provider':'Understat','status':status,'source':report,
+            'eligibility':deepcopy(attrs.get('xg_eligibility',{})),
+            'cutoff_date':str(cutoff.date()) if cutoff is not None else None,
+            'requested_season':season_for_kickoff(kickoff)}
+    day=pd.Timestamp(cutoff).tz_localize(None).normalize() if cutoff is not None else None
+    columns={'Date_dt','HomeTeam','AwayTeam','xG_home','xG_away'}
+    usable=supported and cutoff is not None and frame is not None and not frame.empty and columns.issubset(frame.columns)
+    if cutoff is None:
+        result['status'] = 'invalid_cutoff'
+    if supported and frame is not None and not frame.empty and not columns.issubset(frame.columns):
+        result['status']='missing_columns'
+    dates = pd.to_datetime(frame.Date_dt,errors='coerce',utc=True).dt.tz_localize(None) if usable else None
+    if dates is not None:
+        result['invalid_date_rows']=int(dates.isna().sum())
+        if dates.isna().all():
+            result['status'],usable='invalid_dates',False
+    for side,name,venue in (('home',home,'HomeTeam'),('away',away,'AwayTeam')):
+        info={'input_name':name,'status':'source_unavailable','matched_name':None,'sample':0}
+        if usable:
+            # Diagnostic calendar comparison only; original timestamp eligibility
+            # and model formulas remain in understat_history/app unchanged.
+            clean=frame[dates<day].copy()
+            clean['Date_dt']=dates.loc[clean.index]
+            candidate,method=safe_match_team(name,set(clean.HomeTeam)|set(clean.AwayTeam))
+            info.update(mapping=method,matched_name=candidate)
+            if candidate is None:
+                info['status']='name_unmatched' if method!='name_ambiguous' else 'name_ambiguous'
+            else:
+                venue_rows=clean[clean[venue].eq(candidate)].copy()
+                valid_xg=venue_rows[['xG_home','xG_away']].apply(
+                    lambda column: column.map(_export_number)).apply(
+                    lambda column: column.map(lambda value: value is not None and pd.notna(value) and value>=0)).all(axis=1)
+                info['invalid_xg_rows']=int((~valid_xg).sum())
+                sample=venue_rows[valid_xg].tail(10)
+                last=sample.Date_dt.max() if not sample.empty else None
+                info.update(sample=len(sample),last_date=str(last.date()) if last is not None and pd.notna(last) else None)
+                info['status']=('invalid_xg' if sample.empty and info['invalid_xg_rows'] else
+                    'no_venue_history' if sample.empty else
+                    'stale' if (day-pd.Timestamp(last).normalize()).days>120 else
+                    'insufficient_sample' if len(sample)<5 else 'available')
+        result[side]=info
+    source_notes=[]
+    for item in report.get('sources',[]):
+        note=f"{item.get('season','?')}: {item.get('status','unknown')} HTTP {item.get('http_status','?')}"
+        for key,label in (('received_at','รับ UTC'),('url','URL'),('payload_sha256','SHA256')):
+            if item.get(key):
+                note+=f" · {label} {item[key]}"
+        source_notes.append(note)
+    source_label=SOURCE_MESSAGES.get(result['status'], 'เวลา cutoff ไม่มี timezone ที่ยืนยันได้' if result['status']=='invalid_cutoff' else result['status'])
+    http_codes=sorted({str(item['http_status']) for item in report.get('sources',[])
+                       if item.get('http_status') not in (None,200)})
+    if http_codes:
+        source_label+=' (HTTP '+', '.join(http_codes)+')'
+    if not supported:
+        source_label=SOURCE_MESSAGES['unsupported']
+    side_labels={'available':'มีตัวอย่างตามสนามครบอย่างน้อย 5 นัด',
+        'source_unavailable':'ไม่มีข้อมูลจากผู้ให้บริการ','name_unmatched':'จับคู่ชื่อทีมไม่ได้',
+        'name_ambiguous':'ชื่อกำกวม','no_venue_history':'ไม่มีเกมตามสนามก่อนวันแข่ง',
+        'insufficient_sample':'ตัวอย่างตามสนามไม่ถึง 5 นัด','stale':'ข้อมูลเก่าเกิน 120 วัน',
+        'invalid_xg':'ค่า xG ต้นทางไม่ครบ/ไม่เป็นตัวเลขที่ใช้ได้'}
+    result['summary']='Understat: '+source_label+' · '+' · '.join(
+        ('เจ้าบ้าน' if side=='home' else 'ทีมเยือน')+': '+side_labels[result[side]['status']]+
+        f" ({result[side]['sample']} นัด)" for side in ('home','away'))
+    if result['eligibility'].get('excluded_unknown_time') or result['eligibility'].get('quarantined_unknown_time'):
+        result['summary']+=' · พักข้อมูลที่ยังยืนยันเวลาก่อน cutoff ไม่ได้'
+    if result['eligibility'].get('excluded_received_after_analysis'):
+        result['summary']+=' · ไม่ใช้ข้อมูลที่รับหลังเวลาวิเคราะห์'
+    result['details']=result['summary']+(' · '+' | '.join(source_notes) if source_notes else
+        ' · ไม่มีหลักฐานเวลารับข้อมูลต้นทางที่บันทึกไว้')
+    return result
+
+
+def model_data_readiness(provider, metrics, analysis_b):
+    """Explain the unchanged model's output; calibration is not data availability."""
+    info = {'provider': 'Understat', 'calibration_status': 'not_validated',
+            'minimum_venue_samples': 5, 'max_xg_age_days': 120, 'reason_codes': []}
+    if analysis_b.get('available') is True:
+        info.update(status='available_uncalibrated', message='B/EV คำนวณได้จากข้อมูลที่ผ่านเกณฑ์เดิม แต่ยังไม่ผ่าน Calibration')
+        return info
+    if metrics is not None:
+        info.update(status='no_valid_market', message='มีโมเดล แต่ไม่มีราคาตลาดที่ใช้คำนวณ EV ได้')
+        info['reason_codes'] = ['no_valid_market']
+        return info
+    for side in ('home', 'away'):
+        status = provider.get(side, {}).get('status', 'source_unavailable')
+        if status != 'available':
+            info['reason_codes'].append(side+'_'+status)
+    info['reason_codes'] = list(dict.fromkeys(info['reason_codes']))
+    if info['reason_codes']:
+        info.update(status='xg_unavailable', message=provider.get('summary', 'ข้อมูล xG ไม่พอ'))
+    else:
+        info.update(status='model_gate_failed', message='มี xG ตามสนาม แต่ไม่ผ่านเงื่อนไขฐานลีก/ค่าคาดการณ์ของโมเดลเดิม — ไม่สร้าง EV ทดแทน')
+        info['reason_codes'] = ['model_gate_failed']
+    return info
+
+
+def _export_number(value):
+    """CSV numbers only; boolean, infinity and malformed cells are not evidence."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+        return number if math.isfinite(number) else None
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def summarize_export_readiness(frame):
+    """Audit saved exports offline, distinguishing quotes from fixture identity.
+
+    An optional event_id is preferred. Legacy 22-column exports do not contain
+    provider IDs, so their label/time grouping is explicitly a fallback rather
+    than proof of unique provider fixtures. Numeric EV presence is availability,
+    not calibration, positive value or an approved betting recommendation.
+    """
+    required = {'ลีก', 'คู่แข่งขัน', 'เวลาแข่ง (ไทย)', 'คะแนนหลักฐาน A/100', 'EV (%)'}
+    columns = set(getattr(frame, 'columns', []))
+    if frame is None or not required.issubset(columns):
+        return {'status': 'missing_columns', 'missing': sorted(required-columns)}
+    basis = ('provider_event_id' if 'event_id' in columns else
+             'legacy_label_time_fallback_not_verified_event_id')
+    if frame.empty:
+        return {'status': 'empty', 'market_rows': 0, 'fixtures': 0, 'leagues': [],
+                'a_scored_fixtures': 0, 'b_ev_fixtures': 0,
+                'identity_basis': basis, 'problem_fixtures': []}
+    working = frame.copy().reset_index(drop=True)
+    scores = working['คะแนนหลักฐาน A/100'].map(_export_number)
+    ev = working['EV (%)'].map(_export_number)
+    working['_a_ready'] = scores.map(lambda value: value is not None and pd.notna(value) and 0 <= value <= 100)
+    working['_b_ev_present'] = ev.map(lambda value: value is not None and pd.notna(value))
+    labels = ['ลีก', 'คู่แข่งขัน', 'เวลาแข่ง (ไทย)']
+    bad_ids, conflicts = 0, set()
+    if 'event_id' in working:
+        valid = working.event_id.map(lambda value: isinstance(value, str) and bool(value.strip()))
+        ids = working.event_id.map(lambda value: value.strip() if isinstance(value, str) else None)
+        bad_ids = int((~valid).sum())
+        for event_id, subset in working[valid].assign(_event_id=ids[valid]).groupby('_event_id', sort=False):
+            if any(subset[column].astype(str).nunique(dropna=False)>1 for column in labels):
+                conflicts.add(event_id)
+        # Unknown IDs cannot be silently joined by possibly similar team labels.
+        working['_identity'] = [f'event:{ids.iloc[index]}' if valid.iloc[index] else f'missing:{index}'
+                                for index in working.index]
+        ambiguous = ids.isin(conflicts)
+        working.loc[ambiguous, ['_a_ready', '_b_ev_present']] = False
+        working['_identity_conflict'] = ambiguous
+        grouped = working.groupby('_identity', sort=False, dropna=False)
+    else:
+        working['_identity_conflict'] = False
+        grouped = working.groupby(labels, sort=False, dropna=False)
+    summaries, problem_fixtures = [], []
+    for _, subset in grouped:
+        first = subset.iloc[0]
+        a_ready, b_ready = bool(subset['_a_ready'].any()), bool(subset['_b_ev_present'].any())
+        identity_conflict = bool(subset['_identity_conflict'].any())
+        summary = {'league': str(first['ลีก']), 'fixture': str(first['คู่แข่งขัน']),
+            'kickoff': str(first['เวลาแข่ง (ไทย)']), 'market_rows': len(subset),
+            'a_scored': a_ready, 'b_ev_present': b_ready,
+            'identity_conflict': identity_conflict}
+        if 'event_id' in subset:
+            summary['event_id'] = first['event_id'] if isinstance(first['event_id'], str) else None
+        summaries.append(summary)
+        if a_ready and b_ready and not identity_conflict:
+            continue
+        details = {}
+        for column in ('ระบบ A', 'ระบบ B', 'สถานะข้อมูล', 'system_c_reason'):
+            if column in subset:
+                values = [str(value).strip() for value in subset[column].dropna().unique()
+                          if str(value).strip()]
+                if values:
+                    details[column] = values[:3]
+        problem_fixtures.append({**summary, 'observed_reasons': details})
+    fixtures = pd.DataFrame(summaries)
+    leagues = []
+    for league, subset in fixtures.groupby('league', sort=False, dropna=False):
+        leagues.append({'league': str(league), 'fixtures': len(subset),
+            'market_rows': int(subset.market_rows.sum()),
+            'a_scored_fixtures': int(subset.a_scored.sum()),
+            'b_ev_fixtures': int(subset.b_ev_present.sum())})
+    return {'status': 'ok', 'market_rows': len(working), 'fixtures': len(fixtures),
+        'a_scored_fixtures': int(fixtures.a_scored.sum()),
+        'b_ev_fixtures': int(fixtures.b_ev_present.sum()),
+        'identity_basis': basis, 'missing_event_id_rows': bad_ids,
+        'conflicting_event_ids': sorted(conflicts), 'leagues': leagues,
+        'problem_fixtures': problem_fixtures,
+        'note': 'Finite EV present means availability only; not calibration or a betting recommendation. Legacy label/time grouping is not provider event identity proof.'}
+
+
+def annotate_form_source(profile, frame, team, kickoff, sport_key):
+    """Add evidence labels without altering the original form calculations."""
+    diagnostic=profile.setdefault('diagnostics',{})
+    season=season_for_kickoff(kickoff)
+    source=deepcopy(getattr(frame,'attrs',{}).get('history_diagnostics',{}))
+    diagnostic.update(source=source,requested_sport_key=sport_key,requested_season=season)
+    cache = deepcopy(getattr(frame, 'attrs', {}).get('cache_diagnostics', {}))
+    if cache:
+        diagnostic['cache'] = cache
+        diagnostic['message'] = str(diagnostic.get('message', ''))+f" · CSV cache: {cache.get('status', 'unknown')} TTL {cache.get('ttl_seconds')}s; สถานะแหล่ง {cache.get('source_status')}"
+    from form_readiness import form_data_readiness
+    diagnostic['readiness'] = form_data_readiness(frame, team, kickoff, diagnostic.get('venue'))
+    diagnostic['message'] = str(diagnostic.get('message', ''))+' · '+diagnostic['readiness']['summary']
+    api_report = deepcopy(getattr(frame, 'attrs', {}).get('api_football_diagnostics', {}))
+    if api_report:
+        from api_football_data import api_football_status_text, BASE_URL
+        from readiness import instant
+        diagnostic['api_football'] = api_report
+        diagnostic['message'] = str(diagnostic.get('message', ''))+' · '+api_football_status_text(api_report)
+        received = instant(api_report.get('received_at'))
+        if received is not None:
+            diagnostic['message'] += ' · รับ API-Football UTC: '+received.isoformat()+' · '+BASE_URL
+    received=[item['received_at'] for item in source.get('sources',[]) if item.get('received_at')]
+    if received:
+        diagnostic['source_received_at']=received
+        usable_receipts=[item['received_at'] for item in source.get('sources',[])
+                         if item.get('received_at') and item.get('status')=='ok' and item.get('valid_rows',0)>0]
+        if usable_receipts:
+            diagnostic['message']=str(diagnostic.get('message',''))+' · รับแหล่งผลที่ใช้ได้ UTC: '+max(usable_receipts)
+    if frame is None or frame.empty or '_history_season' not in frame:
+        diagnostic['membership_status']='not_verified'
+        return
+    before=frame[pd.to_datetime(frame.Date_dt,errors='coerce')<pd.Timestamp(kickoff).tz_convert('UTC').tz_localize(None).normalize()]
+    current=before[before['_history_season'].astype(str).eq(season)]
+    candidate,method=safe_match_team(team,set(current.HomeTeam)|set(current.AwayTeam))
+    diagnostic['membership_status']='current_source_matched' if candidate is not None else 'current_membership_unverified'
+    diagnostic['membership_mapping']=method
+    if candidate is None:
+        diagnostic['message']=str(diagnostic.get('message',''))+f' · ยังยืนยันชื่อทีมในลีก/ฤดูกาล {season} ที่เลือกไม่ได้; ไม่อนุมานจากสมาชิกลีกเก่า'

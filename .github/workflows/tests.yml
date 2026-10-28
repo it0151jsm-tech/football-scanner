@@ -1,0 +1,49 @@
+name: Regression tests
+on: [push, pull_request]
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      - run: python -m playwright install --with-deps chromium
+      - run: sudo apt-get install -y fonts-thai-tlwg
+      - name: Check mobile dashboard before full regression
+        run: |
+          python - <<'PY'
+          import os, socket, tempfile, unittest
+          from pathlib import Path
+          from unittest.mock import patch
+          import scripts.run_offline_tests as offline
+          with tempfile.TemporaryDirectory(prefix='mobile-ui-preflight-') as isolated, \
+                  patch.dict(os.environ, VALUE_BET_DB=str(Path(isolated)/'app.db'),
+                      VALUE_BET_API_LEDGER=str(Path(isolated)/'budget.db'),
+                      VALUE_BET_OBSERVATION_DB='', THE_ODDS_API_KEY='', API_FOOTBALL_KEY=''), \
+                  patch.object(socket.socket, 'connect', offline.connect), \
+                  patch.object(socket.socket, 'connect_ex', offline.connect_ex):
+              suite = unittest.defaultTestLoader.loadTestsFromName('test_mobile_dashboard_ui')
+              result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() and not offline.blocked else 1)
+          PY
+        env:
+          DASHBOARD_SCREENSHOTS: test-artifacts
+      - run: python scripts/run_offline_tests.py
+        env:
+          DASHBOARD_SCREENSHOTS: test-artifacts
+      - run: python -m py_compile app.py mobile_dashboard.py market_recommendations.py history_data.py ou_market.py manual_quotes.py data_health.py scripts/check_e2_history.py scripts/audit_leagues.py readiness.py odds_budget.py bill_backup.py credential_redaction.py domestic_data.py form_audit.py api_football_data.py understat_history.py source_diagnostics.py scan_diagnostics.py form_readiness.py api_football_backoff.py
+      - name: Compile isolated offline backtest tools
+        run: python -m compileall -q backtest scripts/run_backtest.py scripts/export_observed_backtest.py scan_control.py scan_journal.py scan_status.py market_summary.py quote_provenance.py observation_archive.py data_center_store.py data_center_stats.py data_center_ui.py data_center_presentation.py
+      - name: Produce honest empty-cohort report without provider downloads
+        run: |
+          mkdir -p test-artifacts
+          python scripts/run_backtest.py --archive fixtures/backtest/empty-observed.json --output test-artifacts/backtest-data-availability.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iphone-dashboard-previews
+          path: test-artifacts/
+          if-no-files-found: ignore
+
