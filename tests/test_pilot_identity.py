@@ -57,15 +57,27 @@ class PilotIdentityBoundaryTests(unittest.TestCase):
                     f'2026-10-{day:02d}' for day in range(6, 11)])
 
     def test_unverified_pr13_abbreviations_do_not_gain_identity_by_similarity(self):
-        # PR #13 supplies no per-team evidence for these remaining variants.
-        # When evidence is reviewed, this fixture must be replaced explicitly.
-        for full, short in [('Newcastle United', 'Newcastle'),
-                            ('Tottenham Hotspur', 'Spurs'),
-                            ('West Ham United', 'West Ham'),
-                            ('Brighton and Hove Albion', 'Brighton'),
-                            ('Wolverhampton Wanderers', 'Wolves')]:
+        # Unlisted variants still never match by similarity.
+        for full, short in [('Tottenham Hotspur', 'Spurs')]:
             with self.subTest(team=full):
                 self.assertEqual(match_team(full, [short]), (None, 'name_unmatched'))
+
+    def test_explicit_aliases_added_for_scan_coverage_are_flagged_unaudited(self):
+        # Owner-approved explicit aliases, replacing the former PR #13 guard.
+        # They are exact reviewed label pairs (never similarity) and carry
+        # review_status until audit_leagues.py confirms them on live labels.
+        from history_data import alias_evidence
+        for full, short in [('Newcastle United', 'Newcastle'),
+                            ('West Ham United', 'West Ham'),
+                            ('Brighton and Hove Albion', 'Brighton'),
+                            ('Wolverhampton Wanderers', 'Wolves'),
+                            ('Tottenham Hotspur', 'Tottenham')]:
+            with self.subTest(team=full):
+                self.assertEqual(match_team(full, [short]), (short, 'verified_alias'))
+                self.assertEqual(alias_evidence(full, short)['review_status'],
+                                 'unverified_label_pair')
+        self.assertEqual(match_team('Newcastle United', ['Newcastle Jets']),
+                         (None, 'name_unmatched'))
 
     def test_newly_reviewed_manchester_aliases_keep_club_identity_evidence(self):
         from history_data import alias_evidence
