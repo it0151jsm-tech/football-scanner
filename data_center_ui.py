@@ -471,7 +471,7 @@ def render_center(cards, report, budget, *, on_load_statistics=None, on_analyze=
     from data_center_presentation import project_cards
     cards=project_cards(list(cards or []),analysis_rows)
     st.subheader('⚽ Football Data Center')
-    st.caption('โปรแกรม ราคา และสถิติที่มีจริง แสดงได้โดยไม่ต้องรอ A/B/C · เปลี่ยนหน้าจอไม่เรียก Odds API')
+    st.caption('กดสแกนครั้งเดียวเพื่อบันทึกราคาและรัน A/B/C จากข้อมูลย้อนหลัง · เปลี่ยนหน้าจอไม่เรียก Odds API')
     st.markdown(DATA_CENTER_CSS,unsafe_allow_html=True)
     st.markdown(dashboard_summary_html(cards),unsafe_allow_html=True)
     with st.expander('สถานะรอบสแกนและเครดิต API',expanded=not cards):
