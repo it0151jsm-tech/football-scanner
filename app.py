@@ -2028,6 +2028,31 @@ def execute_data_center_scan(selected, hours_limit, min_odds, max_odds, regions,
     return result
 
 
+
+def execute_data_center_scan_and_analyze(selected, hours_limit, min_odds, max_odds, regions, api_key, on_progress=None):
+    """One-click workflow: persist selected-league prices, then analyze that exact saved batch.
+
+    The analysis replays the stored OddsBatch and therefore makes no second
+    The Odds API request. Historical score/xG providers are used only by the
+    existing A/B/C scanner; missing or unsupported evidence stays unavailable.
+    """
+    result = execute_data_center_scan(
+        selected, hours_limit, min_odds, max_odds, regions, api_key,
+        on_progress=on_progress,
+    )
+    run_id = result.get("run_id")
+    if not run_id:
+        result.update(analysis_requested=False, analysis_status="skipped")
+        return result
+    analysis = analyze_data_center_run(run_id, min_odds, max_odds)
+    result.update(
+        analysis_requested=True,
+        analysis_status=analysis.get("status", "unknown"),
+        analysis_summary=analysis,
+    )
+    return result
+
+
 def data_center_run_context(run_id):
     from data_center_store import load_batches
     with db() as con:
@@ -2184,14 +2209,21 @@ with tab_scan:
             elif not selected_leagues:
                 show_scan_issue('no_leagues')
             else:
-                run_price_scan(
-                    lambda progress: execute_data_center_scan(selected_leagues,hours_limit,min_odds,max_odds,regions,api_key,on_progress=progress),
+                scan_result = run_price_scan(
+                    lambda progress: execute_data_center_scan_and_analyze(
+                        selected_leagues,hours_limit,min_odds,max_odds,regions,api_key,on_progress=progress),
                     lambda: load_data_center_cards(selected_leagues,regions,hours_limit),
                     latest_scan_report,lambda: safe_budget_status(api_key))
+                analysis_summary = scan_result.get('analysis_summary') if isinstance(scan_result,dict) else None
+                if isinstance(analysis_summary,dict):
+                    if analysis_summary.get('status') == 'completed':
+                        st.success(f"สแกนและวิเคราะห์แล้ว {analysis_summary.get('leagues',0)} ลีก | บันทึกผล A/B/C {analysis_summary.get('saved_counts',[0,0])[0]} รายการ")
+                    elif analysis_summary.get('status') == 'partial':
+                        st.warning(f"วิเคราะห์ได้บางส่วน {analysis_summary.get('leagues',0)} ลีก | มีข้อผิดพลาด {analysis_summary.get('errors',0)} ลีก — คู่และราคาที่บันทึกไว้ยังอยู่")
+                    else:
+                        st.warning(f"สแกนราคาแล้ว แต่การวิเคราะห์ยังไม่สำเร็จครบ ({analysis_summary.get('errors',0)} ลีก) — ตรวจสถานะแหล่งข้อมูล")
         render_center(load_data_center_cards(selected_leagues,regions,hours_limit),latest_scan_report(),safe_budget_status(api_key),
-            analysis_rows=load_picks(limit=None),
-            on_load_statistics=lambda cards: collect_data_center_statistics(cards[0]['run_id'],[card['event_id'] for card in cards]),
-            on_analyze=lambda cards: analyze_data_center_run(cards[0]['run_id'],min_odds,max_odds))
+            analysis_rows=load_picks(limit=None))
     with analysis_panel(data_center_active):
         st.subheader("📊 วิเคราะห์ทุกคู่ที่ดึงข้อมูลได้")
         render_data_health()
