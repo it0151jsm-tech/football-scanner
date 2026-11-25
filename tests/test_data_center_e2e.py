@@ -319,6 +319,22 @@ class DataCenterEndToEndTests(unittest.TestCase):
         self.assertEqual(len(self.cards()), 1)
         self.assertEqual(len(self.cards()[0]['quotes']), 4)
 
+    def test_one_click_scan_then_analysis_reuses_saved_odds_without_second_odds_api_call(self):
+        result=self.h.f['execute_data_center_scan_and_analyze'](
+            self.selected,24,1.8,2.15,'uk','SYNTHETIC_NO_CREDIT')
+        self.assertEqual(result['analysis_status'],'completed')
+        self.assertEqual(result['analysis_summary']['leagues'],1)
+        self.assertEqual(result['analysis_summary']['errors'],0)
+        self.assertEqual(result['analysis_summary']['saved_counts'][0],4)
+        self.assertEqual(self.h.f['fetch_odds'].call_count,1)
+        saved=self.h.f['load_picks'](limit=None)
+        self.assertEqual(len(saved),4)
+        self.assertTrue(all(json.loads(row)['score'] is not None for row in saved['analysis_a_json']))
+        self.assertTrue(all(json.loads(row)['available'] for row in saved['analysis_b_json']))
+        cards=self.cards()
+        self.assertEqual(len(cards),1)
+        self.assertEqual(len(cards[0]['quotes']),4)
+
     def test_backup_restore_retains_center_cards_without_touching_existing_bills(self):
         with self.h.f['db']() as con:
             con.execute("INSERT INTO slips(selections_json,status) VALUES(?,?)", ('{damaged legacy bill','รอตรวจผล'))
