@@ -1317,10 +1317,13 @@ def mobile_card_lines(row):
     if b.get("available"):
         goals, hda, ou, selection = b["expected_goals"], b["hda"], b["ou"], b["selection"]
         text += [f"ประตูคาดการณ์ (λ ไม่ใช่สกอร์ฟันธง): เหย้า {goals[0]:.2f} / เยือน {goals[1]:.2f}",
-                 f"โอกาสจากโมเดล: เหย้าชนะ {hda['home']:.2f}% | เสมอ {hda['draw']:.2f}% | เยือนชนะ {hda['away']:.2f}%",
-                 f"ตัวเลือกนี้: ชนะเต็ม {selection['p_win']:.2f}% | ผลครึ่ง/คืนทุน {selection['p_partial']:.2f}% | แพ้เต็ม {selection['p_loss']:.2f}% | EV {selection['ev_pct']:+.2f}%"]
+                 f"โอกาสจากโมเดล: เหย้าชนะ {hda['home']:.2f}% | เสมอ {hda['draw']:.2f}% | เยือนชนะ {hda['away']:.2f}%"]
+        if all(key in selection for key in ('p_half_win', 'p_push', 'p_half_loss')):
+            text.append(f"ตลาดนี้: ชนะเต็ม {selection['p_win']:.2f}% | ครึ่งชนะ {selection['p_half_win']:.2f}% | คืนทุน {selection['p_push']:.2f}% | ครึ่งแพ้ {selection['p_half_loss']:.2f}% | แพ้เต็ม {selection['p_loss']:.2f}% | EV {selection['ev_pct']:+.2f}%")
+        else:
+            text.append(f"ตลาดนี้: ชนะเต็ม {selection['p_win']:.2f}% | ผลผสม/คืนทุน {selection['p_partial']:.2f}% | แพ้เต็ม {selection['p_loss']:.2f}% | EV {selection['ev_pct']:+.2f}%")
         ou_note = "เส้นตลาดนี้" if row.get("market") == "Over/Under" else "เส้นอ้างอิงโมเดล ไม่ใช่ราคาที่เสนอ"
-        text.append(f"สูง/ต่ำ {b['ou_line']} ({ou_note}): สูงชนะเต็ม {ou['over_full']:.2f}% | ต่ำชนะเต็ม {ou['under_full']:.2f}% | ผลครึ่ง/คืนทุน {ou['partial_or_push']:.2f}%")
+        text.append(f"สูง/ต่ำ {b['ou_line']} ({ou_note}): สูงชนะเต็ม {ou['over_full']:.2f}% | ต่ำชนะเต็ม {ou['under_full']:.2f}% | ผลผสม/คืนทุน {ou['partial_or_push']:.2f}%")
     else:
         text.append("ประตูคาดการณ์ / โอกาสชนะ–เสมอ–แพ้ / โอกาสสูง–ต่ำ / EV: ไม่มีข้อมูลโมเดลที่พร้อมใช้")
     ev = b.get("selection", {}).get("ev_pct") if b.get("available") else None
