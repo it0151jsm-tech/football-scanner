@@ -243,7 +243,7 @@ def analysis_summary_html(card):
                       + (f'{point:+g}' if point is not None and market == 'AH' else f'{point:g}' if point is not None else 'ไม่มีข้อมูล')
                       + ' · ราคา ' + (f'{odds:.2f}' if odds is not None else 'ไม่มีข้อมูล') + ' · '
                       + _escaped(row.get('bookmaker')) + '</p><div class="dc-analysis-grid">')
-        output.append('<div class="dc-analysis-item"><span>ระบบ A · คะแนนหลักฐาน</span><strong>'
+        output.append('<div class="dc-analysis-item"><span>ระบบ A · คะแนนหลักฐาน A</span><strong>'
                       + (f'{score:.1f}/100' if score is not None else 'ไม่มีคะแนนที่คำนวณได้')
                       + '</strong><p>' + _escaped(a.get('result')) + '</p></div>')
         output.append('<div class="dc-analysis-item"><span>ระบบ B · Poisson / EV</span><strong>'
