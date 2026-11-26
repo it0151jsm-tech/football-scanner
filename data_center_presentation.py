@@ -275,7 +275,8 @@ def analysis_summary_html(card):
             ou_values = [_number(ou.get(key), 0, 100)
                          for key in ('over_full', 'under_full', 'partial_or_push')]
             if all(value is not None for value in ou_values):
-                output.append('<p>OU อ้างอิงเส้น ' + _escaped(b.get('ou_line')) + ': สูงชนะเต็ม '
+                ou_line = _number(b.get('ou_line'))
+                output.append('<p>OU อ้างอิงเส้น ' + (f'{ou_line:g}' if ou_line is not None else 'ไม่มีข้อมูล') + ': สูงชนะเต็ม '
                               + f'{ou_values[0]:.2f}% · ต่ำชนะเต็ม {ou_values[1]:.2f}%'
                               + f' · ครึ่ง/คืนทุน {ou_values[2]:.2f}%</p>')
             matrix = b.get('score_matrix_pct')
@@ -314,4 +315,43 @@ def analysis_summary_html(card):
                       + '</p><p>รับราคา ' + _escaped(row.get('received_at')) + ' · เจ้ามืออัปเดต '
                       + _escaped(row.get('source_updated_at')) + '</p></details></section>')
     output.append('</details>')
+    return ''.join(output)
+
+
+def value_ranking_html(cards):
+    """Rank only positive-EV, recent, exact-snapshot model outputs; never infer missing EV."""
+    candidates = []
+    for card in cards if isinstance(cards, (list, tuple)) else []:
+        if not isinstance(card, dict):
+            continue
+        for row in card.get('display_analysis', []) if isinstance(card.get('display_analysis'), list) else []:
+            if not isinstance(row, dict) or row.get('freshness_status') != 'recent_observed_snapshot':
+                continue
+            model = row.get('analysis_b') if isinstance(row.get('analysis_b'), dict) else {}
+            evidence = row.get('analysis_a') if isinstance(row.get('analysis_a'), dict) else {}
+            if model.get('available') is not True:
+                continue
+            selection = model.get('selection') if isinstance(model.get('selection'), dict) else {}
+            ev = _number(selection.get('ev_pct'))
+            if ev is None or ev <= 0:
+                continue
+            score = _number(evidence.get('score'), 0, 100)
+            candidates.append((ev, score, card, row))
+    candidates.sort(key=lambda item: (item[0], item[1] if item[1] is not None else -1), reverse=True)
+    if not candidates:
+        return ('<section class="dc-value-ranking"><h4>อันดับ Value จากข้อมูลจริง</h4>'
+                '<p class="dc-muted">ยังไม่มีคู่ที่มี Poisson/EV พร้อมใช้และ EV เป็นบวกจาก Snapshot ที่ยืนยันเวลาได้ '
+                'จึงไม่จัดอันดับด้วยราคาอย่างเดียว</p></section>')
+    output = ['<section class="dc-value-ranking"><h4>อันดับ Value จากข้อมูลจริง</h4>',
+              '<p class="dc-muted">เรียงตาม EV จากโมเดลที่มีข้อมูล xG จริงและ Snapshot ปัจจุบัน; '
+              'ความน่าจะเป็นยังไม่ผ่าน Calibration และไม่ใช่การรับประกันกำไร</p><ol>']
+    for ev, score, card, row in candidates:
+        market = 'AH' if row.get('market') == 'Asian Handicap' else 'OU'
+        output.append('<li><strong>' + _escaped(card.get('match')) + '</strong> · ' + market
+                      + ' · ' + _escaped(row.get('selection')) + ' · EV '
+                      + f'{ev:+.2f}%' + ' · คะแนนหลักฐาน A '
+                      + (f'{score:.1f}/100' if score is not None else 'ไม่มีข้อมูล')
+                      + ' · ราคา ' + (f'{_number(row.get("odds")):.2f}' if _number(row.get('odds')) is not None else 'ไม่มีข้อมูล')
+                      + '</li>')
+    output.append('</ol></section>')
     return ''.join(output)
