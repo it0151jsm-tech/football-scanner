@@ -220,14 +220,13 @@ def _escaped(value, missing='ไม่มีข้อมูล'):
 
 
 def analysis_summary_html(card):
-    """Display existing A evidence, B EV and C text without making a new score."""
+    """Display saved A/B/C, expected goals, settlement probabilities and Poisson evidence."""
     rows = card.get('display_analysis') if isinstance(card, dict) else None
     rows = rows if isinstance(rows, list) else []
     if not rows:
         return '<section class="dc-analysis"><p class="dc-muted">ยังไม่มีผลวิเคราะห์ที่ตรง Snapshot นี้</p></section>'
-    output = ['<details class="dc-analysis"><summary>ดูผลและเหตุผลการวิเคราะห์ A/B/C</summary>',
-              '<p class="dc-analysis-note">คะแนนหลักฐานไม่ใช่ความน่าจะเป็นชนะที่ผ่านการปรับเทียบ; '
-              'ค่าความน่าจะเป็นของโมเดลที่แสดงยังไม่ผ่าน Calibration</p>']
+    output = ['<details class="dc-analysis" open><summary>ผลวิเคราะห์ A/B/C · แสดงอัตโนมัติ</summary>',
+              '<p class="dc-analysis-note">คะแนน A เป็นคะแนนหลักฐาน ไม่ใช่โอกาสชนะ; ความน่าจะเป็น Poisson ยังไม่ผ่าน Calibration</p>']
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -244,20 +243,69 @@ def analysis_summary_html(card):
                       + (f'{point:+g}' if point is not None and market == 'AH' else f'{point:g}' if point is not None else 'ไม่มีข้อมูล')
                       + ' · ราคา ' + (f'{odds:.2f}' if odds is not None else 'ไม่มีข้อมูล') + ' · '
                       + _escaped(row.get('bookmaker')) + '</p><div class="dc-analysis-grid">')
-        output.append('<div class="dc-analysis-item"><span>ระบบ A · คะแนนหลักฐาน A</span><strong>'
+        output.append('<div class="dc-analysis-item"><span>ระบบ A · คะแนนหลักฐาน</span><strong>'
                       + (f'{score:.1f}/100' if score is not None else 'ไม่มีคะแนนที่คำนวณได้')
                       + '</strong><p>' + _escaped(a.get('result')) + '</p></div>')
-        output.append('<div class="dc-analysis-item"><span>ระบบ B</span><strong>'
+        output.append('<div class="dc-analysis-item"><span>ระบบ B · Poisson / EV</span><strong>'
                       + (f'EV {ev:+.2f}%' if ev is not None else 'ยังไม่มีค่าจากโมเดลที่พร้อมใช้')
-                      + '</strong><p>EV ไม่ใช่โอกาสชนะ</p></div>')
-        output.append('<div class="dc-analysis-item"><span>ระบบ C</span><strong>'
+                      + '</strong><p>EV คิดตามผลเต็ม/ครึ่ง/คืนทุนของเส้นเอเชียน</p></div>')
+        output.append('<div class="dc-analysis-item"><span>ระบบ C · สรุปหลักฐานและราคา</span><strong>'
                       + _escaped(row.get('recommendation'), 'ยังไม่มีผลสรุปที่บันทึกไว้')
-                      + '</strong><p>สรุป A/B ที่บันทึกไว้ ไม่มีคะแนน C แยกต่างหาก</p></div></div>')
-        hda = b.get('hda') if isinstance(b.get('hda'), dict) else {}
-        probabilities = [_number(hda.get(key), 0, 100) for key in ('home', 'draw', 'away')]
-        if b.get('available') is True and all(value is not None for value in probabilities) and abs(sum(probabilities) - 100) <= .1:
-            output.append('<p class="dc-analysis-note">โอกาสจากโมเดลที่ยังไม่ผ่าน Calibration: เหย้าชนะ '
-                          + f'{probabilities[0]:.2f}% · เสมอ {probabilities[1]:.2f}% · เยือนชนะ {probabilities[2]:.2f}%</p>')
+                      + '</strong><p>ไม่มีคะแนน C แยกต่างหาก</p></div></div>')
+        if b.get('available') is True:
+            goals = b.get('expected_goals')
+            if isinstance(goals, list) and len(goals) == 2:
+                gh, ga = _number(goals[0], 0), _number(goals[1], 0)
+                if gh is not None and ga is not None:
+                    output.append('<p><strong>Expected Goals (λ):</strong> เหย้า ' + f'{gh:.2f}'
+                                  + ' · เยือน ' + f'{ga:.2f}' + '</p>')
+            probabilities = [_number((b.get('hda') or {}).get(key), 0, 100)
+                             for key in ('home', 'draw', 'away')]
+            if all(value is not None for value in probabilities) and abs(sum(probabilities) - 100) <= .1:
+                output.append('<p>โอกาส 1X2 จาก Poisson: เหย้าชนะ ' + f'{probabilities[0]:.2f}%'
+                              + ' · เสมอ ' + f'{probabilities[1]:.2f}% · เยือนชนะ '
+                              + f'{probabilities[2]:.2f}%</p>')
+            outcome = [_number(selection.get(key), 0, 100)
+                       for key in ('p_win', 'p_partial', 'p_loss')]
+            if all(value is not None for value in outcome):
+                output.append('<p>ตลาด ' + market + ': ชนะเต็ม ' + f'{outcome[0]:.2f}%'
+                              + ' · ครึ่ง/คืนทุน ' + f'{outcome[1]:.2f}% · แพ้เต็ม '
+                              + f'{outcome[2]:.2f}%' + (f' · EV {ev:+.2f}%' if ev is not None else '') + '</p>')
+            ou = b.get('ou') if isinstance(b.get('ou'), dict) else {}
+            ou_values = [_number(ou.get(key), 0, 100)
+                         for key in ('over_full', 'under_full', 'partial_or_push')]
+            if all(value is not None for value in ou_values):
+                output.append('<p>OU อ้างอิงเส้น ' + _escaped(b.get('ou_line')) + ': สูงชนะเต็ม '
+                              + f'{ou_values[0]:.2f}% · ต่ำชนะเต็ม {ou_values[1]:.2f}%'
+                              + f' · ครึ่ง/คืนทุน {ou_values[2]:.2f}%</p>')
+            matrix = b.get('score_matrix_pct')
+            if isinstance(matrix, list) and matrix and all(isinstance(line, list) for line in matrix):
+                cells = []
+                for home_goals, line in enumerate(matrix):
+                    for away_goals, raw_probability in enumerate(line):
+                        probability = _number(raw_probability, 0, 100)
+                        if probability is not None:
+                            cells.append((probability, home_goals, away_goals))
+                top = sorted(cells, reverse=True)[:5]
+                if top:
+                    output.append('<p>สกอร์ที่มีโอกาสสูงสุดจากเมทริกซ์ (ไม่ใช่สกอร์ฟันธง): '
+                                  + ' · '.join(f'{h}–{a if a < 12 else "12+"} {p:.2f}%'
+                                               for p, h, a in top) + '</p>')
+                output.append('<details class="dc-poisson-matrix"><summary>เปิด Poisson Score Matrix เต็ม</summary>'
+                              '<p class="dc-analysis-note">แถว = ประตูเจ้าบ้าน · คอลัมน์ = ประตูทีมเยือน · ช่อง 12 แทน 12 ประตูขึ้นไป</p>'
+                              '<div class="dc-matrix-scroll"><table><thead><tr><th>เหย้า / เยือน</th>')
+                for away_goals in range(len(matrix[0])):
+                    output.append('<th>' + ('12+' if away_goals == 12 else str(away_goals)) + '</th>')
+                output.append('</tr></thead><tbody>')
+                for home_goals, line in enumerate(matrix):
+                    output.append('<tr><th>' + ('12+' if home_goals == 12 else str(home_goals)) + '</th>')
+                    for raw_probability in line:
+                        probability = _number(raw_probability, 0, 100)
+                        output.append('<td>' + (f'{probability:.2f}%' if probability is not None else '—') + '</td>')
+                    output.append('</tr>')
+                output.append('</tbody></table></div></details>')
+        else:
+            output.append('<p>Expected Goals · Poisson · ความน่าจะเป็น · EV: ไม่มีข้อมูลโมเดลที่พร้อมใช้</p>')
         if row.get('freshness_status') != 'recent_observed_snapshot':
             output.append('<p class="dc-analysis-note">ผลเดิม ณ Snapshot — ราคาเก่าหรือเวลาไม่ยืนยัน ไม่ใช่คำแนะนำเดิมพันใหม่</p>')
         output.append('<details class="dc-analysis-reasons"><summary>เหตุผลและข้อจำกัดของผลเดิม</summary><p>'
