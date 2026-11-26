@@ -45,6 +45,14 @@ class AnalysisTests(unittest.TestCase):
                 self.assertAlmostEqual(sum(b['ou'].values()), 100, delta=.02)
                 self.assertAlmostEqual(sum(b['selection'][k] for k in ['p_win', 'p_partial', 'p_loss']), 100, delta=.02)
 
+    def test_b_persists_normalized_poisson_score_matrix_for_ui(self):
+        b = self.model()
+        matrix = b['score_matrix_pct']
+        self.assertEqual(len(matrix), 13)
+        self.assertTrue(all(len(row) == 13 for row in matrix))
+        self.assertAlmostEqual(sum(sum(row) for row in matrix), 100, delta=.02)
+        self.assertEqual(b['score_matrix_tail_label'], '12+')
+
     def test_b_missing_model_does_not_fill_probabilities(self):
         b = self.f['system_b_analysis'](None, None, None, [(2.5, 1)], 2.5)
         self.assertFalse(b['available'])
