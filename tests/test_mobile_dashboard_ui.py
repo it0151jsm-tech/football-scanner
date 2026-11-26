@@ -484,9 +484,11 @@ sys.exit(cli.main())
                 before = [tuple(row) for row in con.execute('SELECT * FROM dc_batches ORDER BY rowid')]
             for width in (320, 430):
                 page.set_viewport_size({'width': width, 'height': 844})
-                close = page.get_by_test_id('stSidebarCollapseButton').get_by_role('button')
-                if close.is_visible():
-                    close.click()
+                close_buttons = page.get_by_test_id('stSidebarCollapseButton').get_by_role('button')
+                # Streamlit versions differ: the collapse control may be absent
+                # when the sidebar is already collapsed at this viewport.
+                if close_buttons.count() and close_buttons.first.is_visible():
+                    close_buttons.first.click()
                 card.locator('[data-dc-tab="ou"]').click()
                 self.assertTrue(card.locator('.dc-tab-ou').is_checked())
                 self.assertTrue(card.locator('.dc-panel-ou').is_visible())
