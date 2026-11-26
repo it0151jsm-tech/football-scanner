@@ -53,6 +53,22 @@ class AnalysisTests(unittest.TestCase):
         self.assertAlmostEqual(sum(sum(row) for row in matrix), 100, delta=.02)
         self.assertEqual(b['score_matrix_tail_label'], '12+')
 
+    def test_asian_settlement_probabilities_separate_half_wins_losses_and_pushes(self):
+        matrix = [(0, 0, 1.0)]
+        cases = [
+            ('totals', 'over', 2.75, 'p_half_loss'),
+            ('totals', 'under', 2.75, 'p_half_win'),
+            ('spreads', 'home', 0.0, 'p_push'),
+        ]
+        for market, side, point, expected in cases:
+            with self.subTest(market=market, side=side, point=point):
+                result = self.f['evaluate_market_poisson'](matrix, market, side, point, 2.0)
+                self.assertEqual(result[expected], 100.0)
+                self.assertAlmostEqual(sum(result[key] for key in
+                    ('p_win', 'p_half_win', 'p_push', 'p_half_loss', 'p_loss', 'p_mixed')), 100.0)
+                self.assertAlmostEqual(result['p_partial'],
+                    result['p_half_win'] + result['p_push'] + result['p_half_loss'] + result['p_mixed'])
+
     def test_b_missing_model_does_not_fill_probabilities(self):
         b = self.f['system_b_analysis'](None, None, None, [(2.5, 1)], 2.5)
         self.assertFalse(b['available'])
