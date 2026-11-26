@@ -145,7 +145,9 @@ class DataCenterResponseTests(unittest.TestCase):
             self.assertEqual(len(cards[0]['quotes']),4)
             self.assertTrue(all(quote['source_update_scope']=='bookmaker' for quote in cards[0]['quotes']))
             self.assertTrue(cards[0]['received_at'])
-            self.assertEqual(len(self.f['load_picks'](limit=None)),0)
+            saved=self.f['load_picks'](limit=None)
+            self.assertEqual(len(saved),4)
+            self.assertTrue(all(not json.loads(raw)['available'] for raw in saved['analysis_b_json']))
         with sqlite3.connect(self.ledger) as con:
             self.assertEqual(con.execute('SELECT COUNT(*),SUM(credits) FROM calls').fetchone(),(1,2))
             self.assertEqual(con.execute('SELECT remaining,used FROM balances').fetchone(),(498,2))
