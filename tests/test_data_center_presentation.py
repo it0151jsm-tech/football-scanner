@@ -18,8 +18,11 @@ def matching_row(card=None, **changes):
                                               'bookmaker_key', 'received_at', 'source_updated_at', 'source_update_scope')})
     row.update(analysis_a_json=json.dumps({'score': 61.2, 'result': 'หลักฐานฟอร์มสนับสนุน',
                                           'status': 'คะแนนหลักฐานเท่านั้น'}),
-               analysis_b_json=json.dumps({'available': True, 'selection': {'ev_pct': 4.2},
-                                            'hda': {'home': 45, 'draw': 25, 'away': 30}, 'status': 'ยังไม่ผ่าน Calibration'}),
+               analysis_b_json=json.dumps({'available': True, 'expected_goals': [1.7, 1.1],
+                                            'selection': {'ev_pct': 4.2, 'p_win': 40, 'p_partial': 20, 'p_loss': 40},
+                                            'hda': {'home': 45, 'draw': 25, 'away': 30},
+                                            'ou_line': 2.5, 'ou': {'over_full': 48, 'under_full': 42, 'partial_or_push': 10},
+                                            'score_matrix_pct': [[0.1] * 13 for _ in range(13)], 'status': 'ยังไม่ผ่าน Calibration'}),
                confidence_score=61.2, score=61.2, selection='Authored Home -0.25',
                recommendation='Authored stored C result', analysis_reason='Authored stored reason',
                model_status='Authored stored model status', scanned_at='2026-10-25T12:01:00Z')
@@ -38,7 +41,15 @@ class DataCenterPresentationTests(unittest.TestCase):
                       '45.00%','25.00%','30.00%','ไม่มีคะแนน C แยกต่างหาก'):
             self.assertIn(value,html)
         self.assertNotIn('61.2%',html)
-        self.assertNotIn('dc-analysis" open',html)
+        self.assertIn('dc-analysis" open',html)
+
+    def test_analysis_card_shows_expected_goals_probabilities_and_score_matrix(self):
+        card=synthetic_card();row=matching_row(card)
+        html=analysis_summary_html(project_cards([card],[row])[0])
+        for value in ('Expected Goals (λ)', 'Poisson Score Matrix', 'เปิด Poisson Score Matrix เต็ม',
+                      'เหย้าชนะ', 'ชนะเต็ม', 'สูงชนะเต็ม'):
+            self.assertIn(value,html)
+        self.assertIn('score_matrix_pct', json.dumps(json.loads(row['analysis_b_json'])))
 
     def test_identity_changes_never_attach_another_fixture_analysis(self):
         for key,value in (('event_id','other'),('league','other'),('home_team','other'),
