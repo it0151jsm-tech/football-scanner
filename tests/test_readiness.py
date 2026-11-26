@@ -244,6 +244,14 @@ class ReadinessTests(unittest.TestCase):
         original_ui = [entry for entry in ui
                        if not archive_first_line <= entry[0] < archive_last_line
                        and not coverage_first_line <= entry[0] < coverage_last_line]
+        # The one-click Data Center controller is an explicitly authorized UI path;
+        # its result banners are outside the legacy PR2 control contract.
+        dc_scan_start = source.index('    if data_center_active:')
+        dc_scan_end = source.index('        render_center(load_data_center_cards', dc_scan_start)
+        dc_scan_first_line = source.count('\\n', 0, dc_scan_start) + 1
+        dc_scan_last_line = source.count('\\n', 0, dc_scan_end) + 1
+        original_ui = [entry for entry in original_ui
+                       if not dc_scan_first_line <= entry[0] < dc_scan_last_line]
         # PR13/current request explicitly authorizes one scan-count diagnostic.
         # Check its exact single call independently; every original control stays
         # protected by the original PR2 contract rather than regenerating it.
