@@ -2044,8 +2044,26 @@ def execute_data_center_scan_and_analyze(selected, hours_limit, min_odds, max_od
     if not run_id:
         result.update(analysis_requested=False, analysis_status="skipped")
         return result
+    # Load and persist match-level historical evidence before presenting cards.
+    # This uses the existing results/xG providers and never calls The Odds API.
+    try:
+        statistics = collect_data_center_statistics(run_id)
+    except Exception:
+        statistics = {
+            "status": "error",
+            "run_id": run_id,
+            "fixtures": 0,
+            "errors": 1,
+            "odds_api_requests": 0,
+            "reason": "statistics_collection_failed",
+        }
+
+    # Replay the exact persisted odds batch for A/B/C; do not fetch prices again.
     analysis = analyze_data_center_run(run_id, min_odds, max_odds)
     result.update(
+        statistics_requested=True,
+        statistics_status=statistics.get("status", "unknown"),
+        statistics_summary=statistics,
         analysis_requested=True,
         analysis_status=analysis.get("status", "unknown"),
         analysis_summary=analysis,
