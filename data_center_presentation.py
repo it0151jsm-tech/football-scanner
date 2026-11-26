@@ -347,7 +347,7 @@ def value_ranking_html(cards):
               'ความน่าจะเป็นยังไม่ผ่าน Calibration และไม่ใช่การรับประกันกำไร</p><ol>']
     for ev, score, card, row in candidates:
         market = 'AH' if row.get('market') == 'Asian Handicap' else 'OU'
-        output.append('<li><strong>' + _escaped(card.get('match')) + '</strong> · ' + market
+        output.append('<li><strong>' + _escaped(str(card.get('home_team') or 'ไม่มีข้อมูล') + ' vs ' + str(card.get('away_team') or 'ไม่มีข้อมูล')) + '</strong> · ' + market
                       + ' · ' + _escaped(row.get('selection')) + ' · EV '
                       + f'{ev:+.2f}%' + ' · คะแนนหลักฐาน A '
                       + (f'{score:.1f}/100' if score is not None else 'ไม่มีข้อมูล')
