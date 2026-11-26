@@ -226,7 +226,7 @@ def analysis_summary_html(card):
     if not rows:
         return '<section class="dc-analysis"><p class="dc-muted">ยังไม่มีผลวิเคราะห์ที่ตรง Snapshot นี้</p></section>'
     output = ['<details class="dc-analysis" open><summary>ผลวิเคราะห์ A/B/C · แสดงอัตโนมัติ</summary>',
-              '<p class="dc-analysis-note">คะแนน A เป็นคะแนนหลักฐาน ไม่ใช่โอกาสชนะ; ความน่าจะเป็น Poisson ยังไม่ผ่าน Calibration</p>']
+              '<p class="dc-analysis-note">คะแนน A เป็นหลักฐาน ไม่ใช่ความน่าจะเป็นชนะที่ผ่านการปรับเทียบ; ความน่าจะเป็น Poisson ยังไม่ผ่าน Calibration</p>']
     for row in rows:
         if not isinstance(row, dict):
             continue
