@@ -165,7 +165,7 @@ class DataCenterStreamlitTests(unittest.TestCase):
     def test_one_click_statistics_failure_never_removes_fixture_or_echoes_error_body(self):
         self.seed()
         with patch('requests.get',side_effect=AssertionError('statistics fixture must not request real API')) as get, \
-                patch('app.collect_data_center_statistics',side_effect=RuntimeError('DO_NOT_ECHO_KEY')):
+                patch('data_center_stats.collect_statistics',side_effect=RuntimeError('DO_NOT_ECHO_KEY')):
             app=self.app();self.assert_app(app)
             next(button for button in app.button if button.label=='🚀 สแกนราคาและวิเคราะห์').click().run()
             self.assert_app(app)
