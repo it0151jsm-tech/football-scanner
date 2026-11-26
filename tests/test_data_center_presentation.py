@@ -4,7 +4,7 @@ from html import escape
 import json
 import unittest
 
-from data_center_presentation import analysis_summary_html, project_cards, summary_counts
+from data_center_presentation import analysis_summary_html, project_cards, summary_counts, value_ranking_html
 from test_data_center_ui import synthetic_card
 
 
@@ -50,6 +50,20 @@ class DataCenterPresentationTests(unittest.TestCase):
                       'เหย้าชนะ', 'ชนะเต็ม', 'สูงชนะเต็ม'):
             self.assertIn(value,html)
         self.assertIn('score_matrix_pct', json.dumps(json.loads(row['analysis_b_json'])))
+
+    def test_value_ranking_includes_only_positive_ev_and_recent_exact_snapshots(self):
+        card=synthetic_card();row=matching_row(card)
+        projected=project_cards([card],[row])
+        html=value_ranking_html(projected)
+        self.assertIn('อันดับ Value จากข้อมูลจริง',html)
+        self.assertIn('EV +4.20%',html)
+        stale=deepcopy(projected[0]);stale['display_analysis'][0]['freshness_status']='unverified_or_stale'
+        self.assertNotIn('EV +4.20%',value_ranking_html([stale]))
+        missing=deepcopy(row)
+        missing['analysis_b_json']=json.dumps({'available':False,'selection':{'ev_pct':99}})
+        no_model=project_cards([card],[missing])
+        self.assertNotIn('EV +99',value_ranking_html(no_model))
+        self.assertIn('ยังไม่มีคู่ที่มี Poisson/EV พร้อมใช้',value_ranking_html(no_model))
 
     def test_identity_changes_never_attach_another_fixture_analysis(self):
         for key,value in (('event_id','other'),('league','other'),('home_team','other'),
