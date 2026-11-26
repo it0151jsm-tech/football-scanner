@@ -1246,10 +1246,20 @@ def system_b_analysis(metrics, matrix, evaluation, lines, ou_line):
             over += probability * 100
         if all(h + a < line for line, _ in lines):
             under += probability * 100
+    # Persist the complete 13x13 score distribution so the Data Center can
+    # render the same Poisson evidence after the scan, without recalculating it.
+    max_home = max((h for h, _, _ in matrix), default=-1)
+    max_away = max((a for _, a, _ in matrix), default=-1)
+    score_lookup = {(h, a): probability * 100.0 for h, a, probability in matrix}
+    score_matrix_pct = [
+        [round(score_lookup.get((h, a), 0.0), 4) for a in range(max_away + 1)]
+        for h in range(max_home + 1)
+    ]
     return {"available": True, "expected_goals": [metrics["home_lambda"], metrics["away_lambda"]],
             "hda": {k: round(v, 2) for k, v in hda.items()}, "selection": evaluation,
             "ou_line": ou_line, "ou": {"over_full": round(over, 2), "under_full": round(under, 2),
                    "partial_or_push": round(max(0, 100 - over - under), 2)},
+            "score_matrix_pct": score_matrix_pct, "score_matrix_tail_label": "12+",
             "calibrated": False, "status": "Poisson จาก xG จริง; ยังไม่ผ่าน Calibration; สมมติประตูสองทีมเป็นอิสระ"}
 
 
