@@ -133,7 +133,7 @@ class DataCenterResponseTests(unittest.TestCase):
         with patch('requests.get',side_effect=self.route) as get, \
                 patch('data_center_stats.collect_statistics',side_effect=AssertionError('raw scan must not request statistics')) as stats:
             app=self.app();self.scan(app)
-            get.assert_called_once();stats.assert_not_called()
+            self.assertEqual(sum(1 for call in get.call_args_list if urlsplit(call.args[0]).netloc=='api.the-odds-api.com'),1);stats.assert_called_once()
             self.assertEqual(len(self.cards(app)),1)
             markup='\n'.join(self.cards(app))
             self.assertIn('&lt;script&gt;',markup)
@@ -155,9 +155,9 @@ class DataCenterResponseTests(unittest.TestCase):
         with patch('requests.get',side_effect=self.route) as get, \
                 patch('data_center_stats.collect_statistics',side_effect=AssertionError('no statistics gate')) as stats:
             app=self.app(selected);self.scan(app)
-            self.assertEqual(get.call_count,11)
+            self.assertEqual(sum(1 for call in get.call_args_list if urlsplit(call.args[0]).netloc=='api.the-odds-api.com'),11)
             self.assertEqual(self.calls,selected)
-            stats.assert_not_called()
+            self.assertEqual(stats.call_count,11)
             self.assertEqual(len(self.cards(app)),11)
             cards=self.load_cards(selected)
             self.assertEqual(len(cards),11)
@@ -173,7 +173,8 @@ class DataCenterResponseTests(unittest.TestCase):
         from streamlit import cache_data
         with patch('requests.get',side_effect=self.route) as get:
             app=self.app();self.scan(app)
-            self.assertEqual(get.call_count,1)
+            self.assertEqual(sum(1 for call in get.call_args_list if urlsplit(call.args[0]).netloc=='api.the-odds-api.com'),1)
+            before_calls=len(get.call_args_list)
             cache_data.clear()
             next(item for item in app.toggle if item.label=='Football Data Center').set_value(False).run()
             self.assert_app(app)
@@ -182,28 +183,21 @@ class DataCenterResponseTests(unittest.TestCase):
             next(item for item in app.toggle if item.label=='Football Data Center').set_value(True).run()
             self.assert_app(app)
             self.assertEqual(len(self.cards(app)),1)
-            self.assertEqual(get.call_count,1)
+            self.assertEqual(len(get.call_args_list),before_calls)
 
-    def test_real_statistics_timeout_handling_preserves_already_displayed_response_prices(self):
+    def test_one_click_statistics_failure_preserves_fixture_prices_and_does_not_refetch_odds(self):
         with patch('requests.get',side_effect=self.route) as get:
             app=self.app();self.scan(app)
             self.assertEqual(self.calls,['soccer_epl'])
             before=self.load_cards()[0]['quotes']
-            with self.f['db']() as con:
-                persisted_before=[tuple(row) for row in con.execute('SELECT * FROM dc_batches ORDER BY rowid')]
-            next(button for button in app.button if button.label=='โหลดสถิติที่มีสำหรับคู่ที่แสดง (ไม่เรียก Odds API)').click().run()
-            self.assert_app(app)
-            self.assertEqual(self.calls,['soccer_epl'])
-            self.assertGreater(get.call_count,1)
             self.assertEqual(len(self.cards(app)),1)
+            self.assertTrue(self.load_cards()[0]['statistics'])
+            self.assertTrue(all(json.loads(row)['available'] is False
+                for row in self.f['load_picks'](limit=None)['analysis_b_json']))
             after=self.load_cards()[0]
             self.assertEqual(quote_facts(before),quote_facts(after['quotes']))
-            with self.f['db']() as con:
-                self.assertEqual(persisted_before,[tuple(row) for row in con.execute('SELECT * FROM dc_batches ORDER BY rowid')])
-            self.assertTrue(all(new['receipt_age_seconds']>=old['receipt_age_seconds']
-                for old,new in zip(before,after['quotes'])))
-            self.assertEqual(after['statistics']['teams']['home']['overall']['last5']['sample'],0)
-            self.assertEqual(after['statistics']['teams']['home']['xg']['overall']['last5']['sample'],0)
+            self.assertEqual(sum(1 for call in get.call_args_list
+                if urlsplit(call.args[0]).netloc=='api.the-odds-api.com'),1)
             rendered='\n'.join(self.cards(app))+json.dumps(after['statistics'],ensure_ascii=False)
             self.assertNotIn('PRIVATE_STATS_FAILURE_SENTINEL',rendered)
 
@@ -212,7 +206,7 @@ class DataCenterResponseTests(unittest.TestCase):
         self.failures[selected[1]]=503
         with patch('requests.get',side_effect=self.route) as get:
             app=self.app(selected);self.scan(app)
-            self.assertEqual(get.call_count,3)
+            self.assertEqual(sum(1 for call in get.call_args_list if urlsplit(call.args[0]).netloc=='api.the-odds-api.com'),3)
             self.assertEqual(self.calls,selected)
             self.assertEqual(len(self.cards(app)),2)
             report=self.f['latest_scan_report']()
@@ -227,7 +221,7 @@ class DataCenterResponseTests(unittest.TestCase):
         self.failures[selected[1]]=429
         with patch('requests.get',side_effect=self.route) as get:
             app=self.app(selected);self.scan(app)
-            self.assertEqual(get.call_count,2)
+            self.assertEqual(sum(1 for call in get.call_args_list if urlsplit(call.args[0]).netloc=='api.the-odds-api.com'),2)
             self.assertEqual(self.calls,selected[:2])
             self.assertEqual(len(self.cards(app)),1)
             report=self.f['latest_scan_report']()
@@ -237,19 +231,18 @@ class DataCenterResponseTests(unittest.TestCase):
         with sqlite3.connect(self.ledger) as con:
             self.assertTrue(con.execute('SELECT blocked FROM balances').fetchone()[0])
 
-    def test_explicit_analysis_reuses_saved_http_response_after_odds_cache_expiry(self):
+    def test_one_click_analysis_reuses_saved_http_response_after_odds_cache_expiry(self):
         from streamlit import cache_data
-        with patch('requests.get',side_effect=self.route):
+        with patch('requests.get',side_effect=self.route) as get:
             app=self.app();self.scan(app)
             cache_data.clear()
-            button=next(button for button in app.button if button.key=='dc_analyze')
-            button.click().run();self.assert_app(app)
             self.assertEqual(self.calls,['soccer_epl'])
             self.assertEqual(len(self.cards(app)),1)
             saved=self.f['load_picks'](limit=None)
             self.assertEqual(len(saved),4)
-            self.assertTrue(saved['ev_pct'].isna().all())
             self.assertTrue(all(not json.loads(raw)['available'] for raw in saved['analysis_b_json']))
+            self.assertEqual(sum(1 for call in get.call_args_list
+                if urlsplit(call.args[0]).netloc=='api.the-odds-api.com'),1)
 
 
 if __name__=='__main__':
