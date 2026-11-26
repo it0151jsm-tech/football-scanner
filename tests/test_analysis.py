@@ -54,13 +54,12 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(b['score_matrix_tail_label'], '12+')
 
     def test_asian_settlement_probabilities_separate_half_wins_losses_and_pushes(self):
-        matrix = [(0, 0, 1.0)]
         cases = [
-            ('totals', 'over', 2.75, 'p_half_loss'),
-            ('totals', 'under', 2.75, 'p_half_win'),
-            ('spreads', 'home', 0.0, 'p_push'),
+            ('totals', 'over', 2.75, [(3, 0, 1.0)], 'p_half_win'),
+            ('totals', 'under', 2.75, [(3, 0, 1.0)], 'p_half_loss'),
+            ('spreads', 'home', 0.0, [(0, 0, 1.0)], 'p_push'),
         ]
-        for market, side, point, expected in cases:
+        for market, side, point, matrix, expected in cases:
             with self.subTest(market=market, side=side, point=point):
                 result = self.f['evaluate_market_poisson'](matrix, market, side, point, 2.0)
                 self.assertEqual(result[expected], 100.0)
