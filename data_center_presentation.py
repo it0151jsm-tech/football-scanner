@@ -265,12 +265,19 @@ def analysis_summary_html(card):
                 output.append('<p>โอกาส 1X2 จาก Poisson: เหย้าชนะ ' + f'{probabilities[0]:.2f}%'
                               + ' · เสมอ ' + f'{probabilities[1]:.2f}% · เยือนชนะ '
                               + f'{probabilities[2]:.2f}%</p>')
-            outcome = [_number(selection.get(key), 0, 100)
-                       for key in ('p_win', 'p_partial', 'p_loss')]
+            outcome_keys = ('p_win', 'p_half_win', 'p_push', 'p_half_loss', 'p_loss')
+            outcome = [_number(selection.get(key), 0, 100) for key in outcome_keys]
             if all(value is not None for value in outcome):
                 output.append('<p>ตลาด ' + market + ': ชนะเต็ม ' + f'{outcome[0]:.2f}%'
-                              + ' · ครึ่ง/คืนทุน ' + f'{outcome[1]:.2f}% · แพ้เต็ม '
-                              + f'{outcome[2]:.2f}%' + (f' · EV {ev:+.2f}%' if ev is not None else '') + '</p>')
+                              + ' · ครึ่งชนะ ' + f'{outcome[1]:.2f}% · คืนทุน ' + f'{outcome[2]:.2f}%'
+                              + ' · ครึ่งแพ้ ' + f'{outcome[3]:.2f}% · แพ้เต็ม ' + f'{outcome[4]:.2f}%'
+                              + (f' · EV {ev:+.2f}%' if ev is not None else '') + '</p>')
+            else:
+                outcome = [_number(selection.get(key), 0, 100) for key in ('p_win', 'p_partial', 'p_loss')]
+                if all(value is not None for value in outcome):
+                    output.append('<p>ตลาด ' + market + ': ชนะเต็ม ' + f'{outcome[0]:.2f}%'
+                                  + ' · ผลผสม/คืนทุน ' + f'{outcome[1]:.2f}% · แพ้เต็ม '
+                                  + f'{outcome[2]:.2f}%' + (f' · EV {ev:+.2f}%' if ev is not None else '') + '</p>')
             ou = b.get('ou') if isinstance(b.get('ou'), dict) else {}
             ou_values = [_number(ou.get(key), 0, 100)
                          for key in ('over_full', 'under_full', 'partial_or_push')]
