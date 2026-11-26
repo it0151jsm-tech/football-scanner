@@ -1069,9 +1069,10 @@ def settle_leg(adjusted):
 
 
 def evaluate_market_poisson(matrix, market, side, point, odds):
+    """Expected return and mutually exclusive Asian settlement probabilities."""
     if odds <= 1:
         return None
-    ev = p_full_win = p_full_loss = p_other = 0.0
+    ev = p_full_win = p_half_win = p_push = p_half_loss = p_full_loss = p_mixed = 0.0
     legs = split_line(point)
     for home, away, prob in matrix:
         net = 0.0
@@ -1094,12 +1095,23 @@ def evaluate_market_poisson(matrix, market, side, point, odds):
             p_full_win += prob
         elif all(x == "loss" for x in outcomes):
             p_full_loss += prob
+        elif all(x == "push" for x in outcomes):
+            p_push += prob
+        elif "win" in outcomes and "push" in outcomes and "loss" not in outcomes:
+            p_half_win += prob
+        elif "loss" in outcomes and "push" in outcomes and "win" not in outcomes:
+            p_half_loss += prob
         else:
-            p_other += prob
+            p_mixed += prob
+    p_partial = p_half_win + p_half_loss + p_push + p_mixed
     return {
         "ev_pct": round(ev * 100.0, 2),
         "p_win": round(p_full_win * 100.0, 2),
-        "p_partial": round(p_other * 100.0, 2),
+        "p_half_win": round(p_half_win * 100.0, 2),
+        "p_push": round(p_push * 100.0, 2),
+        "p_half_loss": round(p_half_loss * 100.0, 2),
+        "p_mixed": round(p_mixed * 100.0, 2),
+        "p_partial": round(p_partial * 100.0, 2),
         "p_loss": round(p_full_loss * 100.0, 2),
         "score": round((p_full_win * 100.0) + (ev * 100.0), 2),
     }
