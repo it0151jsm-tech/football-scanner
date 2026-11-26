@@ -481,6 +481,8 @@ def render_center(cards, report, budget, *, on_load_statistics=None, on_analyze=
         return
     for index,card in enumerate(cards):
         st.markdown(data_center_card_html(card,instance=index),unsafe_allow_html=True)
+    from data_center_presentation import value_ranking_html
+    st.markdown(value_ranking_html(cards),unsafe_allow_html=True)
     if on_load_statistics is not None:
         if st.button('โหลดสถิติที่มีสำหรับคู่ที่แสดง (ไม่เรียก Odds API)',key='dc_stats_load',use_container_width=True):
             _action(st,on_load_statistics,cards,'statistics')
