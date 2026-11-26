@@ -162,15 +162,16 @@ class DataCenterStreamlitTests(unittest.TestCase):
         with self.f['db']() as con:
             self.assertEqual(before,[tuple(row) for row in con.execute('SELECT * FROM dc_batches ORDER BY rowid')])
 
-    def test_explicit_statistics_failure_never_removes_raw_fixture_or_echoes_error_body(self):
+    def test_one_click_statistics_failure_never_removes_fixture_or_echoes_error_body(self):
         self.seed()
         with patch('requests.get',side_effect=AssertionError('statistics fixture must not request real API')) as get, \
-                patch('data_center_stats.collect_statistics',side_effect=RuntimeError('DO_NOT_ECHO_KEY')):
+                patch('app.collect_data_center_statistics',side_effect=RuntimeError('DO_NOT_ECHO_KEY')):
             app=self.app();self.assert_app(app)
-            button=next(item for item in app.button if item.label=='โหลดสถิติที่มีสำหรับคู่ที่แสดง (ไม่เรียก Odds API)')
-            button.click().run();self.assert_app(app)
+            next(button for button in app.button if button.label=='🚀 สแกนราคาและวิเคราะห์').click().run()
+            self.assert_app(app)
             markup='\n'.join(self.cards(app))
             self.assertIn('Synthetic Data Home',markup)
+            self.assertIn('ยังไม่มีผลวิเคราะห์ที่ตรง Snapshot นี้',markup)
             rendered='\n'.join(str(getattr(item,'value','')) for item in list(app.markdown)+list(app.warning)+list(app.error))
             self.assertNotIn('DO_NOT_ECHO_KEY',rendered)
             get.assert_not_called()
